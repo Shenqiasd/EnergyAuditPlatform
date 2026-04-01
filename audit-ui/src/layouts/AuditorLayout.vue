@@ -1,143 +1,73 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { useAppStore } from '@/stores/app'
+import { auditorMenus } from '@/config/menus'
 
-const router = useRouter()
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
-const appStore = useAppStore()
+const username = computed(() => userStore.userInfo?.realName || '审核员')
 
-const menuItems = computed(() => [
-  {
-    index: '/auditor/dashboard',
-    title: '审计首页',
-    icon: 'Odometer',
-  },
-  {
-    index: '/auditor/tasks',
-    title: '审计任务',
-    icon: 'List',
-  },
-  {
-    index: '/auditor/review',
-    title: '审核详情',
-    icon: 'View',
-  },
-])
-
-const activeMenu = computed(() => route.path)
-
-function handleMenuSelect(index: string) {
-  if (index.startsWith('/')) {
-    router.push(index)
-  }
-}
-
-async function handleLogout() {
-  await userStore.logout()
-}
+function isActive(path: string) { return route.path === path || route.path.startsWith(path + '/') }
+function navigate(path: string) { router.push(path) }
+function logout() { userStore.logout(); router.push('/login') }
 </script>
 
 <template>
-  <el-container class="layout-container">
-    <el-aside :width="appStore.sidebarCollapsed ? '64px' : '220px'" class="layout-aside">
-      <div class="logo">
-        <h1 v-show="!appStore.sidebarCollapsed">审计工作台</h1>
+  <div class="main-layout">
+    <aside class="sidebar">
+      <div class="sidebar__header">
+        <div class="sidebar__logo">🔍</div>
+        <div>
+          <div class="sidebar__logo-title">能碳审计平台</div>
+          <div class="sidebar__logo-sub">审核端</div>
+        </div>
       </div>
-      <el-scrollbar>
-        <el-menu
-          :default-active="activeMenu"
-          :collapse="appStore.sidebarCollapsed"
-          background-color="#304156"
-          text-color="#bfcbd9"
-          active-text-color="#409eff"
-          @select="handleMenuSelect"
-        >
-          <el-menu-item v-for="item in menuItems" :key="item.index" :index="item.index">
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ item.title }}</span>
-          </el-menu-item>
-        </el-menu>
-      </el-scrollbar>
-    </el-aside>
-
-    <el-container>
-      <el-header class="layout-header">
-        <div class="header-left">
-          <el-icon class="collapse-btn" @click="appStore.toggleSidebar">
-            <component :is="appStore.sidebarCollapsed ? 'Expand' : 'Fold'" />
-          </el-icon>
+      <nav class="sidebar__menu">
+        <template v-for="group in auditorMenus" :key="group.section">
+          <div class="sidebar__section">{{ group.section }}</div>
+          <div
+            v-for="item in group.items"
+            :key="item.key"
+            class="sidebar__item"
+            :class="{ 'is-active': isActive(item.path) }"
+            @click="navigate(item.path)"
+          >
+            <span class="sidebar__item-dot"></span>
+            <span class="sidebar__item-icon">{{ item.icon }}</span>
+            <span class="sidebar__item-text">{{ item.title }}</span>
+          </div>
+        </template>
+      </nav>
+      <div class="sidebar__footer">
+        <div class="sidebar__avatar">审</div>
+        <div style="flex:1;min-width:0">
+          <div class="sidebar__user-name">{{ username }}</div>
+          <div class="sidebar__user-sub">能源审计员</div>
         </div>
-        <div class="header-right">
-          <el-dropdown trigger="click">
-            <span class="user-info">
-              {{ userStore.userInfo?.realName || userStore.userInfo?.username || '审计员' }}
-              <el-icon><ArrowDown /></el-icon>
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="handleLogout">退出登录</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+      </div>
+    </aside>
+    <div class="layout-content">
+      <header class="topbar">
+        <div class="breadcrumb">审核端 / <strong>{{ route.meta.title || '首页' }}</strong></div>
+        <div class="topbar-right">
+          <el-button link @click="logout" class="topbar-logout">退出</el-button>
         </div>
-      </el-header>
-
-      <el-main class="layout-main">
-        <router-view />
-      </el-main>
-    </el-container>
-  </el-container>
+      </header>
+      <main class="layout-main"><router-view /></main>
+    </div>
+  </div>
 </template>
 
-<style scoped lang="scss">
-.layout-container {
-  height: 100vh;
-}
-
-.layout-aside {
-  background-color: #304156;
-  transition: width 0.3s;
-  overflow: hidden;
-
-  .logo {
-    height: 50px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-
-    h1 {
-      font-size: 16px;
-      margin: 0;
-      white-space: nowrap;
-    }
-  }
-}
-
-.layout-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #e6e6e6;
-  background: #fff;
-
-  .collapse-btn {
-    font-size: 20px;
-    cursor: pointer;
-  }
-
-  .user-info {
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    gap: 4px;
-  }
-}
-
-.layout-main {
-  background: #f0f2f5;
-}
+<style lang="scss" scoped>
+@use '@/styles/variables' as *;
+@use '@/styles/sidebar';
+.main-layout { display: flex; height: 100vh; overflow: hidden; background: $sidebar-bg; }
+.layout-content { flex: 1; display: flex; flex-direction: column; background: $bg; overflow: hidden; border-radius: 12px 0 0 0; }
+.topbar { height: $topbar-height; background: #fff; border-bottom: 1px solid $border; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; flex-shrink: 0; }
+.breadcrumb { font-size: 13px; color: $text-tertiary; strong { color: $text-primary; } }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar-logout { font-size: 13px; color: $text-tertiary; }
+.layout-main { flex: 1; overflow-y: auto; }
 </style>
