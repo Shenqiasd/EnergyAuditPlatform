@@ -1,23 +1,26 @@
 /**
  * Minimal TypeScript declarations for GrapeCity SpreadJS loaded via CDN.
  * Only the surface used by SpreadDesigner is typed here.
+ *
+ * This file is a module (contains export {}), so all interfaces are explicitly
+ * exported for use in other files. The Window augmentation is in declare global.
  */
 
-interface GCSpreadCommandManager {
+export interface GCSpreadCommandManager {
   register(name: string, command: { execute: () => boolean; canUndo: boolean }): void
 }
 
-interface GCSpreadWorkbookOptions {
+export interface GCSpreadWorkbookOptions {
   allowUserEditFormula: boolean
 }
 
-interface GCSpreadSheet {
+export interface GCSpreadSheet {
   options: {
     isProtected: boolean
   }
 }
 
-interface GCSpreadWorkbook {
+export interface GCSpreadWorkbook {
   fromJSON(json: object): void
   toJSON(): object
   getSheetCount(): number
@@ -26,12 +29,12 @@ interface GCSpreadWorkbook {
   options: GCSpreadWorkbookOptions
 }
 
-interface GCSpreadDesigner {
+export interface GCSpreadDesigner {
   getWorkbook(): GCSpreadWorkbook
   destroy(): void
 }
 
-interface GCSpreadDesignerConstructor {
+export interface GCSpreadDesignerConstructor {
   new (
     host: HTMLElement,
     config: object | null,
@@ -40,19 +43,20 @@ interface GCSpreadDesignerConstructor {
   DefaultConfig: object
 }
 
-interface GCSpreadDesignerNS {
+export interface GCSpreadDesignerNS {
   Designer: GCSpreadDesignerConstructor
+  DefaultConfig: object
 }
 
-interface GCSpreadSheets {
+export interface GCSpreadSheets {
   Designer: GCSpreadDesignerNS
 }
 
-interface GCSpread {
+export interface GCSpread {
   Sheets: GCSpreadSheets
 }
 
-interface GC {
+export interface GC {
   Spread: GCSpread
 }
 
@@ -61,5 +65,3 @@ declare global {
     GC: GC
   }
 }
-
-export {}

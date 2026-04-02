@@ -82,7 +82,7 @@ onMounted(loadTemplates)
               v-for="t in templates"
               :key="t.id"
               :label="`${t.templateName}（v${t.currentVersion ?? 1}）`"
-              :value="t.id"
+              :value="t.id!"
             />
           </el-select>
         </el-form-item>

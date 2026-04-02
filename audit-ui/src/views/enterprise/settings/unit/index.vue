@@ -202,7 +202,7 @@ onMounted(async () => {
                       v-for="e in availableEnergies(row.id)"
                       :key="e.id"
                       :label="`${e.name}（${e.measurementUnit ?? '-'}）`"
-                      :value="e.id"
+                      :value="e.id!"
                     />
                   </el-select>
                   <el-button
