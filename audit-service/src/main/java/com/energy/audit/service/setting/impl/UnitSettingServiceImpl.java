@@ -86,6 +86,9 @@ public class UnitSettingServiceImpl implements UnitSettingService {
         if (energyMapper.selectByIdAndEnterprise(energyId, enterpriseId) == null) {
             throw new BusinessException("Energy not found or access denied: " + energyId);
         }
+        if (unitEnergyMapper.selectByUnitIdAndEnergyId(unitId, energyId) != null) {
+            throw new BusinessException("Energy already associated with this unit");
+        }
         String operator = SecurityUtils.getCurrentUsername();
         BsUnitEnergy ue = new BsUnitEnergy();
         ue.setUnitId(unitId);

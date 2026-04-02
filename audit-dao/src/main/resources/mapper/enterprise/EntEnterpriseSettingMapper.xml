@@ -93,7 +93,8 @@
             energy_enterprise_type = VALUES(energy_enterprise_type),
             remark                 = VALUES(remark),
             update_by              = VALUES(update_by),
-            update_time            = NOW()
+            update_time            = NOW(),
+            deleted                = 0
     </insert>
 
 </mapper>

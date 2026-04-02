@@ -14,6 +14,8 @@ public interface BsUnitEnergyMapper {
 
     List<BsUnitEnergy> selectByUnitId(@Param("unitId") Long unitId);
 
+    BsUnitEnergy selectByUnitIdAndEnergyId(@Param("unitId") Long unitId, @Param("energyId") Long energyId);
+
     int insert(BsUnitEnergy unitEnergy);
 
     int deleteByUnitIdAndEnergyId(@Param("unitId") Long unitId, @Param("energyId") Long energyId,

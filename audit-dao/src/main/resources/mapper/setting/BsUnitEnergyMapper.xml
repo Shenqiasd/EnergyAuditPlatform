@@ -25,6 +25,13 @@
         WHERE ue.unit_id = #{unitId} AND ue.deleted = 0
     </select>
 
+    <select id="selectByUnitIdAndEnergyId" resultMap="BaseResultMap">
+        SELECT id, unit_id, energy_id, create_by, create_time, update_by, update_time, deleted
+        FROM bs_unit_energy
+        WHERE unit_id = #{unitId} AND energy_id = #{energyId} AND deleted = 0
+        LIMIT 1
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO bs_unit_energy (unit_id, energy_id, create_by, create_time, update_by, update_time, deleted)
         VALUES (#{unitId}, #{energyId}, #{createBy}, NOW(), #{updateBy}, NOW(), 0)
