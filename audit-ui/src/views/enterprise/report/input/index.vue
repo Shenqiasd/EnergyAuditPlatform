@@ -112,6 +112,15 @@ async function handleSubmit() {
   }
 }
 
+function onLockLost() {
+  isReadonly.value = true
+  lockedBy.value = null
+  ElMessage.warning({
+    message: '编辑锁已过期，文档已切换为只读模式。如需继续编辑，请重新打开。',
+    duration: 6000,
+  })
+}
+
 onMounted(async () => {
   await loadTemplates()
   const qId = route.query.templateId
@@ -196,6 +205,7 @@ onMounted(async () => {
           :auditYear="selectedYear"
           :readonly="isReadonly"
           @drafted="() => {}"
+          @lock-lost="onLockLost"
         />
       </div>
 

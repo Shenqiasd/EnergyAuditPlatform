@@ -18,6 +18,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   drafted: [submission: TplSubmission]
+  lockLost: []
 }>()
 
 const spreadRef = ref<HTMLDivElement>()
@@ -123,8 +124,20 @@ function applyReadonlyProtection() {
 }
 
 function startHeartbeat() {
-  heartbeatTimer = setInterval(() => {
-    renewLock(props.templateId, props.auditYear).catch(() => {})
+  let failCount = 0
+  heartbeatTimer = setInterval(async () => {
+    try {
+      await renewLock(props.templateId, props.auditYear)
+      failCount = 0
+    } catch {
+      failCount++
+      if (failCount >= 2) {
+        stopHeartbeat()
+        ownsLock = false
+        applyReadonlyProtection()
+        emit('lockLost')
+      }
+    }
   }, 5 * 60 * 1000)
 }
 
