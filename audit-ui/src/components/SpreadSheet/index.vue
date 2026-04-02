@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   getPublishedVersion,
   getSubmission,
@@ -29,6 +29,16 @@ let workbook: import('@/types/spreadjs').GCSpreadWorkbook | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let publishedVersion: TplTemplateVersion | null = null
 let currentSubmission: TplSubmission | null = null
+let editingMode = false
+
+watch(
+  () => props.readonly,
+  (isNowReadonly) => {
+    if (isNowReadonly && editingMode) {
+      enterReadonly()
+    }
+  }
+)
 
 onMounted(() => {
   initWorkbook()
@@ -36,7 +46,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopHeartbeat()
-  if (!props.readonly) {
+  if (editingMode) {
     releaseLock(props.templateId, props.auditYear).catch(() => {})
   }
   workbook?.destroy()
@@ -67,17 +77,26 @@ async function initWorkbook() {
     const jsonStr = currentSubmission?.submissionJson ?? publishedVersion.templateJson
     workbook.fromJSON(JSON.parse(jsonStr))
 
-    const isReadonly = props.readonly || currentSubmission?.status === 1
-    if (isReadonly) {
+    const shouldBeReadonly = props.readonly || currentSubmission?.status === 1
+    if (shouldBeReadonly) {
       applyReadonlyProtection()
+      editingMode = false
     } else {
       startHeartbeat()
+      editingMode = true
     }
   } catch (e: any) {
     errorMsg.value = '加载模板失败：' + (e?.message ?? '未知错误')
   } finally {
     loading.value = false
   }
+}
+
+function enterReadonly() {
+  stopHeartbeat()
+  releaseLock(props.templateId, props.auditYear).catch(() => {})
+  applyReadonlyProtection()
+  editingMode = false
 }
 
 function applyReadonlyProtection() {
