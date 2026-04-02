@@ -14,7 +14,6 @@ public interface BsProductMapper {
 
     BsProduct selectById(@Param("id") Long id);
 
-    /** Tenant-scoped lookup — returns null when id does not belong to given enterprise */
     BsProduct selectByIdAndEnterprise(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
 
     List<BsProduct> selectList(BsProduct query);

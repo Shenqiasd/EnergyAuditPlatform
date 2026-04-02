@@ -28,9 +28,11 @@ public class TemplateVersionServiceImpl implements TemplateVersionService {
     @Override
     public TplTemplateVersion createDraftVersion(Long templateId) {
         String operator = SecurityUtils.getCurrentUsername();
+        Integer max = versionMapper.selectMaxVersion(templateId);
+        int nextVersion = (max == null ? 0 : max) + 1;
         TplTemplateVersion v = new TplTemplateVersion();
         v.setTemplateId(templateId);
-        v.setVersion(1);
+        v.setVersion(nextVersion);
         v.setTemplateJson("{}");
         v.setPublished(0);
         v.setCreateBy(operator);

@@ -46,6 +46,12 @@
         LIMIT 1
     </select>
 
+    <select id="selectMaxVersion" resultType="java.lang.Integer">
+        SELECT MAX(version)
+        FROM tpl_template_version
+        WHERE template_id = #{templateId} AND deleted = 0
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO tpl_template_version (
             template_id, version, template_json, change_log, published, publish_time,

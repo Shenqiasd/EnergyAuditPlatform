@@ -9,9 +9,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/**
- * Product setting service implementation — all mutations are tenant-scoped.
- */
 @Service
 public class ProductSettingServiceImpl implements ProductSettingService {
 
@@ -21,9 +18,6 @@ public class ProductSettingServiceImpl implements ProductSettingService {
         this.productMapper = productMapper;
     }
 
-    /**
-     * Tenant-safe getById: verifies that the record belongs to the current enterprise.
-     */
     @Override
     public BsProduct getByIdForEnterprise(Long id, Long enterpriseId) {
         BsProduct product = productMapper.selectByIdAndEnterprise(id, enterpriseId);
@@ -35,26 +29,22 @@ public class ProductSettingServiceImpl implements ProductSettingService {
 
     @Override
     public List<BsProduct> list(BsProduct query) {
-        // Always enforce current enterprise — ignore any client-supplied enterpriseId
         query.setEnterpriseId(SecurityUtils.getRequiredCurrentEnterpriseId());
         return productMapper.selectList(query);
     }
 
     @Override
     public void create(BsProduct product) {
-        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         String operator = SecurityUtils.getCurrentUsername();
         product.setCreateBy(operator);
         product.setUpdateBy(operator);
-        // Always derive enterpriseId from JWT — never trust caller
-        product.setEnterpriseId(enterpriseId);
+        product.setEnterpriseId(SecurityUtils.getRequiredCurrentEnterpriseId());
         productMapper.insert(product);
     }
 
     @Override
     public void update(BsProduct product) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        // Ownership check
         getByIdForEnterprise(product.getId(), enterpriseId);
         product.setUpdateBy(SecurityUtils.getCurrentUsername());
         productMapper.updateById(product);
@@ -63,7 +53,6 @@ public class ProductSettingServiceImpl implements ProductSettingService {
     @Override
     public void delete(Long id) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        // Ownership check
         getByIdForEnterprise(id, enterpriseId);
         productMapper.deleteById(id, SecurityUtils.getCurrentUsername());
     }

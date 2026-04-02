@@ -16,7 +16,6 @@ public interface TplSubmissionMapper {
 
     TplSubmission selectById(@Param("id") Long id);
 
-    /** Tenant-scoped lookup — returns null when submission does not belong to enterpriseId */
     TplSubmission selectByIdAndEnterprise(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
 
     /** Find existing submission by the unique business key */

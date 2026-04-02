@@ -9,9 +9,6 @@ import java.util.List;
  */
 public interface EnergySettingService {
 
-    /**
-     * Tenant-scoped lookup — throws BusinessException when id does not belong to enterpriseId.
-     */
     BsEnergy getByIdForEnterprise(Long id, Long enterpriseId);
 
     List<BsEnergy> list(BsEnergy query);

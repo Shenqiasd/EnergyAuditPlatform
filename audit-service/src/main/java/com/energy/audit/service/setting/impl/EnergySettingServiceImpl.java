@@ -16,9 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
-/**
- * Energy setting service implementation — all mutations are tenant-scoped.
- */
 @Service
 public class EnergySettingServiceImpl implements EnergySettingService {
 
@@ -32,9 +29,6 @@ public class EnergySettingServiceImpl implements EnergySettingService {
         this.catalogMapper = catalogMapper;
     }
 
-    /**
-     * Tenant-safe getById: verifies that the record belongs to the current enterprise.
-     */
     @Override
     @Cacheable(cacheNames = "energyCache", key = "#id + '_' + #enterpriseId")
     public BsEnergy getByIdForEnterprise(Long id, Long enterpriseId) {
@@ -47,7 +41,6 @@ public class EnergySettingServiceImpl implements EnergySettingService {
 
     @Override
     public List<BsEnergy> list(BsEnergy query) {
-        // Always enforce current enterprise — ignore any client-supplied enterpriseId
         query.setEnterpriseId(SecurityUtils.getRequiredCurrentEnterpriseId());
         return energyMapper.selectList(query);
     }
@@ -55,12 +48,10 @@ public class EnergySettingServiceImpl implements EnergySettingService {
     @Override
     @CacheEvict(cacheNames = "energyCache", allEntries = true)
     public void create(BsEnergy energy) {
-        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         String operator = SecurityUtils.getCurrentUsername();
         energy.setCreateBy(operator);
         energy.setUpdateBy(operator);
-        // Always derive enterpriseId from JWT — never trust caller
-        energy.setEnterpriseId(enterpriseId);
+        energy.setEnterpriseId(SecurityUtils.getRequiredCurrentEnterpriseId());
         if (energy.getIsActive() == null) {
             energy.setIsActive(1);
         }
@@ -71,7 +62,6 @@ public class EnergySettingServiceImpl implements EnergySettingService {
     @CacheEvict(cacheNames = "energyCache", allEntries = true)
     public void update(BsEnergy energy) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        // Ownership check: ensure record belongs to current enterprise
         getByIdForEnterprise(energy.getId(), enterpriseId);
         energy.setUpdateBy(SecurityUtils.getCurrentUsername());
         energyMapper.updateById(energy);
@@ -81,7 +71,6 @@ public class EnergySettingServiceImpl implements EnergySettingService {
     @CacheEvict(cacheNames = "energyCache", allEntries = true)
     public void delete(Long id) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        // Ownership check
         getByIdForEnterprise(id, enterpriseId);
         energyMapper.deleteById(id, SecurityUtils.getCurrentUsername());
     }

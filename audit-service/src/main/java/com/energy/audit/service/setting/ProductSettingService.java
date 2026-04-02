@@ -9,9 +9,6 @@ import java.util.List;
  */
 public interface ProductSettingService {
 
-    /**
-     * Tenant-scoped lookup — throws BusinessException when id does not belong to enterpriseId.
-     */
     BsProduct getByIdForEnterprise(Long id, Long enterpriseId);
 
     List<BsProduct> list(BsProduct query);

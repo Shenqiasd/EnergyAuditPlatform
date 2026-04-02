@@ -10,9 +10,6 @@ import java.util.List;
  */
 public interface UnitSettingService {
 
-    /**
-     * Tenant-scoped lookup — throws BusinessException when id does not belong to enterpriseId.
-     */
     BsUnit getByIdForEnterprise(Long id, Long enterpriseId);
 
     List<BsUnit> list(BsUnit query);
