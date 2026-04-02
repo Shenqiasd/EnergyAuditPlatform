@@ -214,28 +214,28 @@ public class TemplateController {
     // Edit Lock Management
     // =========================================================================
 
-    @Operation(summary = "获取编辑锁")
+    @Operation(summary = "获取编辑锁（enterpriseId 从安全上下文取）")
     @PostMapping("/lock")
-    public R<TplEditLock> acquireLock(@RequestParam Long enterpriseId,
-                                      @RequestParam Long templateId,
+    public R<TplEditLock> acquireLock(@RequestParam Long templateId,
                                       @RequestParam Integer auditYear) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         return R.ok(editLockService.acquireLock(enterpriseId, templateId, auditYear));
     }
 
-    @Operation(summary = "释放编辑锁")
+    @Operation(summary = "释放编辑锁（enterpriseId 从安全上下文取）")
     @DeleteMapping("/lock")
-    public R<Void> releaseLock(@RequestParam Long enterpriseId,
-                               @RequestParam Long templateId,
+    public R<Void> releaseLock(@RequestParam Long templateId,
                                @RequestParam Integer auditYear) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         editLockService.releaseLock(enterpriseId, templateId, auditYear);
         return R.ok();
     }
 
-    @Operation(summary = "检查编辑锁状态")
+    @Operation(summary = "检查编辑锁状态（enterpriseId 从安全上下文取）")
     @GetMapping("/lock")
-    public R<TplEditLock> checkLock(@RequestParam Long enterpriseId,
-                                    @RequestParam Long templateId,
+    public R<TplEditLock> checkLock(@RequestParam Long templateId,
                                     @RequestParam Integer auditYear) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         return R.ok(editLockService.checkLock(enterpriseId, templateId, auditYear));
     }
 }

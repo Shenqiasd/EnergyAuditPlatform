@@ -68,7 +68,12 @@ public class SubmissionServiceImpl implements SubmissionService {
     @Override
     @Transactional
     public void submit(Long submissionId, Long templateVersionId) {
-        TplSubmission sub = getById(submissionId);
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Tenant-scoped lookup: throws BusinessException when submission belongs to another enterprise
+        TplSubmission sub = submissionMapper.selectByIdAndEnterprise(submissionId, enterpriseId);
+        if (sub == null) {
+            throw new BusinessException("填报记录不存在或无权操作: " + submissionId);
+        }
         if (sub.getStatus() == 1) {
             throw new BusinessException("该填报已提交，请勿重复提交");
         }
