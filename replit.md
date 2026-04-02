@@ -30,10 +30,20 @@ npm run dev  # runs on port 5000
 
 ### Backend (dev profile — H2 in-memory)
 ```bash
-mvn package -DskipTests -pl audit-web -am
+# Build with H2 included (-P dev activates H2 profile; -am resolves sibling modules)
+mvn package -DskipTests -pl audit-web -am -P dev
 java -jar audit-web/target/audit-web-1.0.0-SNAPSHOT.jar --spring.profiles.active=dev
-# H2 console available at http://localhost:8080/h2-console
+# H2 console available at http://localhost:8080/api/h2-console
 # Seed account: admin / admin123 (userType=1, admin portal)
+
+# Or run directly without packaging (multi-module: install first, then run from module dir):
+mvn install -DskipTests -pl audit-web -am -P dev
+cd audit-web && mvn spring-boot:run -P dev
+```
+
+### Production build (MySQL, no H2)
+```bash
+mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
 ```
 
 ### Workflow

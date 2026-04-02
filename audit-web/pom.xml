@@ -55,14 +55,13 @@
         </dependency>
     </dependencies>
 
-    <!-- H2 in-memory DB is activated only for the 'dev' Maven profile.
-         Production builds (no profile or -P prod) do NOT include H2. -->
+    <!-- H2 in-memory DB is activated ONLY when building with -P dev.
+         Production builds (mvn package without -P dev) do NOT include H2.
+         Usage: mvn package -DskipTests -pl audit-web -am -P dev
+                mvn spring-boot:run -pl audit-web -am -P dev -->
     <profiles>
         <profile>
             <id>dev</id>
-            <activation>
-                <activeByDefault>true</activeByDefault>
-            </activation>
             <dependencies>
                 <dependency>
                     <groupId>com.h2database</groupId>
