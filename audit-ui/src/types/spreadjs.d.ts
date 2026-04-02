@@ -26,6 +26,7 @@ export interface GCSpreadWorkbook {
   getSheetCount(): number
   getSheet(index: number): GCSpreadSheet
   commandManager(): GCSpreadCommandManager
+  destroy(): void
   options: GCSpreadWorkbookOptions
 }
 
@@ -48,7 +49,12 @@ export interface GCSpreadDesignerNS {
   DefaultConfig: object
 }
 
+export interface GCSpreadSheetsWorkbookConstructor {
+  new (host: HTMLElement, options?: object): GCSpreadWorkbook
+}
+
 export interface GCSpreadSheets {
+  Workbook: GCSpreadSheetsWorkbookConstructor
   Designer: GCSpreadDesignerNS
 }
 

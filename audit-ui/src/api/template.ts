@@ -60,6 +60,7 @@ export interface TplEditLock {
   lockUserId?: number
   lockTime?: string
   expireTime?: string
+  updateBy?: string
 }
 
 export interface TemplateQuery {
@@ -173,4 +174,8 @@ export function releaseLock(templateId: number, auditYear: number): Promise<void
 
 export function checkLock(templateId: number, auditYear: number): Promise<TplEditLock | null> {
   return request.get('/template/lock', { params: { templateId, auditYear } }).then((r: any) => r.data)
+}
+
+export function renewLock(templateId: number, auditYear: number): Promise<TplEditLock> {
+  return request.put('/template/lock', null, { params: { templateId, auditYear } }).then((r: any) => r.data)
 }

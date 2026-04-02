@@ -295,4 +295,13 @@ public class TemplateController {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         return R.ok(editLockService.checkLock(enterpriseId, templateId, auditYear));
     }
+
+    @Operation(summary = "续约编辑锁（心跳，每5分钟调用一次）")
+    @PutMapping("/lock")
+    public R<TplEditLock> renewLock(@RequestParam Long templateId,
+                                    @RequestParam Integer auditYear) {
+        requireEnterprise();
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        return R.ok(editLockService.renewLock(enterpriseId, templateId, auditYear));
+    }
 }

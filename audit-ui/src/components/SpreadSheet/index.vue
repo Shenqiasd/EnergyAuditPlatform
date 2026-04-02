@@ -1,97 +1,167 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-
-/**
- * SpreadSheet - SpreadJS Integration Wrapper
- *
- * This component wraps GrapeCity SpreadJS (SpreadJS) for rendering
- * and editing Excel-like spreadsheet templates.
- *
- * SpreadJS will be initialized in the spreadRef container element.
- * The @grapecity/spread-sheets package needs to be installed and
- * configured before this component becomes functional.
- *
- * Initialization flow:
- * 1. Mount the SpreadJS workbook on the container div
- * 2. Load template by templateId from the backend
- * 3. Populate data if enterpriseId and auditYear are provided
- * 4. Set readonly mode if specified
- * 5. Bind save/extract events
- */
+import {
+  getPublishedVersion,
+  getSubmission,
+  saveDraft,
+  renewLock,
+  releaseLock,
+  type TplSubmission,
+  type TplTemplateVersion,
+} from '@/api/template'
 
 const props = defineProps<{
   templateId: number
+  auditYear: number
   readonly?: boolean
-  enterpriseId?: number
-  auditYear?: number
 }>()
 
 const emit = defineEmits<{
-  save: [data: Record<string, unknown>]
-  dataExtracted: [data: Record<string, unknown>]
+  drafted: [submission: TplSubmission]
 }>()
 
 const spreadRef = ref<HTMLDivElement>()
+const loading = ref(false)
+const saving = ref(false)
+const errorMsg = ref('')
 
-// SpreadJS workbook instance will be stored here
-// let workbook: GC.Spread.Sheets.Workbook | null = null
+let workbook: import('@/types/spreadjs').GCSpreadWorkbook | null = null
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+let publishedVersion: TplTemplateVersion | null = null
+let currentSubmission: TplSubmission | null = null
 
 onMounted(() => {
-  initSpreadJS()
+  initWorkbook()
 })
 
 onBeforeUnmount(() => {
-  destroySpreadJS()
+  stopHeartbeat()
+  if (!props.readonly) {
+    releaseLock(props.templateId, props.auditYear).catch(() => {})
+  }
+  workbook?.destroy()
+  workbook = null
 })
 
-function initSpreadJS() {
+async function initWorkbook() {
   if (!spreadRef.value) return
+  if (!window.GC?.Spread?.Sheets?.Workbook) {
+    errorMsg.value = 'SpreadJS 未加载，请检查网络连接后刷新页面'
+    return
+  }
+  loading.value = true
+  errorMsg.value = ''
+  try {
+    workbook = new window.GC.Spread.Sheets.Workbook(spreadRef.value)
 
-  // TODO: Initialize SpreadJS workbook
-  // workbook = new GC.Spread.Sheets.Workbook(spreadRef.value)
-  // Load template and data based on props
-  console.log('SpreadJS init placeholder', props.templateId, props.readonly)
+    publishedVersion = await getPublishedVersion(props.templateId)
+    if (!publishedVersion?.templateJson) {
+      errorMsg.value = '该模板尚未发布有效版本，请联系管理员'
+      workbook.destroy()
+      workbook = null
+      return
+    }
+
+    currentSubmission = await getSubmission(props.templateId, props.auditYear)
+
+    const jsonStr = currentSubmission?.submissionJson ?? publishedVersion.templateJson
+    workbook.fromJSON(JSON.parse(jsonStr))
+
+    const isReadonly = props.readonly || currentSubmission?.status === 1
+    if (isReadonly) {
+      applyReadonlyProtection()
+    } else {
+      startHeartbeat()
+    }
+  } catch (e: any) {
+    errorMsg.value = '加载模板失败：' + (e?.message ?? '未知错误')
+  } finally {
+    loading.value = false
+  }
 }
 
-function destroySpreadJS() {
-  // TODO: Destroy SpreadJS workbook instance
-  // workbook?.destroy()
-  // workbook = null
+function applyReadonlyProtection() {
+  if (!workbook) return
+  const count = workbook.getSheetCount()
+  for (let i = 0; i < count; i++) {
+    workbook.getSheet(i).options.isProtected = true
+  }
 }
 
-function save() {
-  // TODO: Extract data from SpreadJS and emit save event
-  const data = {}
-  emit('save', data)
+function startHeartbeat() {
+  heartbeatTimer = setInterval(() => {
+    renewLock(props.templateId, props.auditYear).catch(() => {})
+  }, 5 * 60 * 1000)
 }
 
-function extractData() {
-  // TODO: Extract structured data from the spreadsheet
-  const data = {}
-  emit('dataExtracted', data)
+function stopHeartbeat() {
+  if (heartbeatTimer !== null) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
 }
 
-defineExpose({
-  save,
-  extractData,
-})
+async function save(): Promise<void> {
+  if (!workbook || !publishedVersion) {
+    throw new Error('工作簿尚未初始化，请稍后重试')
+  }
+  saving.value = true
+  try {
+    const json = JSON.stringify(workbook.toJSON())
+    const saved = await saveDraft({
+      templateId: props.templateId,
+      auditYear: props.auditYear,
+      submissionJson: json,
+      templateVersion: publishedVersion.version ?? 1,
+    })
+    currentSubmission = saved
+    emit('drafted', saved)
+  } finally {
+    saving.value = false
+  }
+}
+
+function getSubmissionId(): number | undefined {
+  return currentSubmission?.id
+}
+
+function getVersionId(): number | undefined {
+  return publishedVersion?.id
+}
+
+function isSubmitted(): boolean {
+  return currentSubmission?.status === 1
+}
+
+defineExpose({ save, getSubmissionId, getVersionId, isSubmitted, saving, loading })
 </script>
 
 <template>
-  <div class="spreadsheet-container">
-    <div ref="spreadRef" class="spreadjs-host"></div>
+  <div class="spreadsheet-wrapper" v-loading="loading" element-loading-text="正在加载表格模板…">
+    <el-alert
+      v-if="errorMsg"
+      :title="errorMsg"
+      type="error"
+      :closable="false"
+      style="margin-bottom: 12px"
+    />
+    <div v-show="!errorMsg" ref="spreadRef" class="spreadjs-host"></div>
   </div>
 </template>
 
 <style scoped lang="scss">
-.spreadsheet-container {
+.spreadsheet-wrapper {
   width: 100%;
   height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .spreadjs-host {
+  flex: 1;
   width: 100%;
-  height: 600px;
+  min-height: 500px;
   border: 1px solid #e4e7ed;
+  border-radius: 4px;
 }
 </style>

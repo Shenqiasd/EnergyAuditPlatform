@@ -98,6 +98,32 @@ public class EditLockService {
     }
 
     /**
+     * Renew (heartbeat) an existing lock held by the current user.
+     * Extends the expiry by LOCK_TIMEOUT_MINUTES from now.
+     * Throws BusinessException if no active lock exists or the caller does not own it.
+     */
+    @Transactional
+    public TplEditLock renewLock(Long enterpriseId, Long templateId, Integer auditYear) {
+        Long currentUserId = SecurityUtils.getRequiredCurrentUserId();
+        String operator = SecurityUtils.getRequiredCurrentUsername();
+        LocalDateTime now = LocalDateTime.now();
+
+        TplEditLock existing = editLockMapper.selectByKey(enterpriseId, templateId, auditYear);
+        if (existing == null || existing.getExpireTime().isBefore(now)) {
+            throw new BusinessException("编辑锁已过期，请关闭后重新打开文档");
+        }
+        if (!existing.getLockUserId().equals(currentUserId)) {
+            throw new BusinessException("无法续约其他用户持有的编辑锁");
+        }
+        LocalDateTime newExpiry = now.plusMinutes(LOCK_TIMEOUT_MINUTES);
+        editLockMapper.updateByKey(enterpriseId, templateId, auditYear,
+                currentUserId, existing.getLockTime(), newExpiry, operator);
+        log.debug("Lock renewed: enterprise={} template={} year={} newExpiry={}",
+                enterpriseId, templateId, auditYear, newExpiry);
+        return editLockMapper.selectByKey(enterpriseId, templateId, auditYear);
+    }
+
+    /**
      * Check lock status. Returns null if no active (non-expired) lock exists.
      */
     public TplEditLock checkLock(Long enterpriseId, Long templateId, Integer auditYear) {
