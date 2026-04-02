@@ -24,7 +24,7 @@ public class AuthController {
 
     @Operation(summary = "Login")
     @PostMapping("/login")
-    public R<LoginVO> login(@RequestBody LoginDTO dto) {
+    public R<LoginVO> login(@jakarta.validation.Valid @RequestBody LoginDTO dto) {
         return R.ok(authService.login(dto));
     }
 
@@ -48,7 +48,7 @@ public class AuthController {
 
     @Operation(summary = "Change password")
     @PutMapping("/password")
-    public R<Void> changePassword(@RequestBody ChangePasswordDTO dto) {
+    public R<Void> changePassword(@jakarta.validation.Valid @RequestBody ChangePasswordDTO dto) {
         authService.changePassword(dto);
         return R.ok();
     }

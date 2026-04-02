@@ -27,6 +27,14 @@ public class SecurityUtils {
         return USER_ID.get();
     }
 
+    public static Long getRequiredCurrentUserId() {
+        Long userId = USER_ID.get();
+        if (userId == null) {
+            throw new RuntimeException("用户未认证");
+        }
+        return userId;
+    }
+
     public static String getCurrentUsername() {
         return USERNAME.get();
     }

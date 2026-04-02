@@ -35,6 +35,7 @@ export const useUserStore = defineStore('user', () => {
     const res = await loginApi(form)
     token.value = res.token
     localStorage.setItem('token', res.token)
+    localStorage.setItem('userType', String(res.userType))
     userInfo.value = {
       userId: res.userId,
       username: res.username,
@@ -69,6 +70,7 @@ export const useUserStore = defineStore('user', () => {
     token.value = ''
     userInfo.value = null
     localStorage.removeItem('token')
+    localStorage.removeItem('userType')
   }
 
   return { token, userInfo, isLoggedIn, portalPath, needChangePassword, login, fetchUserInfo, logout }

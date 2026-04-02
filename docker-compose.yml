@@ -5,7 +5,7 @@ services:
     image: mysql:8.0
     container_name: energy-audit-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: energy_audit_2024
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: energy_audit
       MYSQL_CHARACTER_SET_SERVER: utf8mb4
       MYSQL_COLLATION_SERVER: utf8mb4_general_ci
@@ -34,7 +34,7 @@ services:
       DB_PORT: 3306
       DB_NAME: energy_audit
       DB_USERNAME: root
-      DB_PASSWORD: energy_audit_2024
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:-energy-audit-platform-2024-production-secret-key-minimum-256-bits}
     depends_on:
       mysql:

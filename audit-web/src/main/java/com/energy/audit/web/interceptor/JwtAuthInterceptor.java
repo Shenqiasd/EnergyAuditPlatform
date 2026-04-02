@@ -1,7 +1,9 @@
 package com.energy.audit.web.interceptor;
 
+import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.JwtUtils;
 import com.energy.audit.common.util.SecurityUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -86,9 +88,11 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         SecurityUtils.clear();
     }
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private void sendError(HttpServletResponse response, int status, String message) throws Exception {
         response.setStatus(status);
         response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write("{\"code\":" + status + ",\"message\":\"" + message + "\",\"data\":null}");
+        response.getWriter().write(OBJECT_MAPPER.writeValueAsString(R.fail(status, message)));
     }
 }

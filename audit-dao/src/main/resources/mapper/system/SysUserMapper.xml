@@ -87,7 +87,7 @@
     </update>
 
     <update id="deleteById">
-        UPDATE sys_user SET deleted = 1, update_time = NOW() WHERE id = #{id}
+        UPDATE sys_user SET deleted = 1, update_by = #{updateBy}, update_time = NOW() WHERE id = #{id}
     </update>
 
 </mapper>

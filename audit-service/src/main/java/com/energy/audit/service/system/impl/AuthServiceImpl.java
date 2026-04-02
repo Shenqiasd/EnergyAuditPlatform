@@ -85,12 +85,12 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void logout(String token) {
-        // For single-node deployment, we can use Ehcache to blacklist the token
-        // The token will be checked in the interceptor
+        // TODO: 生产环境如需高可用，应使用 Redis 持久化 token 黑名单，当前 Ehcache 内存缓存重启后失效
         if (token != null && cacheManager.getCache("tokenBlacklist") != null) {
             cacheManager.getCache("tokenBlacklist").put(token, Boolean.TRUE);
         }
-        log.info("User {} logged out", SecurityUtils.getCurrentUsername());
+        String username = SecurityUtils.getCurrentUsername();
+        log.info("User {} logged out", username != null ? username : "(token-only)");
     }
 
     @Override

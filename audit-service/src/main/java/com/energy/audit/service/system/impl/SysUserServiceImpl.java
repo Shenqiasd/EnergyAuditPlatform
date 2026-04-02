@@ -1,5 +1,6 @@
 package com.energy.audit.service.system.impl;
 
+import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.dao.mapper.system.SysUserMapper;
 import com.energy.audit.model.entity.system.SysUser;
@@ -58,6 +59,7 @@ public class SysUserServiceImpl implements SysUserService {
     @Override
     public void delete(Long id) {
         // TODO: validate user exists, check dependencies
-        sysUserMapper.deleteById(id);
+        String operator = SecurityUtils.getCurrentUsername();
+        sysUserMapper.deleteById(id, operator);
     }
 }

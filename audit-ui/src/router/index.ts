@@ -92,22 +92,44 @@ const router = createRouter({
   routes,
 })
 
+function getPortalHome(userType: number | null): string {
+  switch (userType) {
+    case 1: return '/admin/dashboard'
+    case 2: return '/auditor/dashboard'
+    case 3: return '/enterprise/dashboard'
+    default: return '/login'
+  }
+}
+
 router.beforeEach(async (to, _from, next) => {
   const token = localStorage.getItem('token')
   const requiresAuth = to.meta.requiresAuth !== false
 
+  // Already logged in, redirect away from login page to portal home
   if (to.path === '/login') {
     if (token) {
-      next('/')
+      const userType = Number(localStorage.getItem('userType')) || null
+      next(getPortalHome(userType))
     } else {
       next()
     }
     return
   }
 
+  // Not authenticated, redirect to login
   if (requiresAuth && !token) {
     next({ path: '/login', query: { redirect: to.fullPath } })
     return
+  }
+
+  // Portal access control: check userType matches the route's required portal
+  if (to.matched.some(r => r.meta.userType)) {
+    const requiredType = to.matched.find(r => r.meta.userType)?.meta.userType as number
+    const currentType = Number(localStorage.getItem('userType')) || null
+    if (currentType && requiredType && currentType !== requiredType) {
+      next(getPortalHome(currentType))
+      return
+    }
   }
 
   next()
