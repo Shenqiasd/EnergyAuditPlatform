@@ -1,0 +1,17 @@
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /app
+COPY pom.xml .
+COPY audit-common/pom.xml audit-common/
+COPY audit-model/pom.xml audit-model/
+COPY audit-dao/pom.xml audit-dao/
+COPY audit-service/pom.xml audit-service/
+COPY audit-web/pom.xml audit-web/
+RUN mvn dependency:go-offline -B 2>/dev/null || true
+COPY . .
+RUN mvn package -DskipTests -q
+
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY --from=build /app/audit-web/target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]

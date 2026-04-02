@@ -36,7 +36,7 @@ public class EditLockService {
     public TplEditLock acquireLock(Long enterpriseId, Long templateId, Integer auditYear) {
         String key = lockKey(enterpriseId, templateId, auditYear);
         TplEditLock existingLock = lockStore.get(key);
-        Long currentUserId = SecurityUtils.getCurrentUserId();
+        Long currentUserId = SecurityUtils.getRequiredCurrentUserId();
 
         if (existingLock != null) {
             if (existingLock.getExpireTime().isAfter(LocalDateTime.now())) {
@@ -70,7 +70,7 @@ public class EditLockService {
         String key = lockKey(enterpriseId, templateId, auditYear);
         TplEditLock lock = lockStore.get(key);
         if (lock != null) {
-            Long currentUserId = SecurityUtils.getCurrentUserId();
+            Long currentUserId = SecurityUtils.getRequiredCurrentUserId();
             if (lock.getLockUserId().equals(currentUserId)) {
                 lockStore.remove(key);
                 log.info("Lock released for enterprise:{} template:{} year:{}", enterpriseId, templateId, auditYear);

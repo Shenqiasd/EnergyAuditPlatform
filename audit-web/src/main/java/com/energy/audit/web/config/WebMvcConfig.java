@@ -6,9 +6,6 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-/**
- * Web MVC configuration - CORS and interceptors
- */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
@@ -19,6 +16,21 @@ public class WebMvcConfig implements WebMvcConfigurer {
     }
 
     @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(jwtAuthInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns(
+                        "/auth/login",
+                        "/auth/register",
+                        "/doc.html",
+                        "/swagger-ui/**",
+                        "/v3/api-docs/**",
+                        "/webjars/**",
+                        "/error"
+                );
+    }
+
+    @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
                 .allowedOriginPatterns("*")
@@ -26,20 +38,5 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .allowedHeaders("*")
                 .allowCredentials(true)
                 .maxAge(3600);
-    }
-
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(jwtAuthInterceptor)
-                .addPathPatterns("/**")
-                .excludePathPatterns(
-                        "/auth/login",
-                        "/auth/logout",
-                        "/swagger-ui/**",
-                        "/v3/api-docs/**",
-                        "/swagger-resources/**",
-                        "/doc.html",
-                        "/error"
-                );
     }
 }

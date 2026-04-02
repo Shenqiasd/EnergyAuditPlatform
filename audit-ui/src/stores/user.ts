@@ -1,61 +1,77 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import { login as loginApi, logout as logoutApi, getUserInfo as getUserInfoApi } from '@/api/auth'
-import type { LoginForm } from '@/api/auth'
-import router from '@/router'
+import { ref, computed } from 'vue'
+import { login as loginApi, logout as logoutApi, getUserInfo as getInfoApi } from '@/api/auth'
 
 export interface UserInfo {
-  id: number
+  userId: number
   username: string
   realName: string
-  role: string
-  portal: string
+  phone?: string
+  email?: string
+  userType: number
   enterpriseId?: number
   enterpriseName?: string
+  auditYear?: number
+  passwordChanged: boolean
 }
 
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>(localStorage.getItem('token') || '')
   const userInfo = ref<UserInfo | null>(null)
-  const permissions = ref<string[]>([])
 
-  async function login(form: LoginForm) {
-    const res = await loginApi(form)
-    token.value = res.data.token
-    localStorage.setItem('token', res.data.token)
-    return res
-  }
-
-  async function logout() {
-    try {
-      await logoutApi()
-    } finally {
-      resetState()
-      router.push('/login')
+  const isLoggedIn = computed(() => !!token.value)
+  const portalPath = computed(() => {
+    if (!userInfo.value) return '/login'
+    switch (userInfo.value.userType) {
+      case 1: return '/admin/dashboard'
+      case 2: return '/auditor/dashboard'
+      case 3: return '/enterprise/dashboard'
+      default: return '/login'
     }
-  }
+  })
+  const needChangePassword = computed(() => userInfo.value?.passwordChanged === false)
 
-  async function getUserInfo() {
-    const res = await getUserInfoApi()
-    userInfo.value = res.data.user
-    permissions.value = res.data.permissions || []
+  async function login(form: { username: string; password: string; portal: string }) {
+    const res = await loginApi(form)
+    token.value = res.token
+    localStorage.setItem('token', res.token)
+    localStorage.setItem('userType', String(res.userType))
+    userInfo.value = {
+      userId: res.userId,
+      username: res.username,
+      realName: res.realName,
+      userType: res.userType,
+      enterpriseId: res.enterpriseId,
+      enterpriseName: res.enterpriseName,
+      passwordChanged: res.passwordChanged,
+    } as UserInfo
     return res
   }
 
-  function resetState() {
+  async function fetchUserInfo() {
+    const res = await getInfoApi()
+    userInfo.value = {
+      userId: res.userId,
+      username: res.username,
+      realName: res.realName,
+      phone: res.phone,
+      email: res.email,
+      userType: res.userType,
+      enterpriseId: res.enterpriseId,
+      enterpriseName: res.enterpriseName,
+      auditYear: res.auditYear,
+      passwordChanged: res.passwordChanged,
+    }
+    return res
+  }
+
+  function logout() {
+    logoutApi().catch(() => {})
     token.value = ''
     userInfo.value = null
-    permissions.value = []
     localStorage.removeItem('token')
+    localStorage.removeItem('userType')
   }
 
-  return {
-    token,
-    userInfo,
-    permissions,
-    login,
-    logout,
-    getUserInfo,
-    resetState,
-  }
+  return { token, userInfo, isLoggedIn, portalPath, needChangePassword, login, fetchUserInfo, logout }
 })

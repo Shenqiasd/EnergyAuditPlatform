@@ -3,37 +3,45 @@ import request from '@/utils/request'
 export interface LoginForm {
   username: string
   password: string
-  portal: 'enterprise' | 'admin' | 'auditor'
+  portal?: string
 }
 
 export interface LoginResult {
   token: string
+  userId: number
+  username: string
+  realName: string
+  userType: number
+  enterpriseId?: number
+  enterpriseName?: string
+  passwordChanged: boolean
 }
 
 export interface UserInfoResult {
-  user: {
-    id: number
-    username: string
-    realName: string
-    role: string
-    portal: string
-    enterpriseId?: number
-    enterpriseName?: string
-  }
-  permissions: string[]
+  userId: number
+  username: string
+  realName: string
+  phone?: string
+  email?: string
+  userType: number
+  enterpriseId?: number
+  enterpriseName?: string
+  auditYear?: number
+  passwordChanged: boolean
 }
 
-/** User login */
-export function login(data: LoginForm) {
-  return request.post<LoginResult>('/auth/login', data)
+export function login(data: LoginForm): Promise<LoginResult> {
+  return request.post('/auth/login', data)
 }
 
-/** User logout */
-export function logout() {
+export function logout(): Promise<void> {
   return request.post('/auth/logout')
 }
 
-/** Get current user info */
-export function getUserInfo() {
-  return request.get<UserInfoResult>('/auth/info')
+export function getUserInfo(): Promise<UserInfoResult> {
+  return request.get('/auth/info')
+}
+
+export function changePassword(data: { oldPassword: string; newPassword: string }): Promise<void> {
+  return request.put('/auth/password', data)
 }

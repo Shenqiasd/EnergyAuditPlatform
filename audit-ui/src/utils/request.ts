@@ -1,50 +1,39 @@
 import axios from 'axios'
-import type { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-import { useUserStore } from '@/stores/user'
-import router from '@/router'
 
-export interface ApiResponse<T = unknown> {
-  code: number
-  message: string
-  data: T
-}
-
-const service: AxiosInstance = axios.create({
+const request = axios.create({
   baseURL: '/api',
   timeout: 30000,
 })
 
-// Request interceptor: attach JWT token
-service.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const userStore = useUserStore()
-    if (userStore.token) {
-      config.headers.Authorization = `Bearer ${userStore.token}`
+request.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
     }
     return config
   },
-  (error) => {
-    return Promise.reject(error)
-  }
+  (error) => Promise.reject(error)
 )
 
-// Response interceptor: handle errors and extract data
-service.interceptors.response.use(
-  (response: AxiosResponse<ApiResponse>) => {
+request.interceptors.response.use(
+  (response) => {
     const res = response.data
-    if (res.code !== 0 && res.code !== 200) {
+    if (res.code !== undefined && res.code !== 200) {
       ElMessage.error(res.message || '请求失败')
+      if (res.code === 401) {
+        localStorage.removeItem('token')
+        window.location.href = '/login'
+      }
       return Promise.reject(new Error(res.message || '请求失败'))
     }
-    return res as unknown as AxiosResponse
+    return res.data !== undefined ? res.data : res
   },
   (error) => {
     if (error.response?.status === 401) {
-      const userStore = useUserStore()
-      userStore.resetState()
-      router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
-      ElMessage.error('登录已过期，请重新登录')
+      localStorage.removeItem('token')
+      window.location.href = '/login'
     } else {
       ElMessage.error(error.response?.data?.message || error.message || '网络错误')
     }
@@ -52,4 +41,4 @@ service.interceptors.response.use(
   }
 )
 
-export default service
+export default request

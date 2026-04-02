@@ -1,32 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xmlns="http://www.ehcache.org/v3"
-        xsi:schemaLocation="http://www.ehcache.org/v3 http://www.ehcache.org/schema/ehcache-core-3.0.xsd">
+        xsi:schemaLocation="http://www.ehcache.org/v3
+        http://www.ehcache.org/schema/ehcache-core-3.10.xsd">
 
-    <!-- Dictionary cache: 500 entries, TTL 1 hour -->
+    <!-- Token blacklist for logout -->
+    <cache alias="tokenBlacklist">
+        <expiry>
+            <ttl unit="hours">24</ttl>
+        </expiry>
+        <heap unit="entries">10000</heap>
+    </cache>
+
+    <!-- Dictionary data cache -->
     <cache alias="dictCache">
-        <key-type>java.lang.Object</key-type>
-        <value-type>java.lang.Object</value-type>
         <expiry>
             <ttl unit="hours">1</ttl>
         </expiry>
         <heap unit="entries">500</heap>
     </cache>
 
-    <!-- Energy cache: 200 entries, TTL 30 minutes -->
+    <!-- Energy settings cache -->
     <cache alias="energyCache">
-        <key-type>java.lang.Object</key-type>
-        <value-type>java.lang.Object</value-type>
         <expiry>
             <ttl unit="minutes">30</ttl>
         </expiry>
         <heap unit="entries">200</heap>
     </cache>
 
-    <!-- Template cache: 100 entries, TTL 1 hour -->
+    <!-- Template metadata cache -->
     <cache alias="templateCache">
-        <key-type>java.lang.Object</key-type>
-        <value-type>java.lang.Object</value-type>
         <expiry>
             <ttl unit="hours">1</ttl>
         </expiry>

@@ -43,6 +43,9 @@ public class SysUser extends BaseEntity {
     /** Status (0=disabled, 1=enabled) */
     private Integer status;
 
-    /** Avatar URL */
-    private String avatar;
+    /** Last login time */
+    private java.time.LocalDateTime lastLoginTime;
+
+    /** Whether initial password has been changed (0=no, 1=yes) */
+    private Integer passwordChanged;
 }
