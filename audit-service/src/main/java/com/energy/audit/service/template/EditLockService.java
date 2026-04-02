@@ -108,8 +108,8 @@ public class EditLockService {
         String operator = SecurityUtils.getRequiredCurrentUsername();
         LocalDateTime now = LocalDateTime.now();
 
-        TplEditLock existing = editLockMapper.selectByKey(enterpriseId, templateId, auditYear);
-        if (existing == null || existing.getExpireTime().isBefore(now)) {
+        TplEditLock existing = editLockMapper.selectByKeyForUpdate(enterpriseId, templateId, auditYear);
+        if (existing == null || existing.getDeleted() != 0 || existing.getExpireTime().isBefore(now)) {
             throw new BusinessException("编辑锁已过期，请关闭后重新打开文档");
         }
         if (!existing.getLockUserId().equals(currentUserId)) {
