@@ -1,0 +1,312 @@
+# PR #5 Wave 2 Sprint 3.1 — 首轮综合审核报告
+
+## 概览
+
+**PR**: feat(wave2): Sprint 3.1 模板管理后端 + Wave 2 前端 6 页面  
+**范围**: 60 files changed, +3929 −309  
+**提交**: 43c9cf2  
+
+### 审核范围
+- **后端新增**: 4 张新表 (tpl_template_version, tpl_tag_mapping, tpl_submission, tpl_edit_lock) 的完整 Entity/Mapper/Service/Controller
+- **后端重构**: SecurityUtils 统一上下文 (新增 enterpriseId)、JwtAuthInterceptor 重写、TemplateServiceImpl 升级版本管理
+- **前端新增**: 6 个页面 (管理端模板管理、企业端报告录入/生成/上传/详情、审计端工作台)
+- **前端重构**: 路由守卫改用 localStorage + userType 门户隔离
+
+### Schema/Entity/Mapper 对齐检查
+
+| 表名 | 生产 Schema | H2 Schema | Entity | Mapper XML | 结果 |
+|------|------------|-----------|--------|-----------|------|
+| tpl_template | 12 列 | 12 列 | 12 列 | 12 列 | **对齐** |
+| tpl_template_version | 12 列 | 12 列 | 12 列 | 12 列 | **对齐** |
+| tpl_tag_mapping | 15 列 | 15 列 | 15 列 | 15 列 | **对齐** |
+| tpl_submission | 14 列 | 14 列 | 14 列 | 14 列 | **对齐** |
+| tpl_edit_lock | 12 列 | 12 列 | 12 列 | 12 列 | **对齐** |
+
+**结论**: 全部 5 张表四层完全对齐，Wave 0 的核心问题已彻底消除。
+
+---
+
+## 严重问题 (Critical) — 阻塞合并
+
+### C-1: 发布流程未更新 tpl_template.status — 模板永远显示"草稿"
+
+**文件**: `audit-service/.../template/impl/TemplateVersionServiceImpl.java:80-93`
+
+```java
+public void publish(Long templateId, Long versionId) {
+    // ...
+    versionMapper.updatePublishStatus(versionId, operator);  // 只更新 version 行的 published=1
+
+    TplTemplate upd = new TplTemplate();
+    upd.setId(templateId);
+    upd.setCurrentVersion(v.getVersion());  // 只更新 currentVersion
+    upd.setUpdateBy(operator);
+    templateMapper.updateById(upd);          // ← status 未被 set，updateById 用 <if test="status != null"> 跳过
+}
+```
+
+**问题**: `TemplateServiceImpl.create()` 在 line 71 设置 `template.setStatus(0)` (草稿)，但 `publish()` 方法只更新 `currentVersion`，从未调用 `upd.setStatus(1)`。由于 `TplTemplateMapper.xml:73` 的 `<if test="status != null">` 条件，null 的 status 不会被写入 SQL。
+
+**影响**: 
+- 前端 `STATUS_MAP` 中 status=0 显示"草稿"，status=1 显示"已发布"
+- 即使成功发布了版本，模板的 status 永远停留在 0（草稿）
+- 企业端 `report/input` 页面查询 `getTemplateList({ status: 1 })` 将返回空列表 — 企业无法看到任何已发布模板
+- 前端"发布"按钮禁用条件 `:disabled="row.status === 1"` 永远不触发，允许无限重复发布
+
+**修复**: 在 `TemplateVersionServiceImpl.publish()` 中添加 `upd.setStatus(1);`
+
+**Devin Review C-1 验证**: 确认有效。
+
+---
+
+### C-2: 编辑锁竞态条件 — check-then-write 非原子操作
+
+**文件**: `audit-service/.../template/EditLockService.java:35-59`
+
+```java
+public TplEditLock acquireLock(...) {
+    TplEditLock existing = editLockMapper.selectByKey(...);      // Step 1: SELECT
+    if (existing != null && existing.getExpireTime().isAfter(LocalDateTime.now())) {
+        if (!existing.getLockUserId().equals(currentUserId)) {
+            throw new BusinessException("当前文档正在被其他用户编辑中");
+        }
+    }
+    // Step 2: 无条件执行 INSERT OR UPDATE — 即使 Step 1 检测到其他用户持有未过期锁
+    editLockMapper.insertOrUpdate(lock);  // ON DUPLICATE KEY UPDATE 覆写 lock_user_id
+}
+```
+
+**问题**: 两步操作之间存在 TOCTOU 竞态条件：
+1. **并发场景 A**: 用户 A 和用户 B 同时调用 `acquireLock()`。两者 `selectByKey` 都返回 null（无锁），然后都执行 `insertOrUpdate`。由于 `ON DUPLICATE KEY UPDATE` 语义，最后一个写入者覆盖前一个 — 两个用户都认为自己拿到了锁。
+2. **逻辑缺陷**: 即使 `selectByKey` 返回了一个其他用户的未过期锁，代码在 throw 之前的 if 判断后面没有 `return` 或 `else` — 如果 `existing != null` 但已过期（`expireTime.isBefore(now)`），仍然会执行 `insertOrUpdate` 无条件覆写。这是正确的（过期锁可以抢占）。但真正的问题是并发场景 A，需要数据库级原子操作。
+
+**影响**: 两个企业用户可能同时编辑同一年度同一模板的填报数据，导致数据覆盖丢失。
+
+**修复建议**: 
+- 方案 A (推荐): 将 `selectByKey` + 判断 + `insertOrUpdate` 包装在 `@Transactional` 中，并使用 `SELECT ... FOR UPDATE` 实现行级锁
+- 方案 B: 在 `insertOrUpdate` 的 `ON DUPLICATE KEY UPDATE` 子句中加入条件判断（MySQL `CASE WHEN`），仅当 lock_user_id = currentUserId 或 expire_time < NOW() 时才允许更新
+
+**Devin Review C-2 验证**: 确认有效。从 ConcurrentHashMap 迁移到了数据库存储（好的改进！），但 check-then-write 的非原子模式依然存在。
+
+---
+
+### C-3: selectMaxVersion 排除软删除行导致唯一约束冲突
+
+**文件**: `audit-dao/.../mapper/template/TplTemplateVersionMapper.xml:49-53`
+
+```xml
+<select id="selectMaxVersion" resultType="java.lang.Integer">
+    SELECT MAX(version)
+    FROM tpl_template_version
+    WHERE template_id = #{templateId} AND deleted = 0
+</select>
+```
+
+**问题**: 唯一索引 `uk_template_version (template_id, version)` 不包含 `deleted` 列（因为它是在 MySQL 表级定义的，对所有行有效）。但 `selectMaxVersion` 只查 `deleted = 0` 的行。
+
+**场景**: 
+1. 模板有 v1, v2, v3 三个版本
+2. v3 被软删除 (`deleted = 1`)
+3. `selectMaxVersion` 返回 2（因为过滤了 deleted=1）
+4. `createDraftVersion` 计算 `nextVersion = 2 + 1 = 3`
+5. `INSERT INTO tpl_template_version (template_id=X, version=3)` 命中唯一约束冲突，因为原来的 v3 行虽然 deleted=1 但仍然存在
+
+**影响**: 创建新草稿版本失败，返回 500 错误。
+
+**修复**: 将 `selectMaxVersion` 改为 `SELECT MAX(version) FROM tpl_template_version WHERE template_id = #{templateId}` — 去掉 `AND deleted = 0`
+
+**Devin Review C-3 验证**: 确认有效。
+
+---
+
+## 中等问题 (Medium) — 建议合并前修复
+
+### M-1: saveDraft 控制器使用原始 Map 导致 NPE
+
+**文件**: `audit-web/.../controller/template/TemplateController.java:195-203`
+
+```java
+public R<TplSubmission> saveDraft(@RequestBody Map<String, Object> body) {
+    Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+    Long templateId = Long.parseLong(body.get("templateId").toString());     // ← NPE if missing
+    Integer auditYear = Integer.parseInt(body.get("auditYear").toString()); // ← NPE if missing
+    String submissionJson = (String) body.get("submissionJson");            // ← ClassCastException if not String
+    Integer templateVersion = Integer.parseInt(body.get("templateVersion").toString()); // ← NPE if missing
+    ...
+}
+```
+
+**问题**: 当前端请求体缺少任何一个必要字段时，`body.get("xxx")` 返回 null，`.toString()` 抛出 `NullPointerException`，导致 500 Internal Server Error 而非 400 Bad Request。
+
+**影响**: 前端开发时调试体验差（500 而不是清晰的参数校验错误信息）。
+
+**修复**: 创建一个 `SaveDraftRequest` DTO 类，使用 `@NotNull`、`@NotBlank` 注解 + `@Valid` 参数校验。这与 PR #1 中修复的参数校验模式一致。
+
+**Devin Review M-1 验证**: 确认有效。
+
+---
+
+### M-2: `ON DUPLICATE KEY UPDATE ... VALUES()` 语法在 MySQL 8.0.20+ 已废弃
+
+**文件**: `audit-dao/.../mapper/template/TplEditLockMapper.xml:51-57`
+
+```xml
+ON DUPLICATE KEY UPDATE
+    lock_user_id = VALUES(lock_user_id),
+    lock_time    = VALUES(lock_time),
+    expire_time  = VALUES(expire_time),
+    update_by    = VALUES(update_by),
+```
+
+**问题**: MySQL 8.0.20 正式废弃了 `VALUES()` 函数在 `ON DUPLICATE KEY UPDATE` 子句中的使用（[MySQL 8.0 Release Notes](https://dev.mysql.com/doc/relnotes/mysql/8.0/en/news-8-0-20.html)），推荐使用 `INSERT INTO ... AS new ON DUPLICATE KEY UPDATE col = new.col` 语法。
+
+**影响**: 当前可运行但会产生 deprecation warning。未来 MySQL 版本可能移除支持。此外，H2 的 MySQL 兼容模式对 `VALUES()` 的支持取决于版本。
+
+**修复建议**: 改用 `INSERT INTO tpl_edit_lock (...) VALUES (...) AS new ON DUPLICATE KEY UPDATE lock_user_id = new.lock_user_id, ...`
+
+---
+
+### M-3: H2 不支持 `ON DUPLICATE KEY UPDATE` — 开发环境 EditLock 功能不可用
+
+**文件**: `audit-dao/.../mapper/template/TplEditLockMapper.xml:41-58`
+
+**问题**: H2 数据库即使在 `MODE=MySQL` 下也不支持 MySQL 的 `INSERT ... ON DUPLICATE KEY UPDATE` 语法。开发环境 (H2) 下调用 `editLockMapper.insertOrUpdate()` 会抛出 SQL 语法错误。
+
+**影响**: 编辑锁的所有功能（获取锁、释放锁、检查锁）在 H2 开发环境下完全不可用，无法本地测试。
+
+**修复建议**: 使用 H2 支持的 `MERGE INTO ... KEY(...) VALUES(...)` 语法，或者提供一个 H2-specific 的 Mapper XML override。
+
+---
+
+### M-4: 模板管理端点缺少权限隔离 — 企业用户可调用管理员 API
+
+**文件**: `audit-web/.../controller/template/TemplateController.java`
+
+**问题**: `TemplateController` 的所有端点都映射在 `/template` 下，没有按角色区分。管理端操作（创建模板、修改模板、删除模板、发布版本、管理标签映射）和企业端操作（填报、编辑锁）混在同一个 Controller 中，没有任何 `userType` 校验。
+
+- 管理端 CRUD (lines 64-154): `POST /template`, `PUT /template/{id}`, `DELETE /template/{id}`, `POST /template/{id}/publish` 等 — 应仅限 userType=1 (Admin)
+- 企业端填报 (lines 178-211): `GET /submission`, `POST /submission/draft` 等 — 应仅限 userType=3 (Enterprise)  
+- 编辑锁 (lines 217-240): 依赖 `getRequiredCurrentEnterpriseId()` — 仅企业用户有 enterpriseId
+
+**影响**: 
+- 企业用户 (userType=3) 可以调用 `DELETE /template/{id}` 删除任何模板
+- 管理员 (userType=1) 调用企业端 API 会因 `getRequiredCurrentEnterpriseId()` 返回 null 而 403，但应该在路由层就拦截
+
+**修复建议**: 
+- 拆分为 `AdminTemplateController` (`/admin/template`) 和 `EnterpriseSubmissionController` (`/enterprise/submission`) 
+- 或在现有 Controller 中添加 `userType` 校验注解/拦截器
+
+---
+
+### M-5: `getCurrentUsername()` 不再抛异常 — 可能导致 null 写入审计字段
+
+**文件**: `audit-common/.../util/SecurityUtils.java:40-42`
+
+```java
+public static String getCurrentUsername() {
+    return USERNAME.get();  // ← 直接返回 null，不抛异常
+}
+```
+
+**问题**: Wave 1 之前的 `getCurrentUsername()` 在 null 时抛出 `BusinessException(401, "User not authenticated")`。重构后直接返回 null。所有使用 `SecurityUtils.getCurrentUsername()` 作为 `createBy` / `updateBy` 的地方，如果在未认证上下文（如定时任务、系统调用）中执行，会将 null 写入审计字段。
+
+**影响**: 审计追踪字段可能出现 null 值，违反了 PR #1 中建立的审计追踪要求。当前所有调用都在 Controller 层（已通过 JWT 拦截器认证），所以暂时不会触发。但如果未来添加异步任务或系统调用就会踩坑。
+
+**修复建议**: 添加一个 `getRequiredCurrentUsername()` 方法（与 `getRequiredCurrentUserId()` 对称），在所有写审计字段的场景中使用。
+
+---
+
+## 非阻塞建议 (Non-blocking)
+
+### N-1: `SpreadsheetDataExtractor.extractData()` 抛出 `RuntimeException` 而非 `BusinessException`
+
+**文件**: `audit-service/.../template/SpreadsheetDataExtractor.java:70`
+
+```java
+throw new RuntimeException("Failed to extract spreadsheet data", e);
+```
+
+应统一使用 `BusinessException`，以便全局异常处理器返回正确的 HTTP 状态码。当前 `RuntimeException` 会导致 500 而非更合适的 400/422。
+
+### N-2: `listVersions` 返回完整 `template_json` (LONGTEXT) — 性能问题
+
+**文件**: `audit-dao/.../mapper/template/TplTemplateVersionMapper.xml:32-37`
+
+`selectListByTemplateId` 使用 `Base_Column_List` 包含 `template_json` 列（LONGTEXT，可能几 MB）。版本列表查询返回所有版本的完整 JSON 内容，但前端 `listVersions` 页面并不显示 JSON 内容（只显示版本号、状态、更新说明）。
+
+**建议**: 新增一个不含 `template_json` 的列表查询，或在 `selectListByTemplateId` 中排除该列。Controller 注释 `查询模板版本列表（不含 JSON 内容）` 已说明意图，但实际 SQL 仍然包含。
+
+### N-3: 企业端工作台全部使用硬编码静态数据
+
+**文件**: `audit-ui/src/views/enterprise/dashboard/index.vue`
+
+整个页面的统计数据（综合能耗、碳排放、填报进度、待办事项）都是硬编码的 `ref([...])`，没有从后端 API 获取。这是 MVP 阶段的合理做法，但应添加 TODO 注释标记，以免后续遗忘。
+
+### N-4: 审计端工作台是空壳页面
+
+**文件**: `audit-ui/src/views/auditor/dashboard/index.vue`
+
+仅有一行标题和欢迎语，17 行代码。与企业端工作台的 226 行丰富内容相比差距较大。
+
+### N-5: 路由守卫改用 `localStorage` 直接读取 — 绕过了 Pinia Store
+
+**文件**: `audit-ui/src/router/index.ts:108-139`
+
+```typescript
+router.beforeEach(async (to, _from, next) => {
+    const token = localStorage.getItem('token')
+    // ...
+    const currentType = Number(localStorage.getItem('userType')) || null
+})
+```
+
+路由守卫不再使用 `useUserStore()` 而是直接读取 `localStorage`。虽然避免了 PR #1 中指出的循环依赖问题（`request.ts → router → stores → request.ts`），但也意味着如果 store 中的 token 被清除但 localStorage 没有同步清除，会出现不一致。
+
+### N-6: `report/upload` 页面上传功能未实现
+
+**文件**: `audit-ui/src/views/enterprise/report/upload/index.vue:22-24`
+
+```typescript
+function handleBeforeUpload(_file: File) {
+    ElMessage.info('文件上传功能将在下一迭代接入 OSS 存储，敬请期待')
+    return false  // 阻止上传
+}
+```
+
+符合迭代开发策略，页面展示已完成，实际上传功能待后续实现。仅作记录。
+
+---
+
+## 整体评价
+
+### 优点
+1. **Schema 四层对齐**: 5 张表的生产 Schema / H2 / Entity / Mapper XML 100% 对齐，Wave 0 的核心问题彻底消除
+2. **安全上下文重构**: `SecurityUtils` 从分散的 `setCurrentUserId`/`setCurrentUsername`/`setCurrentUserType` 重构为统一的 `setContext(userId, username, userType, enterpriseId)`，新增 `enterpriseId` 支持企业端隔离
+3. **JwtAuthInterceptor 重构**: 正确处理 `Integer`/`Long` 类型转换、token 黑名单检查、enterpriseId 提取
+4. **编辑锁从内存迁移到数据库**: `ConcurrentHashMap` → `tpl_edit_lock` 表，锁可以跨重启存活
+5. **企业端提交流程设计合理**: `saveDraft()` → `submit()` → `extractData()` 的三步流程设计清晰
+6. **前端 API 层与后端 Controller 完全对齐**: `template.ts` 的 22 个函数与 `TemplateController` 的 22 个端点一一对应
+7. **软删除审计追踪**: 所有 `deleteById` / `deleteByKey` / `deleteByVersionId` 方法都正确包含 `update_by` 和 `update_time`
+8. **前端代码质量**: Vue 3 Composition API + TypeScript 使用规范，Element Plus 组件使用得当
+
+### 风险点
+1. **C-1 (status 未更新)** 导致企业端完全无法看到已发布模板 — 整个填报流程不可用
+2. **C-2 (编辑锁竞态)** 在并发场景下锁保护失效
+3. **C-3 (版本号冲突)** 在有软删除版本存在时创建新版本会失败
+
+---
+
+## 合并建议
+
+**不建议合并。** 需要修复 3 个严重问题 (C-1 ~ C-3) 后再次审核。
+
+修复优先级:
+1. **C-1** (status 未更新): 一行代码修复 — `upd.setStatus(1);`
+2. **C-3** (selectMaxVersion): 一行 SQL 修复 — 去掉 `AND deleted = 0`
+3. **C-2** (编辑锁竞态): 需要设计原子操作方案
+4. **M-1** (saveDraft NPE): 创建 DTO + `@Valid`
+5. **M-2 + M-3** (VALUES deprecated + H2 兼容): 改用兼容语法
+6. **M-4** (权限隔离): 添加 userType 校验
+7. **M-5** (getCurrentUsername null): 添加 getRequiredCurrentUsername
+
+C-1 和 C-3 都是一行修复，C-2 需要更多设计工作。M-1 ~ M-5 建议合并前修复但不强制阻塞。
