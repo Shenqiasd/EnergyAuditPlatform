@@ -6,6 +6,19 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
+  // SpreadJS is loaded via CDN (index.html) and exposed on window.GC.
+  // Externalising these names prevents Vite from bundling them and
+  // ensures the CDN globals are resolved at runtime.
+  build: {
+    rollupOptions: {
+      external: [
+        '@grapecity/spread-sheets',
+        '@grapecity/spread-sheets-designer',
+        '@grapecity/spread-sheets-designer-resources-en',
+        '@grapecity/spread-excelio',
+      ],
+    },
+  },
   plugins: [
     vue(),
     AutoImport({
