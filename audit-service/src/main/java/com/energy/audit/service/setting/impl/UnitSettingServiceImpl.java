@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * Unit setting service implementation
+ * Unit setting service implementation — all mutations are tenant-scoped.
  */
 @Service
 public class UnitSettingServiceImpl implements UnitSettingService {
@@ -31,39 +31,42 @@ public class UnitSettingServiceImpl implements UnitSettingService {
         this.energyMapper = energyMapper;
     }
 
+    /**
+     * Tenant-safe getById: verifies that the record belongs to the current enterprise.
+     */
     @Override
-    public BsUnit getById(Long id) {
-        BsUnit unit = unitMapper.selectById(id);
+    public BsUnit getByIdForEnterprise(Long id, Long enterpriseId) {
+        BsUnit unit = unitMapper.selectByIdAndEnterprise(id, enterpriseId);
         if (unit == null) {
-            throw new BusinessException("Unit not found: " + id);
+            throw new BusinessException("Unit not found or access denied: " + id);
         }
         return unit;
     }
 
     @Override
     public List<BsUnit> list(BsUnit query) {
-        if (query.getEnterpriseId() == null) {
-            query.setEnterpriseId(SecurityUtils.getCurrentEnterpriseId());
-        }
+        // Always enforce current enterprise — ignore any client-supplied enterpriseId
+        query.setEnterpriseId(SecurityUtils.getRequiredCurrentEnterpriseId());
         return unitMapper.selectList(query);
     }
 
     @Override
     @Transactional
     public void create(BsUnit unit) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         String operator = SecurityUtils.getCurrentUsername();
-        Long enterpriseId = SecurityUtils.getCurrentEnterpriseId();
         unit.setCreateBy(operator);
         unit.setUpdateBy(operator);
-        if (unit.getEnterpriseId() == null) {
-            unit.setEnterpriseId(enterpriseId);
-        }
+        // Always derive enterpriseId from JWT — never trust caller
+        unit.setEnterpriseId(enterpriseId);
         unitMapper.insert(unit);
     }
 
     @Override
     public void update(BsUnit unit) {
-        getById(unit.getId());
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Ownership check
+        getByIdForEnterprise(unit.getId(), enterpriseId);
         unit.setUpdateBy(SecurityUtils.getCurrentUsername());
         unitMapper.updateById(unit);
     }
@@ -71,7 +74,9 @@ public class UnitSettingServiceImpl implements UnitSettingService {
     @Override
     @Transactional
     public void delete(Long id) {
-        getById(id);
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Ownership check
+        getByIdForEnterprise(id, enterpriseId);
         String operator = SecurityUtils.getCurrentUsername();
         unitMapper.deleteById(id, operator);
         unitEnergyMapper.deleteAllByUnitId(id, operator);
@@ -79,15 +84,20 @@ public class UnitSettingServiceImpl implements UnitSettingService {
 
     @Override
     public List<BsUnitEnergy> getUnitEnergies(Long unitId) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Verify caller owns this unit before returning its energy list
+        getByIdForEnterprise(unitId, enterpriseId);
         return unitEnergyMapper.selectByUnitId(unitId);
     }
 
     @Override
     @Transactional
     public void addUnitEnergy(Long unitId, Long energyId) {
-        getById(unitId);
-        if (energyMapper.selectById(energyId) == null) {
-            throw new BusinessException("Energy not found: " + energyId);
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Both unit and energy must belong to current enterprise
+        getByIdForEnterprise(unitId, enterpriseId);
+        if (energyMapper.selectByIdAndEnterprise(energyId, enterpriseId) == null) {
+            throw new BusinessException("Energy not found or access denied: " + energyId);
         }
         String operator = SecurityUtils.getCurrentUsername();
         BsUnitEnergy ue = new BsUnitEnergy();
@@ -101,6 +111,9 @@ public class UnitSettingServiceImpl implements UnitSettingService {
     @Override
     @Transactional
     public void removeUnitEnergy(Long unitId, Long energyId) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Verify caller owns this unit
+        getByIdForEnterprise(unitId, enterpriseId);
         unitEnergyMapper.deleteByUnitIdAndEnergyId(unitId, energyId, SecurityUtils.getCurrentUsername());
     }
 }

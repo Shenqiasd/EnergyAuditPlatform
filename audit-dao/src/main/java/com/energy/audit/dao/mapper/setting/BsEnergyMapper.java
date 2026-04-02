@@ -14,6 +14,9 @@ public interface BsEnergyMapper {
 
     BsEnergy selectById(@Param("id") Long id);
 
+    /** Tenant-scoped lookup — returns null when id does not belong to given enterprise */
+    BsEnergy selectByIdAndEnterprise(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
+
     List<BsEnergy> selectList(BsEnergy query);
 
     int insert(BsEnergy energy);

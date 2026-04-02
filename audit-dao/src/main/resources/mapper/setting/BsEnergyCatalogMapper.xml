@@ -52,6 +52,13 @@
         ORDER BY sort_order, category, id
     </select>
 
+    <select id="selectByCategory" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM bs_energy_catalog
+        WHERE category = #{category} AND is_active = 1 AND deleted = 0
+        ORDER BY sort_order, id
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO bs_energy_catalog (
             name, category, measurement_unit, equivalent_value, equal_value,

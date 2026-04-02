@@ -2,6 +2,7 @@ package com.energy.audit.web.controller.setting;
 
 import com.energy.audit.common.result.PageResult;
 import com.energy.audit.common.result.R;
+import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.model.entity.setting.BsUnit;
 import com.energy.audit.model.entity.setting.BsUnitEnergy;
 import com.energy.audit.service.setting.UnitSettingService;
@@ -35,10 +36,11 @@ public class UnitSettingController {
         this.unitSettingService = unitSettingService;
     }
 
-    @Operation(summary = "Get unit by ID")
+    @Operation(summary = "Get unit by ID (tenant-scoped)")
     @GetMapping("/{id}")
     public R<BsUnit> getById(@PathVariable Long id) {
-        return R.ok(unitSettingService.getById(id));
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        return R.ok(unitSettingService.getByIdForEnterprise(id, enterpriseId));
     }
 
     @Operation(summary = "List units with pagination")

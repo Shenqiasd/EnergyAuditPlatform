@@ -28,6 +28,12 @@
         WHERE id = #{id} AND deleted = 0
     </select>
 
+    <select id="selectByIdAndEnterprise" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM bs_unit
+        WHERE id = #{id} AND enterprise_id = #{enterpriseId} AND deleted = 0
+    </select>
+
     <select id="selectList" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM bs_unit

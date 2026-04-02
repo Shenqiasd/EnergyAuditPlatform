@@ -43,7 +43,7 @@ export function removeEnergy(id: number): Promise<void> {
 
 /** Import energy types from global catalog (batch) */
 export function importFromCatalog(catalogIds: number[]): Promise<void> {
-  return request.post('/setting/energy/import-catalog', { catalogIds })
+  return request.post('/setting/energy/import-from-catalog', { catalogIds })
 }
 
 // ============================================================

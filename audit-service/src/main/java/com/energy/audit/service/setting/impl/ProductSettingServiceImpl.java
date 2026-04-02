@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Product setting service implementation
+ * Product setting service implementation — all mutations are tenant-scoped.
  */
 @Service
 public class ProductSettingServiceImpl implements ProductSettingService {
@@ -21,45 +21,50 @@ public class ProductSettingServiceImpl implements ProductSettingService {
         this.productMapper = productMapper;
     }
 
+    /**
+     * Tenant-safe getById: verifies that the record belongs to the current enterprise.
+     */
     @Override
-    public BsProduct getById(Long id) {
-        BsProduct product = productMapper.selectById(id);
+    public BsProduct getByIdForEnterprise(Long id, Long enterpriseId) {
+        BsProduct product = productMapper.selectByIdAndEnterprise(id, enterpriseId);
         if (product == null) {
-            throw new BusinessException("Product not found: " + id);
+            throw new BusinessException("Product not found or access denied: " + id);
         }
         return product;
     }
 
     @Override
     public List<BsProduct> list(BsProduct query) {
-        if (query.getEnterpriseId() == null) {
-            query.setEnterpriseId(SecurityUtils.getCurrentEnterpriseId());
-        }
+        // Always enforce current enterprise — ignore any client-supplied enterpriseId
+        query.setEnterpriseId(SecurityUtils.getRequiredCurrentEnterpriseId());
         return productMapper.selectList(query);
     }
 
     @Override
     public void create(BsProduct product) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         String operator = SecurityUtils.getCurrentUsername();
-        Long enterpriseId = SecurityUtils.getCurrentEnterpriseId();
         product.setCreateBy(operator);
         product.setUpdateBy(operator);
-        if (product.getEnterpriseId() == null) {
-            product.setEnterpriseId(enterpriseId);
-        }
+        // Always derive enterpriseId from JWT — never trust caller
+        product.setEnterpriseId(enterpriseId);
         productMapper.insert(product);
     }
 
     @Override
     public void update(BsProduct product) {
-        getById(product.getId());
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Ownership check
+        getByIdForEnterprise(product.getId(), enterpriseId);
         product.setUpdateBy(SecurityUtils.getCurrentUsername());
         productMapper.updateById(product);
     }
 
     @Override
     public void delete(Long id) {
-        getById(id);
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Ownership check
+        getByIdForEnterprise(id, enterpriseId);
         productMapper.deleteById(id, SecurityUtils.getCurrentUsername());
     }
 }

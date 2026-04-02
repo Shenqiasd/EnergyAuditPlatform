@@ -16,6 +16,9 @@ public interface BsEnergyCatalogMapper {
 
     List<BsEnergyCatalog> selectList(BsEnergyCatalog query);
 
+    /** Fetch all active catalog entries for a given category (for admin grouping / import-picker) */
+    List<BsEnergyCatalog> selectByCategory(@Param("category") String category);
+
     int insert(BsEnergyCatalog catalog);
 
     int updateById(BsEnergyCatalog catalog);

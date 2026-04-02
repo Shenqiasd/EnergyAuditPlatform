@@ -37,5 +37,5 @@ export function getEnterpriseSetting(): Promise<EnterpriseSetting | null> {
 
 /** Create or update enterprise setting (upsert) */
 export function upsertEnterpriseSetting(data: Partial<EnterpriseSetting>): Promise<void> {
-  return request.post('/enterprise/setting', data)
+  return request.put('/enterprise/setting', data)
 }

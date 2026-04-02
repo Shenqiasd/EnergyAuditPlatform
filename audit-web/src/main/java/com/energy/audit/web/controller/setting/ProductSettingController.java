@@ -2,6 +2,7 @@ package com.energy.audit.web.controller.setting;
 
 import com.energy.audit.common.result.PageResult;
 import com.energy.audit.common.result.R;
+import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.model.entity.setting.BsProduct;
 import com.energy.audit.service.setting.ProductSettingService;
 import com.github.pagehelper.PageHelper;
@@ -34,10 +35,11 @@ public class ProductSettingController {
         this.productSettingService = productSettingService;
     }
 
-    @Operation(summary = "Get product by ID")
+    @Operation(summary = "Get product by ID (tenant-scoped)")
     @GetMapping("/{id}")
     public R<BsProduct> getById(@PathVariable Long id) {
-        return R.ok(productSettingService.getById(id));
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        return R.ok(productSettingService.getByIdForEnterprise(id, enterpriseId));
     }
 
     @Operation(summary = "List products with pagination")

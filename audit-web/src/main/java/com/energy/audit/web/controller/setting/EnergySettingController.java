@@ -2,6 +2,8 @@ package com.energy.audit.web.controller.setting;
 
 import com.energy.audit.common.result.PageResult;
 import com.energy.audit.common.result.R;
+import com.energy.audit.common.util.SecurityUtils;
+import com.energy.audit.model.dto.ImportCatalogRequest;
 import com.energy.audit.model.entity.setting.BsEnergy;
 import com.energy.audit.service.setting.EnergySettingService;
 import com.github.pagehelper.PageHelper;
@@ -34,10 +36,11 @@ public class EnergySettingController {
         this.energySettingService = energySettingService;
     }
 
-    @Operation(summary = "Get energy setting by ID")
+    @Operation(summary = "Get energy setting by ID (tenant-scoped)")
     @GetMapping("/{id}")
     public R<BsEnergy> getById(@PathVariable Long id) {
-        return R.ok(energySettingService.getById(id));
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        return R.ok(energySettingService.getByIdForEnterprise(id, enterpriseId));
     }
 
     @Operation(summary = "List energy settings with pagination")
@@ -74,9 +77,9 @@ public class EnergySettingController {
     }
 
     @Operation(summary = "Import energy types from global catalog")
-    @PostMapping("/import-catalog")
-    public R<Void> importFromCatalog(@RequestBody List<Long> catalogIds) {
-        energySettingService.importFromCatalog(catalogIds);
+    @PostMapping("/import-from-catalog")
+    public R<Void> importFromCatalog(@RequestBody ImportCatalogRequest request) {
+        energySettingService.importFromCatalog(request.getCatalogIds());
         return R.ok();
     }
 }

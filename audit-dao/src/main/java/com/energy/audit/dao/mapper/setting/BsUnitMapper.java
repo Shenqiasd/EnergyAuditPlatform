@@ -14,6 +14,9 @@ public interface BsUnitMapper {
 
     BsUnit selectById(@Param("id") Long id);
 
+    /** Tenant-scoped lookup — returns null when id does not belong to given enterprise */
+    BsUnit selectByIdAndEnterprise(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
+
     List<BsUnit> selectList(BsUnit query);
 
     int insert(BsUnit unit);
