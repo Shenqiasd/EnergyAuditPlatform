@@ -90,6 +90,10 @@ public class EnergySettingServiceImpl implements EnergySettingService {
                 log.warn("Catalog entry {} not found, skipping", catalogId);
                 continue;
             }
+            if (energyMapper.selectByEnterpriseAndName(enterpriseId, catalog.getName()) != null) {
+                log.warn("Energy '{}' already exists for enterprise {}, skipping", catalog.getName(), enterpriseId);
+                continue;
+            }
             BsEnergy energy = new BsEnergy();
             energy.setEnterpriseId(enterpriseId);
             energy.setName(catalog.getName());

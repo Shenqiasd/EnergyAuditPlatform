@@ -78,7 +78,10 @@ public class EnergySettingController {
 
     @Operation(summary = "Import energy types from global catalog")
     @PostMapping("/import-from-catalog")
-    public R<Void> importFromCatalog(@RequestBody ImportCatalogRequest request) {
+    public R<Void> importFromCatalog(@RequestBody(required = false) ImportCatalogRequest request) {
+        if (request == null || request.getCatalogIds() == null || request.getCatalogIds().isEmpty()) {
+            return R.ok();
+        }
         energySettingService.importFromCatalog(request.getCatalogIds());
         return R.ok();
     }

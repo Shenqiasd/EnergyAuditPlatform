@@ -16,6 +16,8 @@ public interface BsEnergyMapper {
 
     BsEnergy selectByIdAndEnterprise(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
 
+    BsEnergy selectByEnterpriseAndName(@Param("enterpriseId") Long enterpriseId, @Param("name") String name);
+
     List<BsEnergy> selectList(BsEnergy query);
 
     int insert(BsEnergy energy);

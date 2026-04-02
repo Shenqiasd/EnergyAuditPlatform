@@ -42,6 +42,13 @@
         WHERE id = #{id} AND enterprise_id = #{enterpriseId} AND deleted = 0
     </select>
 
+    <select id="selectByEnterpriseAndName" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM bs_energy
+        WHERE enterprise_id = #{enterpriseId} AND name = #{name} AND deleted = 0
+        LIMIT 1
+    </select>
+
     <select id="selectList" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM bs_energy
