@@ -4,69 +4,63 @@
 <mapper namespace="com.energy.audit.dao.mapper.enterprise.EntEnterpriseMapper">
 
     <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.enterprise.EntEnterprise">
-        <id     column="id"              property="id"/>
-        <result column="enterprise_code" property="enterpriseCode"/>
-        <result column="enterprise_name" property="enterpriseName"/>
-        <result column="credit_code"     property="creditCode"/>
-        <result column="industry_code"   property="industryCode"/>
-        <result column="province_code"   property="provinceCode"/>
-        <result column="city_code"       property="cityCode"/>
-        <result column="address"         property="address"/>
-        <result column="contact_name"    property="contactName"/>
-        <result column="contact_phone"   property="contactPhone"/>
-        <result column="audit_year"      property="auditYear"/>
-        <result column="status"          property="status"/>
-        <result column="create_time"     property="createTime"/>
-        <result column="update_time"     property="updateTime"/>
-        <result column="is_deleted"      property="isDeleted"/>
+        <id     column="id"             property="id"/>
+        <result column="name"           property="name"/>
+        <result column="credit_code"    property="creditCode"/>
+        <result column="industry_type"  property="industryType"/>
+        <result column="province"       property="province"/>
+        <result column="city"           property="city"/>
+        <result column="district"       property="district"/>
+        <result column="address"        property="address"/>
+        <result column="contact_person" property="contactPerson"/>
+        <result column="contact_phone"  property="contactPhone"/>
+        <result column="contact_email"  property="contactEmail"/>
+        <result column="status"         property="status"/>
+        <result column="remark"         property="remark"/>
+        <result column="create_by"      property="createBy"/>
+        <result column="create_time"    property="createTime"/>
+        <result column="update_by"      property="updateBy"/>
+        <result column="update_time"    property="updateTime"/>
+        <result column="deleted"        property="deleted"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, enterprise_code, enterprise_name, credit_code, industry_code,
-        province_code, city_code, address, contact_name, contact_phone,
-        audit_year, status, create_time, update_time, is_deleted
+        id, name, credit_code, industry_type, province, city, district, address,
+        contact_person, contact_phone, contact_email, status, remark,
+        create_by, create_time, update_by, update_time, deleted
     </sql>
 
     <select id="selectById" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM ent_enterprise
-        WHERE id = #{id} AND is_deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </select>
 
-    <select id="selectByEnterpriseCode" resultMap="BaseResultMap">
+    <select id="selectList" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM ent_enterprise
-        WHERE enterprise_code = #{enterpriseCode} AND is_deleted = 0
-    </select>
-
-    <select id="selectPage" resultMap="BaseResultMap">
-        SELECT <include refid="Base_Column_List"/>
-        FROM ent_enterprise
-        WHERE is_deleted = 0
-        <if test="enterpriseName != null and enterpriseName != ''">
-            AND enterprise_name LIKE CONCAT('%', #{enterpriseName}, '%')
+        WHERE deleted = 0
+        <if test="name != null and name != ''">
+            AND name LIKE CONCAT('%', #{name}, '%')
         </if>
-        <if test="industryCode != null and industryCode != ''">
-            AND industry_code = #{industryCode}
+        <if test="industryType != null and industryType != ''">
+            AND industry_type = #{industryType}
         </if>
         <if test="status != null">
             AND status = #{status}
-        </if>
-        <if test="auditYear != null">
-            AND audit_year = #{auditYear}
         </if>
         ORDER BY create_time DESC
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO ent_enterprise (
-            enterprise_code, enterprise_name, credit_code, industry_code,
-            province_code, city_code, address, contact_name, contact_phone,
-            audit_year, status, create_time, update_time, is_deleted
+            name, credit_code, industry_type, province, city, district, address,
+            contact_person, contact_phone, contact_email, status, remark,
+            create_by, create_time, update_by, update_time, deleted
         ) VALUES (
-            #{enterpriseCode}, #{enterpriseName}, #{creditCode}, #{industryCode},
-            #{provinceCode}, #{cityCode}, #{address}, #{contactName}, #{contactPhone},
-            #{auditYear}, #{status}, NOW(), NOW(), 0
+            #{name}, #{creditCode}, #{industryType}, #{province}, #{city}, #{district}, #{address},
+            #{contactPerson}, #{contactPhone}, #{contactEmail}, #{status}, #{remark},
+            #{createBy}, NOW(), #{updateBy}, NOW(), 0
         )
     </insert>
 
@@ -74,21 +68,26 @@
         UPDATE ent_enterprise
         <set>
             update_time = NOW(),
-            <if test="enterpriseName != null">enterprise_name = #{enterpriseName},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            <if test="name != null">name = #{name},</if>
             <if test="creditCode != null">credit_code = #{creditCode},</if>
-            <if test="industryCode != null">industry_code = #{industryCode},</if>
-            <if test="provinceCode != null">province_code = #{provinceCode},</if>
-            <if test="cityCode != null">city_code = #{cityCode},</if>
+            <if test="industryType != null">industry_type = #{industryType},</if>
+            <if test="province != null">province = #{province},</if>
+            <if test="city != null">city = #{city},</if>
+            <if test="district != null">district = #{district},</if>
             <if test="address != null">address = #{address},</if>
-            <if test="contactName != null">contact_name = #{contactName},</if>
+            <if test="contactPerson != null">contact_person = #{contactPerson},</if>
             <if test="contactPhone != null">contact_phone = #{contactPhone},</if>
+            <if test="contactEmail != null">contact_email = #{contactEmail},</if>
             <if test="status != null">status = #{status},</if>
+            <if test="remark != null">remark = #{remark},</if>
         </set>
-        WHERE id = #{id} AND is_deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </update>
 
     <update id="deleteById">
-        UPDATE ent_enterprise SET is_deleted = 1, update_time = NOW()
+        UPDATE ent_enterprise
+        SET deleted = 1, update_time = NOW()
         WHERE id = #{id}
     </update>
 

@@ -4,48 +4,47 @@
 <mapper namespace="com.energy.audit.dao.mapper.template.TplTemplateMapper">
 
     <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.template.TplTemplate">
-        <id     column="id"              property="id"/>
-        <result column="template_code"   property="templateCode"/>
-        <result column="template_name"   property="templateName"/>
-        <result column="template_type"   property="templateType"/>
-        <result column="industry_code"   property="industryCode"/>
-        <result column="audit_year"      property="auditYear"/>
-        <result column="file_path"       property="filePath"/>
-        <result column="description"     property="description"/>
-        <result column="status"          property="status"/>
-        <result column="create_by"       property="createBy"/>
-        <result column="create_time"     property="createTime"/>
-        <result column="update_time"     property="updateTime"/>
-        <result column="is_deleted"      property="isDeleted"/>
+        <id     column="id"               property="id"/>
+        <result column="template_code"    property="templateCode"/>
+        <result column="template_name"    property="templateName"/>
+        <result column="category"         property="category"/>
+        <result column="description"      property="description"/>
+        <result column="current_version"  property="currentVersion"/>
+        <result column="status"           property="status"/>
+        <result column="remark"           property="remark"/>
+        <result column="create_by"        property="createBy"/>
+        <result column="create_time"      property="createTime"/>
+        <result column="update_by"        property="updateBy"/>
+        <result column="update_time"      property="updateTime"/>
+        <result column="deleted"          property="deleted"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, template_code, template_name, template_type, industry_code,
-        audit_year, file_path, description, status, create_by,
-        create_time, update_time, is_deleted
+        id, template_code, template_name, category, description, current_version, status, remark,
+        create_by, create_time, update_by, update_time, deleted
     </sql>
 
     <select id="selectById" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM tpl_template
-        WHERE id = #{id} AND is_deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </select>
 
-    <select id="selectPage" resultMap="BaseResultMap">
+    <select id="selectByCode" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM tpl_template
-        WHERE is_deleted = 0
+        WHERE template_code = #{templateCode} AND deleted = 0
+    </select>
+
+    <select id="selectList" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM tpl_template
+        WHERE deleted = 0
         <if test="templateName != null and templateName != ''">
             AND template_name LIKE CONCAT('%', #{templateName}, '%')
         </if>
-        <if test="templateType != null and templateType != ''">
-            AND template_type = #{templateType}
-        </if>
-        <if test="industryCode != null and industryCode != ''">
-            AND industry_code = #{industryCode}
-        </if>
-        <if test="auditYear != null">
-            AND audit_year = #{auditYear}
+        <if test="category != null and category != ''">
+            AND category = #{category}
         </if>
         <if test="status != null">
             AND status = #{status}
@@ -53,24 +52,13 @@
         ORDER BY create_time DESC
     </select>
 
-    <select id="selectByIndustryAndYear" resultMap="BaseResultMap">
-        SELECT <include refid="Base_Column_List"/>
-        FROM tpl_template
-        WHERE industry_code = #{industryCode}
-          AND audit_year = #{auditYear}
-          AND is_deleted = 0 AND status = 1
-        ORDER BY template_type, template_code
-    </select>
-
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO tpl_template (
-            template_code, template_name, template_type, industry_code,
-            audit_year, file_path, description, status, create_by,
-            create_time, update_time, is_deleted
+            template_code, template_name, category, description, current_version, status, remark,
+            create_by, create_time, update_by, update_time, deleted
         ) VALUES (
-            #{templateCode}, #{templateName}, #{templateType}, #{industryCode},
-            #{auditYear}, #{filePath}, #{description}, #{status}, #{createBy},
-            NOW(), NOW(), 0
+            #{templateCode}, #{templateName}, #{category}, #{description}, #{currentVersion}, #{status}, #{remark},
+            #{createBy}, NOW(), #{updateBy}, NOW(), 0
         )
     </insert>
 
@@ -78,19 +66,20 @@
         UPDATE tpl_template
         <set>
             update_time = NOW(),
+            <if test="updateBy != null">update_by = #{updateBy},</if>
             <if test="templateName != null">template_name = #{templateName},</if>
-            <if test="templateType != null">template_type = #{templateType},</if>
-            <if test="industryCode != null">industry_code = #{industryCode},</if>
-            <if test="auditYear != null">audit_year = #{auditYear},</if>
-            <if test="filePath != null">file_path = #{filePath},</if>
+            <if test="category != null">category = #{category},</if>
             <if test="description != null">description = #{description},</if>
+            <if test="currentVersion != null">current_version = #{currentVersion},</if>
             <if test="status != null">status = #{status},</if>
+            <if test="remark != null">remark = #{remark},</if>
         </set>
-        WHERE id = #{id} AND is_deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </update>
 
     <update id="deleteById">
-        UPDATE tpl_template SET is_deleted = 1, update_time = NOW()
+        UPDATE tpl_template
+        SET deleted = 1, update_time = NOW()
         WHERE id = #{id}
     </update>
 

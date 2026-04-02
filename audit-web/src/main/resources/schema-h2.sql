@@ -1,40 +1,44 @@
 -- H2 dev schema (MODE=MySQL compatible)
--- Core tables needed for development and CI.
+-- Columns and names MUST match the MyBatis mapper XMLs exactly.
 -- Production uses MySQL with the full 55-table schema in /sql/
 
--- System user table
+-- System user table  (matches SysUserMapper.xml)
 CREATE TABLE IF NOT EXISTS sys_user (
-    id              BIGINT       NOT NULL AUTO_INCREMENT,
-    username        VARCHAR(64)  NOT NULL,
-    password        VARCHAR(128) NOT NULL,
-    real_name       VARCHAR(64),
-    phone           VARCHAR(20),
-    email           VARCHAR(128),
-    user_type       TINYINT      NOT NULL DEFAULT 0 COMMENT '0=enterprise,1=admin,2=auditor',
-    enterprise_id   BIGINT,
-    status          TINYINT      NOT NULL DEFAULT 1,
-    password_changed TINYINT     NOT NULL DEFAULT 0,
+    id               BIGINT       NOT NULL AUTO_INCREMENT,
+    username         VARCHAR(64)  NOT NULL,
+    password         VARCHAR(128) NOT NULL,
+    real_name        VARCHAR(64),
+    phone            VARCHAR(20),
+    email            VARCHAR(128),
+    user_type        TINYINT      NOT NULL DEFAULT 0,
+    enterprise_id    BIGINT,
+    status           TINYINT      NOT NULL DEFAULT 1,
     last_login_time  DATETIME,
-    create_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_deleted      TINYINT      NOT NULL DEFAULT 0,
+    password_changed TINYINT      NOT NULL DEFAULT 0,
+    create_by        VARCHAR(64),
+    create_time      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by        VARCHAR(64),
+    update_time      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted          TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uk_username (username)
 );
 
--- System role table
+-- System role table  (matches SysRoleMapper.xml)
 CREATE TABLE IF NOT EXISTS sys_role (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
-    role_code   VARCHAR(64)  NOT NULL,
     role_name   VARCHAR(128) NOT NULL,
-    user_type   TINYINT      NOT NULL DEFAULT 0,
-    description VARCHAR(255),
+    role_key    VARCHAR(64)  NOT NULL,
+    order_num   INT          DEFAULT 0,
     status      TINYINT      NOT NULL DEFAULT 1,
+    remark      VARCHAR(255),
+    create_by   VARCHAR(64),
     create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by   VARCHAR(64),
     update_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_deleted  TINYINT      NOT NULL DEFAULT 0,
+    deleted     TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_role_code (role_code)
+    UNIQUE KEY uk_role_key (role_key)
 );
 
 -- User-role mapping
@@ -46,92 +50,102 @@ CREATE TABLE IF NOT EXISTS sys_user_role (
     UNIQUE KEY uk_user_role (user_id, role_id)
 );
 
--- Enterprise table
+-- Enterprise table  (matches EntEnterpriseMapper.xml)
 CREATE TABLE IF NOT EXISTS ent_enterprise (
     id              BIGINT       NOT NULL AUTO_INCREMENT,
-    enterprise_code VARCHAR(64)  NOT NULL,
-    enterprise_name VARCHAR(255) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
     credit_code     VARCHAR(64),
-    industry_code   VARCHAR(32),
-    province_code   VARCHAR(16),
-    city_code       VARCHAR(16),
+    industry_type   VARCHAR(32),
+    province        VARCHAR(64),
+    city            VARCHAR(64),
+    district        VARCHAR(64),
     address         VARCHAR(512),
-    contact_name    VARCHAR(64),
+    contact_person  VARCHAR(64),
     contact_phone   VARCHAR(20),
-    audit_year      INT          NOT NULL DEFAULT 2024,
+    contact_email   VARCHAR(128),
     status          TINYINT      NOT NULL DEFAULT 1,
+    remark          VARCHAR(512),
+    create_by       VARCHAR(64),
     create_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by       VARCHAR(64),
     update_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_deleted      TINYINT      NOT NULL DEFAULT 0,
-    PRIMARY KEY (id),
-    UNIQUE KEY uk_enterprise_code (enterprise_code)
+    deleted         TINYINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
 );
 
--- Energy type base data
+-- Energy type base data  (matches BsEnergyMapper.xml)
 CREATE TABLE IF NOT EXISTS bs_energy (
-    id           BIGINT         NOT NULL AUTO_INCREMENT,
-    energy_code  VARCHAR(32)    NOT NULL,
-    energy_name  VARCHAR(128)   NOT NULL,
-    energy_unit  VARCHAR(32),
-    convert_coef DECIMAL(18, 6) DEFAULT 1.0,
-    co2_factor   DECIMAL(18, 6) DEFAULT 0.0,
-    category     VARCHAR(32),
-    sort_order   INT            DEFAULT 0,
-    status       TINYINT        NOT NULL DEFAULT 1,
-    create_time  DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time  DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_deleted   TINYINT        NOT NULL DEFAULT 0,
+    id                BIGINT         NOT NULL AUTO_INCREMENT,
+    energy_code       VARCHAR(32)    NOT NULL,
+    energy_name       VARCHAR(128)   NOT NULL,
+    category          VARCHAR(32),
+    unit              VARCHAR(32),
+    conversion_factor DECIMAL(18, 6) DEFAULT 1.0,
+    carbon_factor     DECIMAL(18, 6) DEFAULT 0.0,
+    order_num         INT            DEFAULT 0,
+    status            TINYINT        NOT NULL DEFAULT 1,
+    create_by         VARCHAR(64),
+    create_time       DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by         VARCHAR(64),
+    update_time       DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted           TINYINT        NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uk_energy_code (energy_code)
 );
 
--- Product base data
+-- Product base data  (matches BsProductMapper.xml)
 CREATE TABLE IF NOT EXISTS bs_product (
-    id            BIGINT       NOT NULL AUTO_INCREMENT,
-    product_code  VARCHAR(64)  NOT NULL,
-    product_name  VARCHAR(255) NOT NULL,
-    product_unit  VARCHAR(32),
-    industry_code VARCHAR(32),
-    sort_order    INT          DEFAULT 0,
-    status        TINYINT      NOT NULL DEFAULT 1,
-    create_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_deleted    TINYINT      NOT NULL DEFAULT 0,
+    id           BIGINT       NOT NULL AUTO_INCREMENT,
+    product_code VARCHAR(64)  NOT NULL,
+    product_name VARCHAR(255) NOT NULL,
+    category     VARCHAR(32),
+    unit         VARCHAR(32),
+    order_num    INT          DEFAULT 0,
+    status       TINYINT      NOT NULL DEFAULT 1,
+    remark       VARCHAR(512),
+    create_by    VARCHAR(64),
+    create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by    VARCHAR(64),
+    update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted      TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uk_product_code (product_code)
 );
 
--- Unit base data
+-- Unit base data  (matches BsUnitMapper.xml)
 CREATE TABLE IF NOT EXISTS bs_unit (
-    id          BIGINT      NOT NULL AUTO_INCREMENT,
-    unit_code   VARCHAR(32) NOT NULL,
-    unit_name   VARCHAR(128) NOT NULL,
-    unit_symbol VARCHAR(32),
-    category    VARCHAR(32),
-    sort_order  INT         DEFAULT 0,
-    status      TINYINT     NOT NULL DEFAULT 1,
-    create_time DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_deleted  TINYINT     NOT NULL DEFAULT 0,
+    id                BIGINT         NOT NULL AUTO_INCREMENT,
+    unit_code         VARCHAR(32)    NOT NULL,
+    unit_name         VARCHAR(128)   NOT NULL,
+    symbol            VARCHAR(32),
+    category          VARCHAR(32),
+    conversion_factor DECIMAL(18, 6) DEFAULT 1.0,
+    order_num         INT            DEFAULT 0,
+    status            TINYINT        NOT NULL DEFAULT 1,
+    create_by         VARCHAR(64),
+    create_time       DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by         VARCHAR(64),
+    update_time       DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted           TINYINT        NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uk_unit_code (unit_code)
 );
 
--- Template table
+-- Template table  (matches TplTemplateMapper.xml)
 CREATE TABLE IF NOT EXISTS tpl_template (
-    id            BIGINT       NOT NULL AUTO_INCREMENT,
-    template_code VARCHAR(64)  NOT NULL,
-    template_name VARCHAR(255) NOT NULL,
-    template_type VARCHAR(32),
-    industry_code VARCHAR(32),
-    audit_year    INT,
-    file_path     VARCHAR(512),
-    description   VARCHAR(512),
-    status        TINYINT      NOT NULL DEFAULT 1,
-    create_by     BIGINT,
-    create_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    is_deleted    TINYINT      NOT NULL DEFAULT 0,
+    id               BIGINT       NOT NULL AUTO_INCREMENT,
+    template_code    VARCHAR(64)  NOT NULL,
+    template_name    VARCHAR(255) NOT NULL,
+    category         VARCHAR(32),
+    description      VARCHAR(512),
+    current_version  VARCHAR(32),
+    status           TINYINT      NOT NULL DEFAULT 1,
+    remark           VARCHAR(512),
+    create_by        VARCHAR(64),
+    create_time      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by        VARCHAR(64),
+    update_time      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted          TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uk_template_code (template_code)
 );

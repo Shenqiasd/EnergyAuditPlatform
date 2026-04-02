@@ -5,64 +5,52 @@
 
     <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.system.SysRole">
         <id     column="id"          property="id"/>
-        <result column="role_code"   property="roleCode"/>
         <result column="role_name"   property="roleName"/>
-        <result column="user_type"   property="userType"/>
-        <result column="description" property="description"/>
+        <result column="role_key"    property="roleKey"/>
+        <result column="order_num"   property="orderNum"/>
         <result column="status"      property="status"/>
+        <result column="remark"      property="remark"/>
+        <result column="create_by"   property="createBy"/>
         <result column="create_time" property="createTime"/>
+        <result column="update_by"   property="updateBy"/>
         <result column="update_time" property="updateTime"/>
-        <result column="is_deleted"  property="isDeleted"/>
+        <result column="deleted"     property="deleted"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, role_code, role_name, user_type, description,
-        status, create_time, update_time, is_deleted
+        id, role_name, role_key, order_num, status, remark,
+        create_by, create_time, update_by, update_time, deleted
     </sql>
 
     <select id="selectById" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM sys_role
-        WHERE id = #{id} AND is_deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </select>
 
-    <select id="selectByRoleCode" resultMap="BaseResultMap">
+    <select id="selectList" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM sys_role
-        WHERE role_code = #{roleCode} AND is_deleted = 0
-    </select>
-
-    <select id="selectByUserId" resultMap="BaseResultMap">
-        SELECT r.id, r.role_code, r.role_name, r.user_type, r.description,
-               r.status, r.create_time, r.update_time, r.is_deleted
-        FROM sys_role r
-        INNER JOIN sys_user_role ur ON r.id = ur.role_id
-        WHERE ur.user_id = #{userId} AND r.is_deleted = 0 AND r.status = 1
-    </select>
-
-    <select id="selectPage" resultMap="BaseResultMap">
-        SELECT <include refid="Base_Column_List"/>
-        FROM sys_role
-        WHERE is_deleted = 0
+        WHERE deleted = 0
         <if test="roleName != null and roleName != ''">
             AND role_name LIKE CONCAT('%', #{roleName}, '%')
         </if>
-        <if test="userType != null">
-            AND user_type = #{userType}
+        <if test="roleKey != null and roleKey != ''">
+            AND role_key = #{roleKey}
         </if>
         <if test="status != null">
             AND status = #{status}
         </if>
-        ORDER BY create_time DESC
+        ORDER BY order_num
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO sys_role (
-            role_code, role_name, user_type, description,
-            status, create_time, update_time, is_deleted
+            role_name, role_key, order_num, status, remark,
+            create_by, create_time, update_by, update_time, deleted
         ) VALUES (
-            #{roleCode}, #{roleName}, #{userType}, #{description},
-            #{status}, NOW(), NOW(), 0
+            #{roleName}, #{roleKey}, #{orderNum}, #{status}, #{remark},
+            #{createBy}, NOW(), #{updateBy}, NOW(), 0
         )
     </insert>
 
@@ -70,16 +58,19 @@
         UPDATE sys_role
         <set>
             update_time = NOW(),
+            <if test="updateBy != null">update_by = #{updateBy},</if>
             <if test="roleName != null">role_name = #{roleName},</if>
-            <if test="userType != null">user_type = #{userType},</if>
-            <if test="description != null">description = #{description},</if>
+            <if test="roleKey != null">role_key = #{roleKey},</if>
+            <if test="orderNum != null">order_num = #{orderNum},</if>
             <if test="status != null">status = #{status},</if>
+            <if test="remark != null">remark = #{remark},</if>
         </set>
-        WHERE id = #{id} AND is_deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </update>
 
     <update id="deleteById">
-        UPDATE sys_role SET is_deleted = 1, update_time = NOW()
+        UPDATE sys_role
+        SET deleted = 1, update_time = NOW()
         WHERE id = #{id}
     </update>
 

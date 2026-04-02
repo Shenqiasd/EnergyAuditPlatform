@@ -4,42 +4,37 @@
 <mapper namespace="com.energy.audit.dao.mapper.setting.BsEnergyMapper">
 
     <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.setting.BsEnergy">
-        <id     column="id"            property="id"/>
-        <result column="energy_code"   property="energyCode"/>
-        <result column="energy_name"   property="energyName"/>
-        <result column="energy_unit"   property="energyUnit"/>
-        <result column="convert_coef"  property="convertCoef"/>
-        <result column="co2_factor"    property="co2Factor"/>
-        <result column="category"      property="category"/>
-        <result column="sort_order"    property="sortOrder"/>
-        <result column="status"        property="status"/>
-        <result column="create_time"   property="createTime"/>
-        <result column="update_time"   property="updateTime"/>
-        <result column="is_deleted"    property="isDeleted"/>
+        <id     column="id"                property="id"/>
+        <result column="energy_code"       property="energyCode"/>
+        <result column="energy_name"       property="energyName"/>
+        <result column="category"          property="category"/>
+        <result column="unit"              property="unit"/>
+        <result column="conversion_factor" property="conversionFactor"/>
+        <result column="carbon_factor"     property="carbonFactor"/>
+        <result column="order_num"         property="orderNum"/>
+        <result column="status"            property="status"/>
+        <result column="create_by"         property="createBy"/>
+        <result column="create_time"       property="createTime"/>
+        <result column="update_by"         property="updateBy"/>
+        <result column="update_time"       property="updateTime"/>
+        <result column="deleted"           property="deleted"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, energy_code, energy_name, energy_unit, convert_coef, co2_factor,
-        category, sort_order, status, create_time, update_time, is_deleted
+        id, energy_code, energy_name, category, unit, conversion_factor, carbon_factor,
+        order_num, status, create_by, create_time, update_by, update_time, deleted
     </sql>
 
     <select id="selectById" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM bs_energy
-        WHERE id = #{id} AND is_deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </select>
 
-    <select id="selectAll" resultMap="BaseResultMap">
+    <select id="selectList" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM bs_energy
-        WHERE is_deleted = 0 AND status = 1
-        ORDER BY category, sort_order
-    </select>
-
-    <select id="selectPage" resultMap="BaseResultMap">
-        SELECT <include refid="Base_Column_List"/>
-        FROM bs_energy
-        WHERE is_deleted = 0
+        WHERE deleted = 0
         <if test="energyName != null and energyName != ''">
             AND energy_name LIKE CONCAT('%', #{energyName}, '%')
         </if>
@@ -49,16 +44,16 @@
         <if test="status != null">
             AND status = #{status}
         </if>
-        ORDER BY category, sort_order
+        ORDER BY category, order_num
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO bs_energy (
-            energy_code, energy_name, energy_unit, convert_coef, co2_factor,
-            category, sort_order, status, create_time, update_time, is_deleted
+            energy_code, energy_name, category, unit, conversion_factor, carbon_factor,
+            order_num, status, create_by, create_time, update_by, update_time, deleted
         ) VALUES (
-            #{energyCode}, #{energyName}, #{energyUnit}, #{convertCoef}, #{co2Factor},
-            #{category}, #{sortOrder}, #{status}, NOW(), NOW(), 0
+            #{energyCode}, #{energyName}, #{category}, #{unit}, #{conversionFactor}, #{carbonFactor},
+            #{orderNum}, #{status}, #{createBy}, NOW(), #{updateBy}, NOW(), 0
         )
     </insert>
 
@@ -66,19 +61,21 @@
         UPDATE bs_energy
         <set>
             update_time = NOW(),
+            <if test="updateBy != null">update_by = #{updateBy},</if>
             <if test="energyName != null">energy_name = #{energyName},</if>
-            <if test="energyUnit != null">energy_unit = #{energyUnit},</if>
-            <if test="convertCoef != null">convert_coef = #{convertCoef},</if>
-            <if test="co2Factor != null">co2_factor = #{co2Factor},</if>
             <if test="category != null">category = #{category},</if>
-            <if test="sortOrder != null">sort_order = #{sortOrder},</if>
+            <if test="unit != null">unit = #{unit},</if>
+            <if test="conversionFactor != null">conversion_factor = #{conversionFactor},</if>
+            <if test="carbonFactor != null">carbon_factor = #{carbonFactor},</if>
+            <if test="orderNum != null">order_num = #{orderNum},</if>
             <if test="status != null">status = #{status},</if>
         </set>
-        WHERE id = #{id} AND is_deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </update>
 
     <update id="deleteById">
-        UPDATE bs_energy SET is_deleted = 1, update_time = NOW()
+        UPDATE bs_energy
+        SET deleted = 1, update_time = NOW()
         WHERE id = #{id}
     </update>
 
