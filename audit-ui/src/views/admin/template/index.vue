@@ -191,9 +191,7 @@ async function openDesigner(v: TplTemplateVersion) {
     designerVersion.value = full
     // Sync tags from the stored templateJson so the right panel is always
     // up-to-date, even for versions created before this feature was deployed.
-    if (full.templateJson && full.templateJson !== '{}') {
-      await syncTagsFromJson(v.id!)
-    }
+    await syncTagsFromJson(v.id!)
   } finally {
     designerLoading.value = false
   }

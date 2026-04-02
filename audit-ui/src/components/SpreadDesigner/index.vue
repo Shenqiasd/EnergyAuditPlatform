@@ -47,7 +47,11 @@ function initDesigner() {
   workbook = designer.getWorkbook()
 
   if (props.templateJson && props.templateJson !== '{}') {
-    workbook.fromJSON(JSON.parse(props.templateJson))
+    try {
+      workbook.fromJSON(JSON.parse(props.templateJson))
+    } catch (e) {
+      console.error('SpreadDesigner: failed to load templateJson — workbook starts empty', e)
+    }
   }
 
   if (props.readonly) {
