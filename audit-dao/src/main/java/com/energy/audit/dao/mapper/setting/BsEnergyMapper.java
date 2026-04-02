@@ -20,5 +20,5 @@ public interface BsEnergyMapper {
 
     int updateById(BsEnergy energy);
 
-    int deleteById(@Param("id") Long id);
+    int deleteById(@Param("id") Long id, @Param("updateBy") String updateBy);
 }

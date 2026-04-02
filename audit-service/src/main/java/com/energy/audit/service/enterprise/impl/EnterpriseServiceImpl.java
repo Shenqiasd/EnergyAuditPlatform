@@ -1,6 +1,7 @@
 package com.energy.audit.service.enterprise.impl;
 
 import com.energy.audit.common.exception.BusinessException;
+import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.dao.mapper.enterprise.EntEnterpriseMapper;
 import com.energy.audit.model.entity.enterprise.EntEnterprise;
 import com.energy.audit.service.enterprise.EnterpriseService;
@@ -53,6 +54,7 @@ public class EnterpriseServiceImpl implements EnterpriseService {
     @Override
     public void delete(Long id) {
         // TODO: validate enterprise exists, check dependencies
-        enterpriseMapper.deleteById(id);
+        String operator = SecurityUtils.getCurrentUsername();
+        enterpriseMapper.deleteById(id, operator);
     }
 }

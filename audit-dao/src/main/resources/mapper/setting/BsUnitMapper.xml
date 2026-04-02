@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.setting.BsUnitMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.setting.BsUnit">
+        <id     column="id"            property="id"/>
+        <result column="enterprise_id" property="enterpriseId"/>
+        <result column="name"          property="name"/>
+        <result column="unit_type"     property="unitType"/>
+        <result column="sub_category"  property="subCategory"/>
+        <result column="remark"        property="remark"/>
+        <result column="create_by"     property="createBy"/>
+        <result column="create_time"   property="createTime"/>
+        <result column="update_by"     property="updateBy"/>
+        <result column="update_time"   property="updateTime"/>
+        <result column="deleted"       property="deleted"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, enterprise_id, name, unit_type, sub_category, remark,
+        create_by, create_time, update_by, update_time, deleted
+    </sql>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM bs_unit
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectList" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM bs_unit
+        WHERE deleted = 0
+        <if test="enterpriseId != null">
+            AND enterprise_id = #{enterpriseId}
+        </if>
+        <if test="name != null and name != ''">
+            AND name LIKE CONCAT('%', #{name}, '%')
+        </if>
+        <if test="unitType != null">
+            AND unit_type = #{unitType}
+        </if>
+        <if test="subCategory != null and subCategory != ''">
+            AND sub_category = #{subCategory}
+        </if>
+        ORDER BY unit_type, id
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bs_unit (
+            enterprise_id, name, unit_type, sub_category, remark,
+            create_by, create_time, update_by, update_time, deleted
+        ) VALUES (
+            #{enterpriseId}, #{name}, #{unitType}, #{subCategory}, #{remark},
+            #{createBy}, NOW(), #{updateBy}, NOW(), 0
+        )
+    </insert>
+
+    <update id="updateById">
+        UPDATE bs_unit
+        <set>
+            update_time = NOW(),
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            <if test="name != null">name = #{name},</if>
+            <if test="unitType != null">unit_type = #{unitType},</if>
+            <if test="subCategory != null">sub_category = #{subCategory},</if>
+            <if test="remark != null">remark = #{remark},</if>
+        </set>
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="deleteById">
+        UPDATE bs_unit
+        SET deleted = 1, update_by = #{updateBy}, update_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

@@ -7,6 +7,7 @@ import { auditorMenus } from '@/config/menus'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+
 const username = computed(() => userStore.userInfo?.realName || '审核员')
 
 function isActive(path: string) { return route.path === path || route.path.startsWith(path + '/') }

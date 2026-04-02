@@ -20,5 +20,5 @@ public interface BsUnitMapper {
 
     int updateById(BsUnit unit);
 
-    int deleteById(@Param("id") Long id);
+    int deleteById(@Param("id") Long id, @Param("updateBy") String updateBy);
 }

@@ -20,5 +20,5 @@ public interface EntEnterpriseMapper {
 
     int updateById(EntEnterprise enterprise);
 
-    int deleteById(@Param("id") Long id);
+    int deleteById(@Param("id") Long id, @Param("updateBy") String updateBy);
 }

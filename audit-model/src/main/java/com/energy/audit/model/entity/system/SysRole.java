@@ -22,8 +22,8 @@ public class SysRole extends BaseEntity {
     /** Role key */
     private String roleKey;
 
-    /** Display order */
-    private Integer orderNum;
+    /** Sort order */
+    private Integer sortOrder;
 
     /** Status (0=disabled, 1=enabled) */
     private Integer status;

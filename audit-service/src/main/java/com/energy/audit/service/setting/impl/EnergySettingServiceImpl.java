@@ -1,6 +1,7 @@
 package com.energy.audit.service.setting.impl;
 
 import com.energy.audit.common.exception.BusinessException;
+import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.dao.mapper.setting.BsEnergyMapper;
 import com.energy.audit.model.entity.setting.BsEnergy;
 import com.energy.audit.service.setting.EnergySettingService;
@@ -59,6 +60,7 @@ public class EnergySettingServiceImpl implements EnergySettingService {
     @CacheEvict(cacheNames = "energyCache", key = "#id")
     public void delete(Long id) {
         // TODO: validate energy exists, check dependencies
-        energyMapper.deleteById(id);
+        String operator = SecurityUtils.getCurrentUsername();
+        energyMapper.deleteById(id, operator);
     }
 }

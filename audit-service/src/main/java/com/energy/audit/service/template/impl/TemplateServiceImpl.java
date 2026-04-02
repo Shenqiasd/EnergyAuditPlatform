@@ -1,6 +1,7 @@
 package com.energy.audit.service.template.impl;
 
 import com.energy.audit.common.exception.BusinessException;
+import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.dao.mapper.template.TplTemplateMapper;
 import com.energy.audit.model.entity.template.TplTemplate;
 import com.energy.audit.service.template.TemplateService;
@@ -71,7 +72,8 @@ public class TemplateServiceImpl implements TemplateService {
     @CacheEvict(cacheNames = "templateCache", allEntries = true)
     public void delete(Long id) {
         // TODO: validate template exists, check dependencies
-        templateMapper.deleteById(id);
+        String operator = SecurityUtils.getCurrentUsername();
+        templateMapper.deleteById(id, operator);
     }
 
     @Override

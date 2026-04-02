@@ -5,6 +5,9 @@ server:
 
 spring:
   profiles:
+    # Default to 'dev' (H2 in-memory) for local development.
+    # IMPORTANT: Production deployments MUST override via SPRING_PROFILES_ACTIVE=prod
+    # (already set in docker-compose.yml). Never rely on this default in production.
     active: dev
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver

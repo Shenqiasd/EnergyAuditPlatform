@@ -8,7 +8,7 @@ import java.io.Serial;
 import java.math.BigDecimal;
 
 /**
- * Energy type base setting entity
+ * Energy type base setting entity — matches bs_energy production schema
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -17,27 +17,39 @@ public class BsEnergy extends BaseEntity {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    /** Energy code */
-    private String energyCode;
+    /** Enterprise ID */
+    private Long enterpriseId;
 
     /** Energy name */
-    private String energyName;
+    private String name;
 
-    /** Energy category */
+    /** Energy category (dictionary: solid/liquid/gas/electricity/heat etc.) */
     private String category;
 
-    /** Unit */
-    private String unit;
+    /** Measurement unit */
+    private String measurementUnit;
 
-    /** Standard coal conversion factor */
-    private BigDecimal conversionFactor;
+    /** Standard coal equivalent value */
+    private BigDecimal equivalentValue;
 
-    /** Carbon emission factor */
-    private BigDecimal carbonFactor;
+    /** Equal value */
+    private BigDecimal equalValue;
 
-    /** Display order */
-    private Integer orderNum;
+    /** Low heat value */
+    private BigDecimal lowHeatValue;
 
-    /** Status (0=disabled, 1=enabled) */
-    private Integer status;
+    /** Carbon content per unit heat value */
+    private BigDecimal carbonContent;
+
+    /** Oxidation rate */
+    private BigDecimal oxidationRate;
+
+    /** Color */
+    private String color;
+
+    /** Active flag (0=inactive, 1=active) */
+    private Integer isActive;
+
+    /** Remark */
+    private String remark;
 }

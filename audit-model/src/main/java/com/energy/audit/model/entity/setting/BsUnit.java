@@ -5,10 +5,10 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
-import java.math.BigDecimal;
 
 /**
- * Unit base setting entity
+ * Unit (process unit) entity — matches bs_unit production schema.
+ * unitType: 1=Processing/Conversion, 2=Distribution/Transport, 3=Terminal Use
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -17,24 +17,18 @@ public class BsUnit extends BaseEntity {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    /** Unit code */
-    private String unitCode;
+    /** Enterprise ID */
+    private Long enterpriseId;
 
     /** Unit name */
-    private String unitName;
+    private String name;
 
-    /** Unit symbol */
-    private String symbol;
+    /** Unit type (1=processing/conversion 2=distribution/transport 3=terminal use) */
+    private Integer unitType;
 
-    /** Unit category (e.g., energy, mass, volume) */
-    private String category;
+    /** Sub-category (dictionary, used when unitType=3) */
+    private String subCategory;
 
-    /** Conversion factor to base unit */
-    private BigDecimal conversionFactor;
-
-    /** Display order */
-    private Integer orderNum;
-
-    /** Status (0=disabled, 1=enabled) */
-    private Integer status;
+    /** Remark */
+    private String remark;
 }

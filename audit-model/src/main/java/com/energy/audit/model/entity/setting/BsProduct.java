@@ -5,9 +5,10 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
+import java.math.BigDecimal;
 
 /**
- * Product base setting entity
+ * Product base setting entity — matches bs_product production schema
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -16,23 +17,17 @@ public class BsProduct extends BaseEntity {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    /** Product code */
-    private String productCode;
+    /** Enterprise ID */
+    private Long enterpriseId;
 
     /** Product name */
-    private String productName;
+    private String name;
 
-    /** Product category */
-    private String category;
+    /** Measurement unit */
+    private String measurementUnit;
 
-    /** Unit of measurement */
-    private String unit;
-
-    /** Display order */
-    private Integer orderNum;
-
-    /** Status (0=disabled, 1=enabled) */
-    private Integer status;
+    /** Unit price (10k CNY) */
+    private BigDecimal unitPrice;
 
     /** Remark */
     private String remark;

@@ -24,6 +24,9 @@ export default defineConfig({
     },
   },
   server: {
+    host: '0.0.0.0',
+    port: 5000,
+    allowedHosts: true, // Required for Replit proxied preview (all Host headers must be allowed)
     proxy: {
       '/api': {
         target: 'http://localhost:8080',

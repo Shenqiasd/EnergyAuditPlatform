@@ -22,5 +22,5 @@ public interface TplTemplateMapper {
 
     int updateById(TplTemplate template);
 
-    int deleteById(@Param("id") Long id);
+    int deleteById(@Param("id") Long id, @Param("updateBy") String updateBy);
 }

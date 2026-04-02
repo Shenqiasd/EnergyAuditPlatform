@@ -22,8 +22,8 @@ public class TplTemplate extends BaseEntity {
     /** Template name */
     private String templateName;
 
-    /** Template category */
-    private String category;
+    /** Module type */
+    private String moduleType;
 
     /** Description */
     private String description;
@@ -33,7 +33,4 @@ public class TplTemplate extends BaseEntity {
 
     /** Status (0=draft, 1=published, 2=archived) */
     private Integer status;
-
-    /** Remark */
-    private String remark;
 }

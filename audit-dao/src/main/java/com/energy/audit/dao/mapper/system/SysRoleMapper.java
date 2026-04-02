@@ -20,5 +20,5 @@ public interface SysRoleMapper {
 
     int updateById(SysRole role);
 
-    int deleteById(@Param("id") Long id);
+    int deleteById(@Param("id") Long id, @Param("updateBy") String updateBy);
 }

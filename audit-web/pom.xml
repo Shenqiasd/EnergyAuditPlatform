@@ -46,6 +46,23 @@
             <artifactId>jjwt-jackson</artifactId>
             <scope>runtime</scope>
         </dependency>
+
+        <!-- MySQL driver for production deployments -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- H2 in-memory database for dev/CI (Spring profile: dev).
+             Included unconditionally so 'mvn spring-boot:run -pl audit-web'
+             works without -P dev. H2 is not activated in production because
+             application-prod.yml configures MySQL exclusively. -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
 
     <build>

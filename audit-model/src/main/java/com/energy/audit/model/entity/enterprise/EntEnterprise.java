@@ -5,9 +5,11 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
- * Enterprise entity
+ * Enterprise entity — matches ent_enterprise production schema
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -17,38 +19,35 @@ public class EntEnterprise extends BaseEntity {
     private static final long serialVersionUID = 1L;
 
     /** Enterprise name */
-    private String name;
+    private String enterpriseName;
 
     /** Unified social credit code */
     private String creditCode;
 
-    /** Industry type */
-    private String industryType;
-
-    /** Province */
-    private String province;
-
-    /** City */
-    private String city;
-
-    /** District */
-    private String district;
-
-    /** Detailed address */
-    private String address;
-
     /** Contact person */
     private String contactPerson;
-
-    /** Contact phone */
-    private String contactPhone;
 
     /** Contact email */
     private String contactEmail;
 
-    /** Status (0=disabled, 1=enabled) */
-    private Integer status;
+    /** Contact phone */
+    private String contactPhone;
 
     /** Remark */
     private String remark;
+
+    /** Expiry date */
+    private LocalDate expireDate;
+
+    /** Locked flag (0=unlocked, 1=locked) */
+    private Integer isLocked;
+
+    /** Active flag (0=inactive, 1=active) */
+    private Integer isActive;
+
+    /** Last login time */
+    private LocalDateTime lastLoginTime;
+
+    /** Sort order */
+    private Integer sortOrder;
 }
