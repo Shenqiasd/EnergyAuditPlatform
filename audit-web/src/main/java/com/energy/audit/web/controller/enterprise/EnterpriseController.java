@@ -8,6 +8,7 @@ import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,7 +19,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Enterprise management controller
@@ -70,6 +73,29 @@ public class EnterpriseController {
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable Long id) {
         enterpriseService.delete(id);
+        return R.ok();
+    }
+
+    @Operation(summary = "Lock enterprise account")
+    @PutMapping("/{id}/lock")
+    public R<Void> lock(@PathVariable Long id) {
+        enterpriseService.lock(id);
+        return R.ok();
+    }
+
+    @Operation(summary = "Unlock enterprise account")
+    @PutMapping("/{id}/unlock")
+    public R<Void> unlock(@PathVariable Long id) {
+        enterpriseService.unlock(id);
+        return R.ok();
+    }
+
+    @Operation(summary = "Update enterprise expiry date")
+    @PutMapping("/{id}/expire")
+    public R<Void> updateExpireDate(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        String dateStr = body.get("expireDate");
+        LocalDate expireDate = dateStr != null && !dateStr.isEmpty() ? LocalDate.parse(dateStr) : null;
+        enterpriseService.updateExpireDate(id, expireDate);
         return R.ok();
     }
 }

@@ -19,9 +19,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
- * System user management controller
+ * System user management controller (admin/auditor accounts)
  */
 @Tag(name = "System Users", description = "User CRUD operations")
 @RestController
@@ -37,7 +38,9 @@ public class SysUserController {
     @Operation(summary = "Get user by ID")
     @GetMapping("/{id}")
     public R<SysUser> getById(@PathVariable Long id) {
-        return R.ok(sysUserService.getById(id));
+        SysUser user = sysUserService.getById(id);
+        user.setPassword(null);
+        return R.ok(user);
     }
 
     @Operation(summary = "List users with pagination")
@@ -47,6 +50,7 @@ public class SysUserController {
                                        @RequestParam(defaultValue = "10") Integer pageSize) {
         PageHelper.startPage(pageNum, pageSize);
         List<SysUser> list = sysUserService.list(query);
+        list.forEach(u -> u.setPassword(null));
         PageInfo<SysUser> pageInfo = new PageInfo<>(list);
         return R.ok(PageResult.of(pageInfo.getTotal(), pageInfo.getList()));
     }
@@ -70,6 +74,22 @@ public class SysUserController {
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable Long id) {
         sysUserService.delete(id);
+        return R.ok();
+    }
+
+    @Operation(summary = "Reset user password")
+    @PutMapping("/{id}/reset-password")
+    public R<Void> resetPassword(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        String newPassword = body.get("password");
+        sysUserService.resetPassword(id, newPassword);
+        return R.ok();
+    }
+
+    @Operation(summary = "Toggle user status (enable/disable)")
+    @PutMapping("/{id}/status")
+    public R<Void> updateStatus(@PathVariable Long id, @RequestBody Map<String, Integer> body) {
+        Integer status = body.get("status");
+        sysUserService.updateStatus(id, status);
         return R.ok();
     }
 }

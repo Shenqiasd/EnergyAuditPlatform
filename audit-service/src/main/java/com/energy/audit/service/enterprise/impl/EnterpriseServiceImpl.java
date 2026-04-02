@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -41,20 +42,60 @@ public class EnterpriseServiceImpl implements EnterpriseService {
 
     @Override
     public void create(EntEnterprise enterprise) {
-        // TODO: validate unique credit code
+        String operator = SecurityUtils.getCurrentUsername();
+        enterprise.setCreateBy(operator);
+        enterprise.setUpdateBy(operator);
+        if (enterprise.getIsActive() == null) enterprise.setIsActive(1);
+        if (enterprise.getIsLocked() == null) enterprise.setIsLocked(0);
+        if (enterprise.getSortOrder() == null) enterprise.setSortOrder(0);
         enterpriseMapper.insert(enterprise);
     }
 
     @Override
     public void update(EntEnterprise enterprise) {
-        // TODO: validate enterprise exists
+        getById(enterprise.getId());
+        String operator = SecurityUtils.getCurrentUsername();
+        enterprise.setUpdateBy(operator);
         enterpriseMapper.updateById(enterprise);
     }
 
     @Override
     public void delete(Long id) {
-        // TODO: validate enterprise exists, check dependencies
+        getById(id);
         String operator = SecurityUtils.getCurrentUsername();
         enterpriseMapper.deleteById(id, operator);
+    }
+
+    @Override
+    public void lock(Long id) {
+        getById(id);
+        String operator = SecurityUtils.getCurrentUsername();
+        EntEnterprise update = new EntEnterprise();
+        update.setId(id);
+        update.setIsLocked(1);
+        update.setUpdateBy(operator);
+        enterpriseMapper.updateById(update);
+    }
+
+    @Override
+    public void unlock(Long id) {
+        getById(id);
+        String operator = SecurityUtils.getCurrentUsername();
+        EntEnterprise update = new EntEnterprise();
+        update.setId(id);
+        update.setIsLocked(0);
+        update.setUpdateBy(operator);
+        enterpriseMapper.updateById(update);
+    }
+
+    @Override
+    public void updateExpireDate(Long id, LocalDate expireDate) {
+        getById(id);
+        String operator = SecurityUtils.getCurrentUsername();
+        EntEnterprise update = new EntEnterprise();
+        update.setId(id);
+        update.setExpireDate(expireDate);
+        update.setUpdateBy(operator);
+        enterpriseMapper.updateById(update);
     }
 }
