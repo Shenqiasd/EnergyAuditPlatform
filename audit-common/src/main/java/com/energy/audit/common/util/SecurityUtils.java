@@ -1,5 +1,7 @@
 package com.energy.audit.common.util;
 
+import com.energy.audit.common.exception.BusinessException;
+
 public class SecurityUtils {
 
     private static final ThreadLocal<Long> USER_ID = new ThreadLocal<>();
@@ -30,7 +32,7 @@ public class SecurityUtils {
     public static Long getRequiredCurrentUserId() {
         Long userId = USER_ID.get();
         if (userId == null) {
-            throw new RuntimeException("用户未认证");
+            throw new BusinessException(401, "用户未认证");
         }
         return userId;
     }
@@ -50,7 +52,7 @@ public class SecurityUtils {
     public static Long getRequiredCurrentEnterpriseId() {
         Long enterpriseId = ENTERPRISE_ID.get();
         if (enterpriseId == null) {
-            throw new RuntimeException("当前用户不属于任何企业");
+            throw new BusinessException(403, "当前用户不属于任何企业");
         }
         return enterpriseId;
     }
