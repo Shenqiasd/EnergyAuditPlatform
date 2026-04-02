@@ -15,6 +15,7 @@ import {
   type BsUnitEnergy,
   type BsEnergy,
 } from '@/api/setting'
+import { getDataByType, type DictData } from '@/api/dict'
 
 const TABS = [
   { label: '加工转换', unitType: 1 },
@@ -41,6 +42,8 @@ const currentTabType = computed(() => Number(activeTab.value))
 const isEndUse = computed(() => currentTabType.value === 3)
 
 const energyOptions = ref<BsEnergy[]>([])
+const endUseCategoryOptions = ref<DictData[]>([])
+
 const expandedUnitEnergies = ref<Record<number, BsUnitEnergy[]>>({})
 const loadingEnergies = ref<Record<number, boolean>>({})
 const selectedAddEnergy = ref<Record<number, number | null>>({})
@@ -60,6 +63,14 @@ async function loadData() {
 async function loadEnergyOptions() {
   const res = await getEnergyList({ pageSize: 500 })
   energyOptions.value = res.rows ?? []
+}
+
+async function loadEndUseCategoryOptions() {
+  try {
+    endUseCategoryOptions.value = await getDataByType('unit_terminal_category')
+  } catch {
+    endUseCategoryOptions.value = []
+  }
 }
 
 function onTabChange() {
@@ -109,9 +120,10 @@ async function handleDelete(row: BsUnit) {
   loadData()
 }
 
-async function onExpandChange(row: BsUnit, expanded: boolean) {
-  if (!expanded || !row.id) return
-  if (expandedUnitEnergies.value[row.id]) return
+async function onExpandChange(row: BsUnit, expandedRows: BsUnit[]) {
+  const expanding = expandedRows.some(r => r.id === row.id)
+  if (!expanding || !row.id) return
+  if (expandedUnitEnergies.value[row.id] !== undefined) return
   loadingEnergies.value[row.id] = true
   try {
     expandedUnitEnergies.value[row.id] = await getUnitEnergies(row.id)
@@ -147,7 +159,7 @@ function availableEnergies(unitId: number) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadData(), loadEnergyOptions()])
+  await Promise.all([loadData(), loadEnergyOptions(), loadEndUseCategoryOptions()])
 })
 </script>
 
@@ -181,7 +193,7 @@ onMounted(async () => {
                     placeholder="选择能源品种"
                     filterable
                     clearable
-                    style="width:240px"
+                    style="width:260px"
                   >
                     <el-option
                       v-for="e in availableEnergies(row.id)"
@@ -215,12 +227,9 @@ onMounted(async () => {
                       <span v-if="ue.measurementUnit" class="unit-label">（{{ ue.measurementUnit }}）</span>
                     </el-tag>
                   </template>
-                  <span v-else class="no-energy">暂未关联能源品种</span>
+                  <span v-else class="no-energy">暂未关联能源品种，请在上方选择后点击「关联」</span>
                 </div>
-                <div v-else class="energy-loading">
-                  <el-icon class="is-loading"><svg viewBox="0 0 1024 1024" width="16" height="16"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z" fill="currentColor"/></svg></el-icon>
-                  加载中…
-                </div>
+                <el-skeleton v-else :rows="1" animated style="margin-top:8px" />
               </div>
             </template>
           </el-table-column>
@@ -253,18 +262,31 @@ onMounted(async () => {
         <el-form-item label="单元名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入用能单元名称" />
         </el-form-item>
+
         <el-form-item label="子类别">
-          <el-input
-            v-if="!isEndUse"
-            v-model="form.subCategory"
-            placeholder="请输入子类别（选填）"
-          />
-          <el-input
-            v-else
-            v-model="form.subCategory"
-            placeholder="请输入终端使用子类别（如：照明/动力/工艺等）"
-          />
+          <template v-if="isEndUse && endUseCategoryOptions.length">
+            <el-select
+              v-model="form.subCategory"
+              placeholder="请选择终端使用子类别"
+              clearable
+              style="width:100%"
+            >
+              <el-option
+                v-for="item in endUseCategoryOptions"
+                :key="item.dictValue"
+                :label="item.dictLabel"
+                :value="item.dictValue"
+              />
+            </el-select>
+          </template>
+          <template v-else>
+            <el-input
+              v-model="form.subCategory"
+              :placeholder="isEndUse ? '请输入终端使用子类别（如：照明、动力、工艺等）' : '请输入子类别（选填）'"
+            />
+          </template>
         </el-form-item>
+
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="2" />
         </el-form-item>
@@ -297,6 +319,7 @@ onMounted(async () => {
 .energy-panel {
   padding: 12px 24px 12px 48px;
   background: #fafafa;
+  border-top: 1px solid #ebeef5;
 }
 
 .energy-add-row {
@@ -310,19 +333,11 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   min-height: 32px;
 }
 
 .no-energy {
-  color: #909399;
-  font-size: 13px;
-}
-
-.energy-loading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   color: #909399;
   font-size: 13px;
 }
