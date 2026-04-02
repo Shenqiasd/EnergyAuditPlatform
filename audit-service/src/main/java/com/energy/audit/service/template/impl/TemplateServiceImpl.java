@@ -66,7 +66,7 @@ public class TemplateServiceImpl implements TemplateService {
     @Transactional
     @CacheEvict(cacheNames = "templateCache", allEntries = true)
     public void create(TplTemplate template) {
-        String operator = SecurityUtils.getCurrentUsername();
+        String operator = SecurityUtils.getRequiredCurrentUsername();
         template.setCurrentVersion(1);
         template.setStatus(0);
         template.setCreateBy(operator);
@@ -80,7 +80,7 @@ public class TemplateServiceImpl implements TemplateService {
     @CacheEvict(cacheNames = "templateCache", allEntries = true)
     public void update(TplTemplate template) {
         getById(template.getId());
-        template.setUpdateBy(SecurityUtils.getCurrentUsername());
+        template.setUpdateBy(SecurityUtils.getRequiredCurrentUsername());
         templateMapper.updateById(template);
     }
 
@@ -88,7 +88,7 @@ public class TemplateServiceImpl implements TemplateService {
     @CacheEvict(cacheNames = "templateCache", allEntries = true)
     public void delete(Long id) {
         getById(id);
-        templateMapper.deleteById(id, SecurityUtils.getCurrentUsername());
+        templateMapper.deleteById(id, SecurityUtils.getRequiredCurrentUsername());
     }
 
     /**

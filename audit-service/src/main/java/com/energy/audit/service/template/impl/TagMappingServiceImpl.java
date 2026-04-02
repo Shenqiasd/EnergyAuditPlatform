@@ -21,7 +21,7 @@ public class TagMappingServiceImpl implements TagMappingService {
     @Override
     @Transactional
     public void replaceAll(Long templateVersionId, List<TplTagMapping> mappings) {
-        String operator = SecurityUtils.getCurrentUsername();
+        String operator = SecurityUtils.getRequiredCurrentUsername();
         tagMappingMapper.deleteByVersionId(templateVersionId, operator);
         if (mappings != null && !mappings.isEmpty()) {
             mappings.forEach(m -> {

@@ -27,7 +27,7 @@ public class TemplateVersionServiceImpl implements TemplateVersionService {
 
     @Override
     public TplTemplateVersion createDraftVersion(Long templateId) {
-        String operator = SecurityUtils.getCurrentUsername();
+        String operator = SecurityUtils.getRequiredCurrentUsername();
         Integer max = versionMapper.selectMaxVersion(templateId);
         int nextVersion = (max == null ? 0 : max) + 1;
         TplTemplateVersion v = new TplTemplateVersion();
@@ -51,7 +51,7 @@ public class TemplateVersionServiceImpl implements TemplateVersionService {
         upd.setId(versionId);
         upd.setTemplateJson(templateJson);
         upd.setChangeLog(changeLog);
-        upd.setUpdateBy(SecurityUtils.getCurrentUsername());
+        upd.setUpdateBy(SecurityUtils.getRequiredCurrentUsername());
         versionMapper.updateById(upd);
     }
 
@@ -87,7 +87,7 @@ public class TemplateVersionServiceImpl implements TemplateVersionService {
         if (!templateId.equals(v.getTemplateId())) {
             throw new BusinessException("版本不属于该模板");
         }
-        String operator = SecurityUtils.getCurrentUsername();
+        String operator = SecurityUtils.getRequiredCurrentUsername();
         versionMapper.updatePublishStatus(versionId, operator);
 
         TplTemplate upd = new TplTemplate();

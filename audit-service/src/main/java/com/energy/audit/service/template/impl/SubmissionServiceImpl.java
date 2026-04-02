@@ -39,7 +39,7 @@ public class SubmissionServiceImpl implements SubmissionService {
     @Transactional
     public TplSubmission saveDraft(Long enterpriseId, Long templateId, Integer auditYear,
                                    String submissionJson, Integer templateVersion) {
-        String operator = SecurityUtils.getCurrentUsername();
+        String operator = SecurityUtils.getRequiredCurrentUsername();
         TplSubmission existing = submissionMapper.selectByEnterpriseTemplateYear(
                 enterpriseId, templateId, auditYear);
         if (existing != null) {
@@ -85,7 +85,7 @@ public class SubmissionServiceImpl implements SubmissionService {
         } catch (JsonProcessingException e) {
             throw new BusinessException("数据抽取序列化失败: " + e.getMessage());
         }
-        String operator = SecurityUtils.getCurrentUsername();
+        String operator = SecurityUtils.getRequiredCurrentUsername();
         TplSubmission upd = new TplSubmission();
         upd.setId(submissionId);
         upd.setExtractedData(extractedJson);
