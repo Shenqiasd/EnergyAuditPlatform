@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute } from 'vue-router'
 import {
   getTemplateList,
   getPublishedVersion,
@@ -10,6 +11,8 @@ import {
   type TplEditLock,
 } from '@/api/template'
 import SpreadSheet from '@/components/SpreadSheet/index.vue'
+
+const route = useRoute()
 
 const templates = ref<TplTemplate[]>([])
 const selectedTemplateId = ref<number | null>(null)
@@ -105,7 +108,20 @@ async function handleSubmit() {
   }
 }
 
-onMounted(loadTemplates)
+onMounted(async () => {
+  await loadTemplates()
+  const qId = route.query.templateId
+  const qYear = route.query.year
+  if (qId) {
+    selectedTemplateId.value = Number(qId)
+  }
+  if (qYear) {
+    selectedYear.value = Number(qYear)
+  }
+  if (selectedTemplateId.value) {
+    openTemplate()
+  }
+})
 </script>
 
 <template>
