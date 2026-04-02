@@ -82,6 +82,12 @@
         WHERE id = #{id} AND deleted = 0
     </update>
 
+    <update id="resetPasswordByAdmin">
+        UPDATE sys_user SET password = #{password}, password_changed = 0,
+            update_by = #{updateBy}, update_time = NOW()
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
     <update id="updateLastLoginTime">
         UPDATE sys_user SET last_login_time = NOW() WHERE id = #{id}
     </update>

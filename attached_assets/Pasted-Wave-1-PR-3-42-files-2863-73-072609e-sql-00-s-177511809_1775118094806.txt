@@ -1,0 +1,84 @@
+Wave 1 PR #3 — 综合代码审核报告（人工逐文件审核）
+审核范围: 42 files, +2863 −73 | 提交: 072609e
+审核方法: 逐文件阅读全部代码，对照 sql/00-schema.sql 生产表结构验证 Entity/Mapper/H2 对齐
+
+总结
+级别	数量	说明
+🔴 严重 (Critical)	2	阻塞合并，功能性BUG
+🟡 中等 (Medium)	5	建议合并前修复
+🔵 非阻塞 (Non-blocking)	6	可后续迭代修复
+建议：修复 2 个严重问题后可合并。 整体代码质量优秀，架构一致性好，Entity/Mapper/H2 schema 与生产表结构全部对齐（比 Wave 0 有明显进步）。
+
+🔴 严重问题 (Critical — 阻塞合并)
+C-1: resetPassword() 静默失败 — updateById SQL 不包含 password 和 passwordChanged 列
+文件: audit-service/.../SysUserServiceImpl.java:85-95 + audit-dao/.../SysUserMapper.xml:68-78
+
+resetPassword() 构造 SysUser 对象设置了 password 和 passwordChanged，然后调用 sysUserMapper.updateById(update)。但 SysUserMapper.xml 的 updateById SQL 的 <set> 块 只包含 realName、phone、email、status、updateBy — 不包含 password 和 passwordChanged。
+
+后果：管理员点击"重置密码"返回成功，但密码实际未修改。用户使用新密码登录失败。
+
+修复建议：Mapper 已有专用 updatePassword 方法（行80-83），应使用它。注意 updatePassword 会设 password_changed=1，但当前代码意图设为 0（强制用户再次修改）。需要确认业务需求后决定：
+
+如果管理员重置后强制改密：新增 Mapper 方法支持参数化 passwordChanged
+如果不需要强制改密：直接调用 sysUserMapper.updatePassword(id, encodedPassword)
+C-2: deleteData() 缓存淘汰失效 — Spring AOP self-invocation 陷阱
+文件: audit-service/.../SysDictServiceImpl.java:122-133
+
+deleteData() 调用 this.evictDictCache(data.getDictType())。evictDictCache() 上有 @CacheEvict 注解，但这是 self-invocation，不经过 Spring AOP 代理，@CacheEvict 不会生效。
+
+后果：删除字典数据后，getDataByType() 仍返回已删除的缓存数据。
+
+修复建议（三选一）：
+
+注入 CacheManager，手动调用 cacheManager.getCache("dictCache").evict(dictType)
+@Lazy 自注入代理：@Lazy @Autowired private SysDictService self;
+直接在 deleteData() 上标注 @CacheEvict
+🟡 中等问题 (Medium — 建议合并前修复)
+M-1: deleteType() 同样未淘汰缓存
+文件: audit-service/.../SysDictServiceImpl.java:67-74
+
+deleteType() 级联删除了关联字典数据，但没有 @CacheEvict。之前缓存的 getDataByType(dictType) 数据不会被清除。
+
+M-2: createType() 未检查 dictType 唯一性
+文件: audit-service/.../SysDictServiceImpl.java:48-56
+
+直接 insert 未先调用 selectByDictType() 检查重复。数据库 UNIQUE 约束会抛 DataIntegrityViolationException 而非友好的 BusinessException。
+
+对比: SysUserServiceImpl.create() 正确做了 selectByUsername() 唯一性检查。
+
+M-3: OperationLogAspect 在未认证端点上 SecurityUtils 返回 null
+文件: audit-web/.../OperationLogAspect.java:45-46
+
+切面排除了 AuthController.login() 但未排除 RegistrationController.submit()（公开端点）。未认证请求时 getCurrentUserId() 和 getCurrentUsername() 返回 null，日志中 user_id 和 username 都为 null，无法追溯操作人。
+
+M-4: RegistrationServiceImpl.submit() 未认证场景下 createBy 为 null
+文件: audit-service/.../RegistrationServiceImpl.java:62
+
+企业注册是公开操作，SecurityUtils.getCurrentUsername() 返回 null，导致 create_by 和 update_by 都为 null。建议使用 registration.getContactPerson() 或 "self-register" 作为 createBy。
+
+M-5: EnterpriseController.updateExpireDate() 使用 Map<String, String> 无类型安全
+文件: audit-web/.../EnterpriseController.java:88-93
+
+LocalDate.parse(dateStr) 如果前端传非 ISO-8601 格式会抛 DateTimeParseException（返回 500 而非 400）。建议用 DTO 或添加 try-catch。RegistrationController.approve() 和 reject() 也使用了 Map 模式。
+
+🔵 非阻塞建议 (Non-blocking — 可后续迭代)
+#	说明	文件
+N-1	OperationLogAspect 未设置 responseResult，所有日志该字段为 null	OperationLogAspect.java
+N-2	OperationLogAspect 注释说"异步保存"但实际同步执行，高并发下有性能影响	OperationLogAspect.java
+N-3	SysOperationLog.operation 字段始终为 null，建议自定义 @OperationLog 注解	OperationLogAspect.java
+N-4	DictTag.vue 在 options 未加载时显示原始 value 编码（如 "1"）	DictTag.vue
+N-5	多个前端视图的 catch {} 空块，静默吞没异常，不利于调试	多个 .vue 文件
+N-6	C-1 修复后 resetPassword 前后端链路才能正常工作	user.ts + SysUserController
+已验证通过 ✓
+模块	验证内容	状态
+Entity ↔ 生产 Schema	全部 4 个新实体列名/类型完全一致	✓
+Mapper XML ↔ Entity	resultMap、CRUD SQL 完全对应	✓
+H2 ↔ 生产 Schema	4 张新表列名和类型一致	✓
+Soft Delete 审计	全部 deleteById 包含 update_by + update_time	✓
+BCrypt 编码	$2a$ 前缀检查、密码长度校验	✓
+@transactional	approve() 正确使用事务（创建企业+创建用户）	✓
+分页	PageHelper + PageInfo + PageResult 模式一致	✓
+前后端 API 对齐	4 个 API 文件与 Controller 端点完全匹配	✓
+菜单 & 路由	menus.ts + router/index.ts 正确添加	✓
+Maven 依赖	AOP + crypto 依赖位置正确	✓
+整体评价：Wave 1 代码质量明显高于 Wave 0 初始提交 — Schema 对齐问题完全消除，软删除审计一致，BCrypt 使用正确。修复 C-1（resetPassword 静默失败）和 C-2（缓存淘汰失效）后即可合并。

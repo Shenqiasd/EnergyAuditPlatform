@@ -20,6 +20,8 @@ public interface SysUserMapper {
 
     int updatePassword(@Param("id") Long id, @Param("password") String password);
 
+    int resetPasswordByAdmin(@Param("id") Long id, @Param("password") String password, @Param("updateBy") String updateBy);
+
     int updateLastLoginTime(@Param("id") Long id);
 
     int deleteById(@Param("id") Long id, @Param("updateBy") String updateBy);

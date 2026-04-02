@@ -7,6 +7,8 @@ import com.energy.audit.dao.mapper.system.SysDictTypeMapper;
 import com.energy.audit.model.entity.system.SysDictData;
 import com.energy.audit.model.entity.system.SysDictType;
 import com.energy.audit.service.system.SysDictService;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -22,10 +24,14 @@ public class SysDictServiceImpl implements SysDictService {
 
     private final SysDictTypeMapper dictTypeMapper;
     private final SysDictDataMapper dictDataMapper;
+    private final CacheManager cacheManager;
 
-    public SysDictServiceImpl(SysDictTypeMapper dictTypeMapper, SysDictDataMapper dictDataMapper) {
+    public SysDictServiceImpl(SysDictTypeMapper dictTypeMapper,
+                              SysDictDataMapper dictDataMapper,
+                              CacheManager cacheManager) {
         this.dictTypeMapper = dictTypeMapper;
         this.dictDataMapper = dictDataMapper;
+        this.cacheManager = cacheManager;
     }
 
     // ---- Dict Type ----
@@ -46,6 +52,11 @@ public class SysDictServiceImpl implements SysDictService {
 
     @Override
     public void createType(SysDictType dictType) {
+        // M-2: check uniqueness before insert
+        if (dictType.getDictType() != null
+                && dictTypeMapper.selectByDictType(dictType.getDictType()) != null) {
+            throw new BusinessException("字典类型已存在: " + dictType.getDictType());
+        }
         String operator = SecurityUtils.getCurrentUsername();
         dictType.setCreateBy(operator);
         dictType.setUpdateBy(operator);
@@ -71,6 +82,8 @@ public class SysDictServiceImpl implements SysDictService {
         // Delete associated data first
         dictDataMapper.deleteByDictType(type.getDictType(), operator);
         dictTypeMapper.deleteById(id, operator);
+        // M-1: evict cache via CacheManager (avoids self-invocation problem)
+        evictCache(type.getDictType());
     }
 
     // ---- Dict Data ----
@@ -123,12 +136,15 @@ public class SysDictServiceImpl implements SysDictService {
         SysDictData data = getDataById(id);
         String operator = SecurityUtils.getCurrentUsername();
         dictDataMapper.deleteById(id, operator);
-        // Evict cache for this dict type
-        evictDictCache(data.getDictType());
+        // C-2: evict via CacheManager directly — avoids Spring AOP self-invocation trap
+        evictCache(data.getDictType());
     }
 
-    @CacheEvict(value = "dictCache", key = "#dictType")
-    public void evictDictCache(String dictType) {
-        // Cache eviction handled by annotation
+    private void evictCache(String dictType) {
+        if (dictType == null) return;
+        Cache cache = cacheManager.getCache("dictCache");
+        if (cache != null) {
+            cache.evict(dictType);
+        }
     }
 }

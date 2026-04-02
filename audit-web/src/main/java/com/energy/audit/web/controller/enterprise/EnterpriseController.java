@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 
@@ -94,7 +95,14 @@ public class EnterpriseController {
     @PutMapping("/{id}/expire")
     public R<Void> updateExpireDate(@PathVariable Long id, @RequestBody Map<String, String> body) {
         String dateStr = body.get("expireDate");
-        LocalDate expireDate = dateStr != null && !dateStr.isEmpty() ? LocalDate.parse(dateStr) : null;
+        LocalDate expireDate = null;
+        if (dateStr != null && !dateStr.isEmpty()) {
+            try {
+                expireDate = LocalDate.parse(dateStr);
+            } catch (DateTimeParseException e) {
+                return R.fail("日期格式无效，请使用 YYYY-MM-DD 格式");
+            }
+        }
         enterpriseService.updateExpireDate(id, expireDate);
         return R.ok();
     }

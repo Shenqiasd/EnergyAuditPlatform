@@ -34,7 +34,8 @@ public class OperationLogAspect {
     }
 
     @Pointcut("execution(* com.energy.audit.web.controller..*(..)) && " +
-              "!execution(* com.energy.audit.web.controller.system.AuthController.login(..))")
+              "!execution(* com.energy.audit.web.controller.system.AuthController.login(..)) && " +
+              "!execution(* com.energy.audit.web.controller.enterprise.RegistrationController.submit(..))")
     public void controllerMethods() {}
 
     @Around("controllerMethods()")

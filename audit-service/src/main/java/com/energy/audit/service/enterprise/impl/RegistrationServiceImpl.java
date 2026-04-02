@@ -58,6 +58,10 @@ public class RegistrationServiceImpl implements RegistrationService {
         registration.setApplyTime(LocalDateTime.now());
         registration.setAuditStatus(0);
         String operator = SecurityUtils.getCurrentUsername();
+        // Public endpoint: unauthenticated user submits own registration
+        if (operator == null) {
+            operator = registration.getContactPerson() != null ? registration.getContactPerson() : "self-register";
+        }
         registration.setCreateBy(operator);
         registration.setUpdateBy(operator);
         registrationMapper.insert(registration);

@@ -87,12 +87,8 @@ public class SysUserServiceImpl implements SysUserService {
             throw new BusinessException("密码长度不能少于6位");
         }
         String operator = SecurityUtils.getCurrentUsername();
-        SysUser update = new SysUser();
-        update.setId(id);
-        update.setPassword(passwordEncoder.encode(newPassword));
-        update.setPasswordChanged(0);
-        update.setUpdateBy(operator);
-        sysUserMapper.updateById(update);
+        // Use dedicated mapper — sets password + password_changed=0 (force user to re-set on next login)
+        sysUserMapper.resetPasswordByAdmin(id, passwordEncoder.encode(newPassword), operator);
     }
 
     @Override
