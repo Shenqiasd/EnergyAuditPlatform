@@ -47,6 +47,18 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- AOP for operation logging aspect -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <!-- Spring Security Crypto for BCryptPasswordEncoder -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
         <!-- MySQL driver for production deployments -->
         <dependency>
             <groupId>com.mysql</groupId>

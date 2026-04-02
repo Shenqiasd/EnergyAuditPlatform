@@ -89,6 +89,13 @@ export const adminMenus: MenuSection[] = [
     ],
   },
   {
+    section: '系统管理',
+    items: [
+      { key: 'system-users', icon: '👤', title: '用户管理', path: '/admin/system/users' },
+      { key: 'system-dict',  icon: '📖', title: '字典管理', path: '/admin/system/dict' },
+    ],
+  },
+  {
     section: '系统配置',
     items: [
       { key: 'template',        icon: '📋', title: '模板管理',       path: '/admin/template' },

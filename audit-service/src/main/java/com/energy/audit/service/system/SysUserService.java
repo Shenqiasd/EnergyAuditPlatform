@@ -20,4 +20,8 @@ public interface SysUserService {
     void update(SysUser user);
 
     void delete(Long id);
+
+    void resetPassword(Long id, String newPassword);
+
+    void updateStatus(Long id, Integer status);
 }

@@ -150,3 +150,82 @@ CREATE TABLE IF NOT EXISTS tpl_template (
     PRIMARY KEY (id),
     UNIQUE KEY uk_template_code (template_code)
 );
+
+-- 9. ent_registration  (matches EntRegistrationMapper.xml + production ent_registration)
+CREATE TABLE IF NOT EXISTS ent_registration (
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    enterprise_name VARCHAR(256) NOT NULL,
+    credit_code     VARCHAR(64)  NOT NULL,
+    contact_person  VARCHAR(64),
+    contact_email   VARCHAR(128),
+    contact_phone   VARCHAR(20),
+    apply_ip        VARCHAR(64),
+    apply_no        VARCHAR(64),
+    apply_time      DATETIME,
+    audit_status    TINYINT      DEFAULT 0,
+    audit_user_id   BIGINT,
+    audit_time      DATETIME,
+    audit_remark    VARCHAR(512),
+    create_by       VARCHAR(64),
+    create_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by       VARCHAR(64),
+    update_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted         TINYINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 10. sys_dict_type  (matches SysDictTypeMapper.xml + production sys_dict_type)
+CREATE TABLE IF NOT EXISTS sys_dict_type (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    dict_name   VARCHAR(128) NOT NULL,
+    dict_type   VARCHAR(128) NOT NULL,
+    status      TINYINT      DEFAULT 1,
+    remark      VARCHAR(256),
+    create_by   VARCHAR(64),
+    create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by   VARCHAR(64),
+    update_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted     TINYINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_dict_type (dict_type)
+);
+
+-- 11. sys_dict_data  (matches SysDictDataMapper.xml + production sys_dict_data)
+CREATE TABLE IF NOT EXISTS sys_dict_data (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    dict_type   VARCHAR(128) NOT NULL,
+    dict_label  VARCHAR(256) NOT NULL,
+    dict_value  VARCHAR(256) NOT NULL,
+    dict_sort   INT          DEFAULT 0,
+    css_class   VARCHAR(128),
+    status      TINYINT      DEFAULT 1,
+    remark      VARCHAR(256),
+    create_by   VARCHAR(64),
+    create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by   VARCHAR(64),
+    update_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted     TINYINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 12. sys_operation_log  (matches SysOperationLogMapper.xml + production sys_operation_log)
+CREATE TABLE IF NOT EXISTS sys_operation_log (
+    id               BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id          BIGINT,
+    username         VARCHAR(64),
+    operation        VARCHAR(256),
+    method           VARCHAR(256),
+    request_url      VARCHAR(512),
+    request_params   TEXT,
+    response_result  TEXT,
+    ip               VARCHAR(64),
+    status           TINYINT,
+    error_msg        TEXT,
+    operation_time   DATETIME,
+    create_by        VARCHAR(64),
+    create_time      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by        VARCHAR(64),
+    update_time      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted          TINYINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);

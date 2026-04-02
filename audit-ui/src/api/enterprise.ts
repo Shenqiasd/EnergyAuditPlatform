@@ -1,46 +1,63 @@
 import request from '@/utils/request'
 
 export interface Enterprise {
-  id: number
-  name: string
+  id?: number
+  enterpriseName: string
   creditCode: string
-  industry: string
-  address: string
-  contact: string
-  phone: string
-  status: number
-  createdAt: string
-  updatedAt: string
+  contactPerson?: string
+  contactEmail?: string
+  contactPhone?: string
+  remark?: string
+  expireDate?: string
+  isLocked?: number
+  isActive?: number
+  sortOrder?: number
+  createTime?: string
+  updateTime?: string
 }
 
 export interface EnterpriseQuery {
-  page?: number
-  size?: number
-  name?: string
-  status?: number
+  enterpriseName?: string
+  creditCode?: string
+  isLocked?: number
+  isActive?: number
+  pageNum?: number
+  pageSize?: number
 }
 
-/** Get enterprise list */
-export function getList(params?: EnterpriseQuery) {
+export interface PageResult<T> {
+  total: number
+  list: T[]
+}
+
+export function getList(params?: EnterpriseQuery): Promise<PageResult<Enterprise>> {
   return request.get('/enterprise', { params })
 }
 
-/** Get enterprise by ID */
-export function getById(id: number) {
+export function getById(id: number): Promise<Enterprise> {
   return request.get(`/enterprise/${id}`)
 }
 
-/** Create enterprise */
-export function create(data: Partial<Enterprise>) {
+export function create(data: Partial<Enterprise>): Promise<void> {
   return request.post('/enterprise', data)
 }
 
-/** Update enterprise */
-export function update(id: number, data: Partial<Enterprise>) {
+export function update(id: number, data: Partial<Enterprise>): Promise<void> {
   return request.put(`/enterprise/${id}`, data)
 }
 
-/** Remove enterprise */
-export function remove(id: number) {
+export function remove(id: number): Promise<void> {
   return request.delete(`/enterprise/${id}`)
+}
+
+export function lock(id: number): Promise<void> {
+  return request.put(`/enterprise/${id}/lock`)
+}
+
+export function unlock(id: number): Promise<void> {
+  return request.put(`/enterprise/${id}/unlock`)
+}
+
+export function updateExpireDate(id: number, expireDate: string): Promise<void> {
+  return request.put(`/enterprise/${id}/expire`, { expireDate })
 }

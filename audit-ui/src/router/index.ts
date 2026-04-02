@@ -71,6 +71,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'energy-category', name: 'AdminEnergyCategory', component: () => import('@/views/admin/energy-category/index.vue'), meta: { title: '能源品类管理' } },
       { path: 'emission-factor', name: 'AdminEmissionFactor', component: () => import('@/views/admin/emission-factor/index.vue'), meta: { title: '碳排放因子管理' } },
       { path: 'audit-manage', name: 'AdminAuditManage', component: () => import('@/views/admin/audit-manage/index.vue'), meta: { title: '审计管理' } },
+      // Sprint 1.2 — System management
+      { path: 'system/users', name: 'AdminSystemUsers', component: () => import('@/views/admin/system/users/index.vue'), meta: { title: '用户管理' } },
+      { path: 'system/dict', name: 'AdminSystemDict', component: () => import('@/views/admin/system/dict/index.vue'), meta: { title: '字典管理' } },
     ],
   },
   // Auditor portal
