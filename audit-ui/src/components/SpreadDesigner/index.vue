@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import type { GCSpreadDesigner, GCSpreadWorkbook } from '@/types/spreadjs'
+import { initSpreadJSLicense } from '@/utils/spreadjs-license'
 
 /**
  * SpreadDesigner — wraps GrapeCity SpreadJS Designer (loaded via CDN as window.GC).
@@ -30,6 +31,7 @@ onMounted(() => {
     console.error('SpreadDesigner: GC.Spread.Sheets.Designer not available — check CDN scripts in index.html')
     return
   }
+  initSpreadJSLicense()
   initDesigner()
 })
 

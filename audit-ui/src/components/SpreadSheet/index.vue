@@ -9,6 +9,7 @@ import {
   type TplSubmission,
   type TplTemplateVersion,
 } from '@/api/template'
+import { initSpreadJSLicense } from '@/utils/spreadjs-license'
 
 const props = defineProps<{
   templateId: number
@@ -69,6 +70,7 @@ async function initWorkbook() {
     releaseLockIfOwned()
     return
   }
+  initSpreadJSLicense()
   loading.value = true
   errorMsg.value = ''
   try {

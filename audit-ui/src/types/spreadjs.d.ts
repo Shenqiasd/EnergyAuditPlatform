@@ -56,6 +56,7 @@ export interface GCSpreadSheetsWorkbookConstructor {
 export interface GCSpreadSheets {
   Workbook: GCSpreadSheetsWorkbookConstructor
   Designer: GCSpreadDesignerNS
+  LicenseKey: string
 }
 
 export interface GCSpread {
