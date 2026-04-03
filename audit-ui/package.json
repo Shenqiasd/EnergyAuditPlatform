@@ -17,6 +17,10 @@
     "vue-router": "^4.3.0"
   },
   "devDependencies": {
+    "@grapecity/spread-sheets": "^17.0.2",
+    "@grapecity/spread-sheets-designer": "^17.0.2",
+    "@grapecity/spread-sheets-designer-resources-en": "^17.0.2",
+    "@grapecity/spread-sheets-io": "^17.0.2",
     "@types/node": "^20.11.25",
     "@vitejs/plugin-vue": "^5.0.4",
     "sass": "^1.72.0",
