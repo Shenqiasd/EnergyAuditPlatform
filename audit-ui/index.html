@@ -11,13 +11,17 @@
     <link rel="stylesheet" href="/spreadjs/spread.sheets.min.css" />
     <script src="/spreadjs/spread.sheets.all.min.js"></script>
 
-    <!-- SpreadJS Designer (ribbon UI) -->
+    <!-- SpreadJS add-on modules (must load before Designer) -->
+    <script src="/spreadjs/spread.sheets.shapes.min.js"></script>
+    <script src="/spreadjs/spread.sheets.charts.min.js"></script>
+    <script src="/spreadjs/spread.sheets.print.min.js"></script>
+    <script src="/spreadjs/spread.sheets.barcode.min.js"></script>
+    <script src="/spreadjs/spread.sheets.io.min.js"></script>
+
+    <!-- SpreadJS Designer (ribbon UI — must load last) -->
     <link rel="stylesheet" href="/spreadjs/spread.sheets.designer.min.css" />
     <script src="/spreadjs/spread.sheets.designer.resource.min.js"></script>
     <script src="/spreadjs/spread.sheets.designer.min.js"></script>
-
-    <!-- SpreadJS IO (Excel import/export) -->
-    <script src="/spreadjs/spread.sheets.io.min.js"></script>
   </head>
   <body>
     <div id="app"></div>
