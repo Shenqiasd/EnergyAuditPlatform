@@ -4,6 +4,7 @@ import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.common.result.PageResult;
 import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
+import com.energy.audit.service.template.BusinessTablePersister;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -18,18 +19,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Tag(name = "ExtractedData", description = "抽取数据总览")
 @RestController
 @RequestMapping("/extracted-data")
 public class ExtractedDataController {
-
-    private static final Set<String> ALLOWED_TABLES = Set.of(
-            "de_company_overview", "de_tech_indicator", "de_energy_consumption",
-            "de_energy_conversion", "de_product_unit_consumption", "de_equipment_detail",
-            "de_carbon_emission", "de_energy_balance", "de_energy_flow", "de_five_year_target"
-    );
 
     private static final Map<String, String> TABLE_LABELS = new LinkedHashMap<>();
 
@@ -103,7 +97,7 @@ public class ExtractedDataController {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
 
-        if (!ALLOWED_TABLES.contains(tableName)) {
+        if (!BusinessTablePersister.ALLOWED_TABLES.contains(tableName)) {
             throw new BusinessException(400, "不允许查询的表: " + tableName);
         }
         if (pageNum < 1) pageNum = 1;

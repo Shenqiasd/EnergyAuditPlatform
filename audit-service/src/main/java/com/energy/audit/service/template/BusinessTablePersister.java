@@ -18,7 +18,7 @@ public class BusinessTablePersister {
 
     private static final Logger log = LoggerFactory.getLogger(BusinessTablePersister.class);
 
-    private static final Set<String> ALLOWED_TABLES = Set.of(
+    public static final Set<String> ALLOWED_TABLES = Set.of(
             "de_company_overview", "de_tech_indicator", "de_energy_consumption",
             "de_energy_conversion", "de_product_unit_consumption", "de_equipment_detail",
             "de_carbon_emission", "de_energy_balance", "de_energy_flow", "de_five_year_target"
