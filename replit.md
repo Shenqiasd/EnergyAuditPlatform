@@ -50,9 +50,18 @@ mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
 - "Start application" workflow: `cd audit-ui && npm run dev` on port 5000
 
 ## Database Schemas
-- **Production**: `sql/` directory — 55 tables for MySQL 8.0
-- **Dev H2**: `audit-web/src/main/resources/schema-h2.sql` (7 core tables)
+- **Production**: `sql/` directory — 55 tables for MySQL 8.0; `sql/02-wave4-data-extraction.sql` adds 12 de_* tables + tpl_tag_mapping ALTER
+- **Dev H2**: `audit-web/src/main/resources/schema-h2.sql` (~32 tables including de_* extraction tables)
 - **Dev seed**: `audit-web/src/main/resources/data-h2.sql` (admin/admin123)
+
+## Wave 4 — Template-Driven Data Extraction (SCALAR + TABLE Dual Mapping Engine)
+- **Core concept**: SpreadJS templates define all data collection/calculation logic; software handles workflow
+- **tpl_tag_mapping** extended: mapping_type (SCALAR/TABLE), source_type (NAMED_RANGE/CELL_TAG), row_key_column, column_mappings (JSON), header_row
+- **DiscoveredField DTO**: Auto-detects Named Range (single→SCALAR, multi→TABLE) vs Cell Tag (default SCALAR, manual TABLE)
+- **SpreadsheetDataExtractor**: Supports both SCALAR extraction (cell value) and TABLE extraction (row-by-row with column_mappings)
+- **DataPersistenceService**: Routes extracted data to generic de_submission_field / de_submission_table tables
+- **12 de_* tables**: 10 key business tables (company_overview, tech_indicator, energy_consumption, energy_conversion, product_unit_consumption, equipment_detail, carbon_emission, energy_balance, energy_flow, five_year_target) + 2 generic (de_submission_field, de_submission_table)
+- **Frontend**: Admin template designer sidebar renamed to "字段映射配置", shows source type badges, mapping type selector, TABLE-specific config panel (cellRange, headerRow, columnMappings JSON, rowKeyColumn)
 
 ## Wave 0 — Completed (feat/wave0-complete branch)
 - 6 MyBatis Mapper XML files created in `audit-dao/src/main/resources/mapper/`
@@ -62,7 +71,10 @@ mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
 - Backend smoke-tested: login returns JWT, `passwordChanged=false` triggers force-change dialog
 
 ## Key Technologies
-- **SpreadJS**: Excel-like data entry interface
+- **SpreadJS v17.0.2**: Excel-like data entry interface
+  - Files served locally from `audit-ui/public/spreadjs/` (CDN cdn.grapecity.com is blocked in Replit)
+  - npm packages: `@grapecity/spread-sheets{,-designer,-designer-resources-en,-io}@17.0.2`
+  - Copied via: `cp node_modules/@grapecity/spread-sheets/dist/*.min.js public/spreadjs/`
 - **AntV X6**: Energy flow diagram visualization
 - **ECharts**: Data dashboards
 - **OnlyOffice**: Online document editing

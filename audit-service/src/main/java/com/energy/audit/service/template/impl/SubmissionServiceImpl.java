@@ -6,6 +6,7 @@ import com.energy.audit.dao.mapper.template.TplSubmissionMapper;
 import com.energy.audit.model.entity.template.TplSubmission;
 import com.energy.audit.model.entity.template.TplTagMapping;
 import com.energy.audit.model.entity.template.TplTemplateVersion;
+import com.energy.audit.service.template.DataPersistenceService;
 import com.energy.audit.service.template.SpreadsheetDataExtractor;
 import com.energy.audit.service.template.SubmissionService;
 import com.energy.audit.service.template.TagMappingService;
@@ -26,17 +27,20 @@ public class SubmissionServiceImpl implements SubmissionService {
     private final TagMappingService tagMappingService;
     private final SpreadsheetDataExtractor dataExtractor;
     private final TemplateVersionService versionService;
+    private final DataPersistenceService dataPersistenceService;
     private final ObjectMapper objectMapper;
 
     public SubmissionServiceImpl(TplSubmissionMapper submissionMapper,
                                  TagMappingService tagMappingService,
                                  SpreadsheetDataExtractor dataExtractor,
                                  TemplateVersionService versionService,
+                                 DataPersistenceService dataPersistenceService,
                                  ObjectMapper objectMapper) {
         this.submissionMapper = submissionMapper;
         this.tagMappingService = tagMappingService;
         this.dataExtractor = dataExtractor;
         this.versionService = versionService;
+        this.dataPersistenceService = dataPersistenceService;
         this.objectMapper = objectMapper;
     }
 
@@ -100,6 +104,10 @@ public class SubmissionServiceImpl implements SubmissionService {
         } catch (JsonProcessingException e) {
             throw new BusinessException("数据抽取序列化失败: " + e.getMessage());
         }
+
+        dataPersistenceService.persistExtractedData(
+                submissionId, enterpriseId, sub.getAuditYear(), extracted, mappings);
+
         String operator = SecurityUtils.getRequiredCurrentUsername();
         TplSubmission upd = new TplSubmission();
         upd.setId(submissionId);

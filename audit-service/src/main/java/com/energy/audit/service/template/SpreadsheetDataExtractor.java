@@ -1,7 +1,9 @@
 package com.energy.audit.service.template;
 
 import com.energy.audit.common.exception.BusinessException;
+import com.energy.audit.model.dto.DiscoveredField;
 import com.energy.audit.model.entity.template.TplTagMapping;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -10,22 +12,16 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-/**
- * Extracts structured data from SpreadJS JSON using tag mappings.
- *
- * SpreadJS JSON structure:
- *   Named ranges: root.names[] → { name, row, col, rowCount, colCount, sheetIndex }
- *   Cell tags:    root.sheets[sheetName].data.dataTable[row][col].tag → string
- */
 @Component
 public class SpreadsheetDataExtractor {
 
     private static final Logger log = LoggerFactory.getLogger(SpreadsheetDataExtractor.class);
+    private static final Pattern CELL_RANGE_PATTERN = Pattern.compile("([A-Z]+)(\\d+):([A-Z]+)(\\d+)");
 
     private final ObjectMapper objectMapper;
 
@@ -33,13 +29,6 @@ public class SpreadsheetDataExtractor {
         this.objectMapper = objectMapper;
     }
 
-    /**
-     * Extract data from SpreadJS JSON based on tag/namedRange mappings.
-     *
-     * @param spreadjsJson the SpreadJS workbook JSON
-     * @param tagMappings  the tag mapping definitions
-     * @return extracted data as fieldName → value map
-     */
     public Map<String, Object> extractData(String spreadjsJson, List<TplTagMapping> tagMappings) {
         Map<String, Object> result = new HashMap<>();
         try {
@@ -50,8 +39,6 @@ public class SpreadsheetDataExtractor {
                 return result;
             }
 
-            // Collect sheet names into a List once — preserves order and avoids
-            // relying on repeated iterator traversal for sheetIndex resolution (fix C-1).
             List<String> sheetNameList = new ArrayList<>();
             sheets.fieldNames().forEachRemaining(sheetNameList::add);
 
@@ -59,25 +46,38 @@ public class SpreadsheetDataExtractor {
             Map<String, JsonNode> cellTags = parseCellTags(sheets);
 
             for (TplTagMapping mapping : tagMappings) {
-                Object value = null;
                 String tagName = mapping.getTagName();
+                String mappingType = mapping.getMappingType() != null ? mapping.getMappingType() : "SCALAR";
 
-                if (namedRanges.containsKey(tagName)) {
-                    value = extractFromNamedRange(sheets, sheetNameList, namedRanges.get(tagName));
-                } else if (cellTags.containsKey(tagName)) {
-                    value = extractCellValue(cellTags.get(tagName));
+                if ("TABLE".equalsIgnoreCase(mappingType)) {
+                    List<Map<String, Object>> tableData = extractTableData(
+                            sheets, sheetNameList, namedRanges, mapping);
+
+                    if (mapping.getRequired() != null && mapping.getRequired() == 1 && tableData.isEmpty()) {
+                        throw new BusinessException("必填表格 [" + mapping.getFieldName() + "] 无有效数据行");
+                    }
+
+                    result.put(mapping.getFieldName(), tableData);
+                    log.debug("Extracted TABLE: {} tag: {} rows: {}", mapping.getFieldName(), tagName,
+                            tableData.size());
+                } else {
+                    Object value = null;
+                    if (namedRanges.containsKey(tagName)) {
+                        value = extractFromNamedRange(sheets, sheetNameList, namedRanges.get(tagName));
+                    } else if (cellTags.containsKey(tagName)) {
+                        value = extractCellValue(cellTags.get(tagName));
+                    }
+
+                    value = convertType(value, mapping.getDataType());
+
+                    if (mapping.getRequired() != null && mapping.getRequired() == 1
+                            && (value == null || value.toString().isBlank())) {
+                        throw new BusinessException("必填字段 [" + mapping.getFieldName() + "] 未填写");
+                    }
+
+                    result.put(mapping.getFieldName(), value);
+                    log.debug("Extracted SCALAR: {} tag: {} value: {}", mapping.getFieldName(), tagName, value);
                 }
-
-                value = convertType(value, mapping.getDataType());
-
-                // M-2: enforce required fields
-                if (mapping.getRequired() != null && mapping.getRequired() == 1
-                        && (value == null || value.toString().isBlank())) {
-                    throw new BusinessException("必填字段 [" + mapping.getFieldName() + "] 未填写");
-                }
-
-                result.put(mapping.getFieldName(), value);
-                log.debug("Extracted field: {} tag: {} value: {}", mapping.getFieldName(), tagName, value);
             }
         } catch (BusinessException be) {
             throw be;
@@ -88,29 +88,163 @@ public class SpreadsheetDataExtractor {
         return result;
     }
 
-    /**
-     * Discover all tag names (cell tags + named ranges) in a SpreadJS workbook JSON.
-     * Throws {@link BusinessException} on parse failure so callers can roll back.
-     */
-    public Set<String> discoverTagNames(String templateJson) {
+    public List<DiscoveredField> discoverFields(String templateJson) {
         if (templateJson == null || templateJson.isBlank()) {
             throw new BusinessException("模板 JSON 不能为空");
         }
         try {
             JsonNode root = objectMapper.readTree(templateJson);
-            Set<String> result = new HashSet<>();
-            parseNamedRanges(root).keySet().forEach(result::add);
+            List<DiscoveredField> fields = new ArrayList<>();
+
+            JsonNode names = root.get("names");
+            if (names != null && names.isArray()) {
+                for (JsonNode nameNode : names) {
+                    String name = nameNode.has("name") ? nameNode.get("name").asText() : null;
+                    if (name == null || name.isBlank()) continue;
+
+                    int sheetIdx = nameNode.path("sheetIndex").asInt(0);
+                    int row = nameNode.path("row").asInt(0);
+                    int col = nameNode.path("col").asInt(0);
+                    int rowCount = nameNode.path("rowCount").asInt(1);
+                    int colCount = nameNode.path("colCount").asInt(1);
+
+                    if (rowCount > 1 || colCount > 1) {
+                        fields.add(DiscoveredField.namedRangeTable(name, sheetIdx, row, col, rowCount, colCount));
+                    } else {
+                        fields.add(DiscoveredField.namedRangeScalar(name, sheetIdx, row, col));
+                    }
+                }
+            }
+
             JsonNode sheets = root.get("sheets");
             if (sheets != null && sheets.isObject()) {
-                parseCellTags(sheets).keySet().forEach(result::add);
+                int sheetIdx = 0;
+                var it = sheets.fieldNames();
+                while (it.hasNext()) {
+                    String sheetName = it.next();
+                    JsonNode dataTable = sheets.get(sheetName).path("data").path("dataTable");
+                    if (dataTable.isObject()) {
+                        var rowIt = dataTable.fields();
+                        while (rowIt.hasNext()) {
+                            var rowEntry = rowIt.next();
+                            var colIt = rowEntry.getValue().fields();
+                            while (colIt.hasNext()) {
+                                var colEntry = colIt.next();
+                                JsonNode cell = colEntry.getValue();
+                                JsonNode tagNode = cell.get("tag");
+                                if (tagNode == null) continue;
+                                if (tagNode.isTextual()) {
+                                    String tagValue = tagNode.asText();
+                                    if (!tagValue.isBlank()) {
+                                        fields.add(DiscoveredField.cellTag(tagValue, sheetIdx));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    sheetIdx++;
+                }
             }
-            return result;
+
+            return fields;
         } catch (BusinessException be) {
             throw be;
         } catch (Exception e) {
-            log.error("discoverTagNames: failed to parse templateJson — {}", e.getMessage());
-            throw new BusinessException("模板 JSON 解析失败，Tag 同步已中止: " + e.getMessage());
+            log.error("discoverFields: failed to parse templateJson — {}", e.getMessage());
+            throw new BusinessException("模板 JSON 解析失败，字段发现已中止: " + e.getMessage());
         }
+    }
+
+    @Deprecated
+    public java.util.Set<String> discoverTagNames(String templateJson) {
+        java.util.Set<String> result = new java.util.HashSet<>();
+        for (DiscoveredField f : discoverFields(templateJson)) {
+            result.add(f.getTagName());
+        }
+        return result;
+    }
+
+    // ── TABLE extraction ────────────────────────────────────────────────────
+
+    private List<Map<String, Object>> extractTableData(
+            JsonNode sheets, List<String> sheetNameList,
+            Map<String, JsonNode> namedRanges, TplTagMapping mapping) {
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        String tagName = mapping.getTagName();
+
+        int startRow, startCol, rowCount, colCount;
+        int sheetIdx = mapping.getSheetIndex() != null ? mapping.getSheetIndex() : 0;
+
+        JsonNode rangeNode = namedRanges.get(tagName);
+        if (rangeNode != null) {
+            sheetIdx = rangeNode.path("sheetIndex").asInt(sheetIdx);
+            startRow = rangeNode.path("row").asInt(0);
+            startCol = rangeNode.path("col").asInt(0);
+            rowCount = rangeNode.path("rowCount").asInt(1);
+            colCount = rangeNode.path("colCount").asInt(1);
+        } else if (mapping.getCellRange() != null && !mapping.getCellRange().isBlank()) {
+            int[] parsed = parseCellRange(mapping.getCellRange());
+            startRow = parsed[0];
+            startCol = parsed[1];
+            rowCount = parsed[2] - parsed[0] + 1;
+            colCount = parsed[3] - parsed[1] + 1;
+        } else {
+            log.warn("TABLE mapping '{}' has no Named Range and no cellRange configured", tagName);
+            return rows;
+        }
+
+        if (sheetIdx < 0 || sheetIdx >= sheetNameList.size()) {
+            log.warn("extractTableData: sheetIndex {} out of range for tag '{}'", sheetIdx, tagName);
+            return rows;
+        }
+
+        String sheetName = sheetNameList.get(sheetIdx);
+        JsonNode dataTable = sheets.get(sheetName).path("data").path("dataTable");
+
+        int headerRowAbs = mapping.getHeaderRow() != null ? (startRow + mapping.getHeaderRow()) : -1;
+        Integer rowKeyCol = mapping.getRowKeyColumn();
+        List<ColumnMapping> colMaps = parseColumnMappings(mapping.getColumnMappings());
+
+        for (int r = startRow; r < startRow + rowCount; r++) {
+            if (r == headerRowAbs) continue;
+
+            JsonNode rowNode = dataTable.path(String.valueOf(r));
+            if (rowNode.isMissingNode()) continue;
+
+            boolean hasAnyValue = false;
+            Map<String, Object> rowData = new HashMap<>();
+            rowData.put("_rowIndex", r - startRow);
+
+            if (rowKeyCol != null) {
+                Object keyVal = extractCellValue(rowNode.path(String.valueOf(startCol + rowKeyCol)));
+                if (keyVal != null) {
+                    rowData.put("_rowKey", keyVal.toString());
+                }
+            }
+
+            if (!colMaps.isEmpty()) {
+                for (ColumnMapping cm : colMaps) {
+                    int absCol = startCol + cm.col;
+                    Object val = extractCellValue(rowNode.path(String.valueOf(absCol)));
+                    val = convertType(val, cm.type);
+                    if (val != null) hasAnyValue = true;
+                    rowData.put(cm.field, val);
+                }
+            } else {
+                for (int c = startCol; c < startCol + colCount; c++) {
+                    Object val = extractCellValue(rowNode.path(String.valueOf(c)));
+                    if (val != null) hasAnyValue = true;
+                    rowData.put("col_" + (c - startCol), val);
+                }
+            }
+
+            if (hasAnyValue) {
+                rows.add(rowData);
+            }
+        }
+
+        return rows;
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
@@ -139,18 +273,14 @@ public class SpreadsheetDataExtractor {
                         JsonNode cell = colEntry.getValue();
                         JsonNode tagNode = cell.get("tag");
                         if (tagNode == null) return;
-                        String tagValue;
                         if (tagNode.isTextual()) {
-                            // M-1: only accept plain-text tags; object tags are skipped
-                            // (SpreadJS object tags should be stringified before being used as tag names)
-                            tagValue = tagNode.asText();
+                            String tagValue = tagNode.asText();
+                            if (!tagValue.isBlank()) {
+                                map.put(tagValue, cell);
+                            }
                         } else {
                             log.debug("parseCellTags: non-text tag ignored — sheet={} type={}",
                                     sheetName, tagNode.getNodeType());
-                            return;
-                        }
-                        if (!tagValue.isBlank()) {
-                            map.put(tagValue, cell);
                         }
                     })
                 );
@@ -159,11 +289,6 @@ public class SpreadsheetDataExtractor {
         return map;
     }
 
-    /**
-     * Resolve a named range to its cell value.
-     * Uses a pre-built List of sheet names so sheetIndex lookup is O(1) and
-     * not sensitive to JSON field iteration order. (fix C-1)
-     */
     private Object extractFromNamedRange(JsonNode sheets, List<String> sheetNameList, JsonNode rangeNode) {
         int sheetIdx = rangeNode.path("sheetIndex").asInt(0);
         int row = rangeNode.path("row").asInt(0);
@@ -180,10 +305,6 @@ public class SpreadsheetDataExtractor {
         return extractCellValue(cellNode);
     }
 
-    /**
-     * Extract the value from a SpreadJS cell node, preserving native numeric type
-     * to avoid precision loss from double string-conversion. (fix N-2)
-     */
     private Object extractCellValue(JsonNode cellNode) {
         JsonNode val = cellNode.path("value");
         if (val.isMissingNode() || val.isNull()) return null;
@@ -191,14 +312,8 @@ public class SpreadsheetDataExtractor {
         return val.asText(null);
     }
 
-    /**
-     * Convert extracted string value to the target type declared in the tag mapping.
-     * DICT: value is stored as-is (raw user input). Dict label→code translation is
-     * out of scope for the extraction engine and should be handled at the reporting layer.
-     */
     private Object convertType(Object value, String dataType) {
         if (value == null || dataType == null) return value;
-        // If already a Number (from extractCellValue), only re-parse for STRING targets
         if (value instanceof Number && !"STRING".equalsIgnoreCase(dataType)) {
             Number num = (Number) value;
             return switch (dataType.toUpperCase()) {
@@ -213,12 +328,56 @@ public class SpreadsheetDataExtractor {
             return switch (dataType.toUpperCase()) {
                 case "NUMBER" -> str.contains(".") ? Double.parseDouble(str) : Long.parseLong(str);
                 case "DATE"   -> str;
-                case "DICT"   -> str;   // C-2: DICT passes through as raw string
+                case "DICT"   -> str;
                 default       -> str;
             };
         } catch (NumberFormatException e) {
             log.warn("Failed to convert value '{}' to type {}", str, dataType);
             return str;
         }
+    }
+
+    private int[] parseCellRange(String cellRange) {
+        Matcher m = CELL_RANGE_PATTERN.matcher(cellRange.toUpperCase().trim());
+        if (!m.matches()) {
+            throw new BusinessException("无效的单元格范围格式: " + cellRange);
+        }
+        int startCol = letterToCol(m.group(1));
+        int startRow = Integer.parseInt(m.group(2)) - 1;
+        int endCol = letterToCol(m.group(3));
+        int endRow = Integer.parseInt(m.group(4)) - 1;
+        return new int[]{startRow, startCol, endRow, endCol};
+    }
+
+    private int letterToCol(String letters) {
+        int col = 0;
+        for (char c : letters.toCharArray()) {
+            col = col * 26 + (c - 'A' + 1);
+        }
+        return col - 1;
+    }
+
+    private List<ColumnMapping> parseColumnMappings(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            List<ColumnMapping> mappings = objectMapper.readValue(json, new TypeReference<List<ColumnMapping>>() {});
+            for (int i = 0; i < mappings.size(); i++) {
+                ColumnMapping cm = mappings.get(i);
+                if (cm.field == null || cm.field.isBlank()) {
+                    throw new BusinessException("columnMappings 中第 " + (i + 1) + " 项 (col=" + cm.col + ") 缺少 field 属性");
+                }
+            }
+            return mappings;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("列映射 JSON 格式无效: " + e.getMessage());
+        }
+    }
+
+    public static class ColumnMapping {
+        public int col;
+        public String field;
+        public String type;
     }
 }

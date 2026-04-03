@@ -43,6 +43,22 @@ public class TplTagMapping extends BaseEntity {
     /** Cell range (e.g. A1:B10) */
     private String cellRange;
 
+    /** Mapping type: SCALAR or TABLE */
+    private String mappingType;
+
+    /** Source type: NAMED_RANGE or CELL_TAG */
+    private String sourceType;
+
+    /** For TABLE mapping: which column index serves as row key identifier */
+    private Integer rowKeyColumn;
+
+    /** For TABLE mapping: JSON array of column-to-field definitions
+     *  e.g. [{"col":0,"field":"energy_name","type":"STRING"},{"col":2,"field":"amount","type":"NUMBER"}] */
+    private String columnMappings;
+
+    /** For TABLE mapping: header row index to skip (0-based) */
+    private Integer headerRow;
+
     /** Remark */
     private String remark;
 }

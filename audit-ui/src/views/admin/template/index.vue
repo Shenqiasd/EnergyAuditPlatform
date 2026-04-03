@@ -41,6 +41,16 @@ const DATA_TYPE_OPTIONS = [
   { label: 'DICT', value: 'DICT' },
 ]
 
+const MAPPING_TYPE_OPTIONS = [
+  { label: '标量 (SCALAR)', value: 'SCALAR' },
+  { label: '表格 (TABLE)', value: 'TABLE' },
+]
+
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  NAMED_RANGE: 'Named Range',
+  CELL_TAG: 'Cell Tag',
+}
+
 // ── Template list ──────────────────────────────────────────────────────────────
 const loading = ref(false)
 const tableData = ref<TplTemplate[]>([])
@@ -432,21 +442,21 @@ onMounted(loadData)
         <!-- Right: Tag Config Panel -->
         <div class="designer-sidebar">
           <div class="sidebar-header">
-            <span class="sidebar-title">Tag 映射配置</span>
+            <span class="sidebar-title">字段映射配置</span>
             <el-button
               type="primary"
               size="small"
               :loading="designerTagsSaving"
               :disabled="isReadonly(designerVersion)"
               @click="handleSaveDesignerTags"
-            >保存标签配置</el-button>
+            >保存映射配置</el-button>
           </div>
 
           <el-scrollbar class="sidebar-scroll">
             <div v-loading="designerTagsLoading" class="tags-panel">
               <el-empty
                 v-if="!designerTagsLoading && designerTags.length === 0"
-                description="暂无 Tag — 先在设计器中给单元格设置 tag 属性，再点「保存草稿」自动发现"
+                description="暂无字段 — 先在设计器中给单元格设置 tag 属性或 Named Range，再点「保存草稿」自动发现"
                 :image-size="80"
               />
               <div
@@ -454,8 +464,16 @@ onMounted(loadData)
                 :key="tag.id ?? tag.tagName"
                 class="tag-item"
               >
-                <div class="tag-name">
+                <div class="tag-header">
                   <el-tag size="small" type="info">{{ tag.tagName }}</el-tag>
+                  <div class="tag-badges">
+                    <el-tag size="small" :type="tag.sourceType === 'NAMED_RANGE' ? 'success' : 'warning'" effect="plain">
+                      {{ SOURCE_TYPE_LABELS[tag.sourceType ?? 'CELL_TAG'] ?? tag.sourceType }}
+                    </el-tag>
+                    <el-tag size="small" :type="tag.mappingType === 'TABLE' ? 'primary' : 'info'" effect="plain">
+                      {{ tag.mappingType === 'TABLE' ? '表格' : '标量' }}
+                    </el-tag>
+                  </div>
                 </div>
                 <el-input
                   v-model="tag.fieldName"
@@ -473,9 +491,23 @@ onMounted(loadData)
                 />
                 <div class="tag-row" style="margin-top:4px">
                   <el-select
-                    v-model="tag.dataType"
+                    v-model="tag.mappingType"
                     size="small"
                     style="flex:1"
+                    :disabled="isReadonly(designerVersion) || tag.sourceType === 'NAMED_RANGE'"
+                    placeholder="映射类型"
+                  >
+                    <el-option
+                      v-for="opt in MAPPING_TYPE_OPTIONS"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
+                    />
+                  </el-select>
+                  <el-select
+                    v-model="tag.dataType"
+                    size="small"
+                    style="flex:1;margin-left:6px"
                     :disabled="isReadonly(designerVersion)"
                   >
                     <el-option
@@ -499,7 +531,48 @@ onMounted(loadData)
                   size="small"
                   :disabled="isReadonly(designerVersion)"
                   style="margin-top:4px"
+                  v-if="tag.dataType === 'DICT'"
                 />
+                <!-- TABLE-specific configuration -->
+                <div v-if="tag.mappingType === 'TABLE'" class="table-config">
+                  <div class="table-config-title">表格配置</div>
+                  <div class="tag-row" style="margin-top:4px">
+                    <el-input
+                      v-model="tag.cellRange"
+                      placeholder="单元格范围 (如 A2:F20)"
+                      size="small"
+                      :disabled="isReadonly(designerVersion) || tag.sourceType === 'NAMED_RANGE'"
+                      style="flex:1"
+                    />
+                    <el-input-number
+                      v-model="tag.headerRow"
+                      placeholder="表头行"
+                      size="small"
+                      :min="0"
+                      :disabled="isReadonly(designerVersion)"
+                      style="width:110px;margin-left:6px"
+                      controls-position="right"
+                    />
+                  </div>
+                  <el-input
+                    v-model="tag.columnMappings"
+                    placeholder='列映射 JSON (如 [{"col":0,"field":"name","type":"STRING"}])'
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 5 }"
+                    size="small"
+                    :disabled="isReadonly(designerVersion)"
+                    style="margin-top:4px"
+                  />
+                  <el-input-number
+                    v-model="tag.rowKeyColumn"
+                    placeholder="行标识列"
+                    size="small"
+                    :min="0"
+                    :disabled="isReadonly(designerVersion)"
+                    controls-position="right"
+                    style="width:100%;margin-top:4px"
+                  />
+                </div>
               </div>
             </div>
           </el-scrollbar>
@@ -622,12 +695,35 @@ onMounted(loadData)
   border-radius: 4px;
 }
 
-.tag-name {
+.tag-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 2px;
+}
+
+.tag-badges {
+  display: flex;
+  gap: 4px;
 }
 
 .tag-row {
   display: flex;
   align-items: center;
+}
+
+.table-config {
+  margin-top: 8px;
+  padding: 8px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  border: 1px dashed #d9ecff;
+}
+
+.table-config-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #409eff;
+  margin-bottom: 4px;
 }
 </style>

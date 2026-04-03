@@ -6,18 +6,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>能源审计平台</title>
 
-    <!-- SpreadJS CDN (evaluation / trial — watermark shown; replace with licensed package on production) -->
+    <!-- SpreadJS v17.0.2 — served locally from /spreadjs/ (npm @grapecity packages) -->
     <!-- Core SpreadJS (includes formula engine) -->
-    <link rel="stylesheet" href="https://cdn.grapecity.com/spreadjs/17.0.2/spread.sheets.min.css" />
-    <script src="https://cdn.grapecity.com/spreadjs/17.0.2/spread.sheets.all.min.js"></script>
+    <link rel="stylesheet" href="/spreadjs/spread.sheets.min.css" />
+    <script src="/spreadjs/spread.sheets.all.min.js"></script>
 
-    <!-- SpreadJS Designer (ribbon UI) -->
-    <link rel="stylesheet" href="https://cdn.grapecity.com/spreadjs/17.0.2/spread.sheets.designer.min.css" />
-    <script src="https://cdn.grapecity.com/spreadjs/17.0.2/spread.sheets.designer.resource.min.js"></script>
-    <script src="https://cdn.grapecity.com/spreadjs/17.0.2/spread.sheets.designer.min.js"></script>
+    <!-- SpreadJS add-on modules (must load before Designer) -->
+    <script src="/spreadjs/spread.sheets.shapes.min.js"></script>
+    <script src="/spreadjs/spread.sheets.charts.min.js"></script>
+    <script src="/spreadjs/spread.sheets.print.min.js"></script>
+    <script src="/spreadjs/spread.sheets.barcode.min.js"></script>
+    <script src="/spreadjs/spread.sheets.io.min.js"></script>
 
-    <!-- SpreadJS IO (Excel import/export) -->
-    <script src="https://cdn.grapecity.com/spreadjs/17.0.2/spread.sheets.io.min.js"></script>
+    <!-- SpreadJS Designer (ribbon UI — must load last) -->
+    <link rel="stylesheet" href="/spreadjs/spread.sheets.designer.min.css" />
+    <script src="/spreadjs/spread.sheets.designer.resource.min.js"></script>
+    <script src="/spreadjs/spread.sheets.designer.min.js"></script>
   </head>
   <body>
     <div id="app"></div>

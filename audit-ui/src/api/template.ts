@@ -35,7 +35,18 @@ export interface TplTagMapping {
   required?: number
   sheetIndex?: number
   cellRange?: string
+  mappingType?: string
+  sourceType?: string
+  rowKeyColumn?: number
+  columnMappings?: string
+  headerRow?: number
   remark?: string
+}
+
+export interface ColumnMappingItem {
+  col: number
+  field: string
+  type: string
 }
 
 export interface TplSubmission {

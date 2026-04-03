@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.extraction.DeSubmissionFieldMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.extraction.DeSubmissionField">
+        <id     column="id"             property="id"/>
+        <result column="submission_id"  property="submissionId"/>
+        <result column="enterprise_id"  property="enterpriseId"/>
+        <result column="audit_year"     property="auditYear"/>
+        <result column="tag_name"       property="tagName"/>
+        <result column="field_name"     property="fieldName"/>
+        <result column="value_text"     property="valueText"/>
+        <result column="value_number"   property="valueNumber"/>
+        <result column="value_date"     property="valueDate"/>
+        <result column="create_by"      property="createBy"/>
+        <result column="create_time"    property="createTime"/>
+        <result column="update_by"      property="updateBy"/>
+        <result column="update_time"    property="updateTime"/>
+        <result column="deleted"        property="deleted"/>
+    </resultMap>
+
+    <select id="selectBySubmissionId" resultMap="BaseResultMap">
+        SELECT * FROM de_submission_field
+        WHERE submission_id = #{submissionId} AND deleted = 0
+        ORDER BY id ASC
+    </select>
+
+    <insert id="batchInsert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO de_submission_field (
+            submission_id, enterprise_id, audit_year, tag_name, field_name,
+            value_text, value_number, value_date,
+            create_by, create_time, update_by, update_time, deleted
+        ) VALUES
+        <foreach collection="list" item="f" separator=",">
+        (
+            #{f.submissionId}, #{f.enterpriseId}, #{f.auditYear}, #{f.tagName}, #{f.fieldName},
+            #{f.valueText}, #{f.valueNumber}, #{f.valueDate},
+            #{f.createBy}, NOW(), #{f.updateBy}, NOW(), 0
+        )
+        </foreach>
+    </insert>
+
+    <update id="deleteBySubmissionId">
+        UPDATE de_submission_field
+        SET deleted = 1, update_by = #{updateBy}, update_time = NOW()
+        WHERE submission_id = #{submissionId} AND deleted = 0
+    </update>
+
+</mapper>
