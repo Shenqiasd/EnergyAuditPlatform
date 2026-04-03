@@ -67,8 +67,8 @@ mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
 - "Start application" workflow: `cd audit-ui && npm run dev` on port 5000
 
 ## Database Schemas
-- **Production**: `sql/` directory — 55+ tables for MySQL 8.0; `sql/02-wave4-data-extraction.sql` adds 12 de_* tables + tpl_tag_mapping ALTER
-- **Dev H2**: `audit-web/src/main/resources/schema-h2.sql` (~32 tables including de_* extraction tables)
+- **Production**: `sql/` directory — 55+ tables for MySQL 8.0; `sql/02-wave4-data-extraction.sql` adds 12 de_* tables + tpl_tag_mapping ALTER; `sql/03-wave6-schema-expansion.sql` adds 14 new de_* tables + 29 new columns across 6 existing tables
+- **Dev H2**: `audit-web/src/main/resources/schema-h2.sql` (46 tables including 24 de_* business tables + 2 generic)
 - **Dev seed**: `audit-web/src/main/resources/data-h2.sql` (admin/admin123)
 
 ## Wave 4 — Template-Driven Data Extraction (SCALAR + TABLE Dual Mapping Engine)
@@ -78,7 +78,7 @@ mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
 - **SpreadsheetDataExtractor**: Supports both SCALAR extraction (cell value) and TABLE extraction (row-by-row with column_mappings)
 - **DataPersistenceService**: Routes extracted data to generic de_submission_field / de_submission_table tables
 - **BusinessTablePersister**: Dynamic SQL with column name whitelist (`^[a-z][a-z0-9_]{0,63}$`), camelToSnake conversion
-- **12 de_* tables**: 10 key business tables (company_overview, tech_indicator, energy_consumption, energy_conversion, product_unit_consumption, equipment_detail, carbon_emission, energy_balance, energy_flow, five_year_target) + 2 generic (de_submission_field, de_submission_table)
+- **26 de_* tables**: 24 key business tables (company_overview, tech_indicator, energy_consumption, energy_conversion, product_unit_consumption, equipment_detail, carbon_emission, energy_balance, energy_flow, five_year_target, tech_reform_history, saving_project, product_output, meter_instrument, meter_config_rate, obsolete_equipment, product_energy_cost, saving_calculation, management_policy, saving_potential, management_suggestion, tech_reform_suggestion, rectification, report_text) + 2 generic (de_submission_field, de_submission_table)
 - **Frontend**: Admin template designer sidebar renamed to "字段映射配置", shows source type badges, mapping type selector, TABLE-specific config panel (cellRange, headerRow, columnMappings JSON, rowKeyColumn)
 
 ## Key Technologies
@@ -109,9 +109,9 @@ mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
 - `audit-ui/src/components/SpreadDesigner/index.vue` — V18 API compat with resolveDesignerConstructor()
 - `audit-ui/src/utils/spreadjs-license.ts` — centralized SpreadJS license initialization
 - `audit-ui/src/types/spreadjs.d.ts` — SpreadJS TypeScript declarations (V18 shape)
-- `audit-web/src/main/java/com/energy/audit/web/controller/data/ExtractedDataController.java` — extracted data overview API (GET /tables + GET /{tableName})
+- `audit-web/src/main/java/com/energy/audit/web/controller/data/ExtractedDataController.java` — extracted data overview API (GET /tables + GET /{tableName}), 24 table labels
 - `audit-ui/src/api/extracted-data.ts` — frontend API for extracted data queries
-- `audit-ui/src/views/enterprise/data/overview/index.vue` — extracted data overview page with year filter + 10 el-tabs
+- `audit-ui/src/views/enterprise/data/overview/index.vue` — extracted data overview page with year filter + 24 el-tabs with column labels
 - `audit-service/src/main/java/com/energy/audit/service/template/BusinessTablePersister.java` — dynamic business table routing
 - `audit-service/src/main/java/com/energy/audit/service/template/SpreadsheetDataExtractor.java` — SCALAR+TABLE extraction
 - `audit-service/src/main/java/com/energy/audit/service/template/impl/DataPersistenceServiceImpl.java` — dispatch logic
