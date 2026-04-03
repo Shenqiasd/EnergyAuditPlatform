@@ -20,6 +20,22 @@ A comprehensive enterprise-level web application for managing energy consumption
 - **Production**: MySQL 8.0 (`application-prod.yml`, `docker-compose.yml`) — DO NOT CHANGE
 - **Development**: H2 in-memory (`application-dev.yml`, `--spring.profiles.active=dev`)
 
+## Development Progress
+
+| Wave | Topic | Status |
+|------|-------|--------|
+| Wave 0 | Infrastructure & Auth | ✅ Completed |
+| Wave 1 | Admin Basic Functions | ✅ Completed |
+| Wave 2 | Enterprise Basic Settings | ✅ Completed |
+| Wave 3 | SpreadJS Template Engine | ✅ Completed |
+| Wave 4 | Template-Driven Data Extraction | ✅ Completed |
+| Wave 5 | Menu Restructure & Extracted Data Overview | ✅ Completed |
+| Wave 6-9 | Flow Diagram, Charts, Reports, Workflow | Planned |
+| Wave 10 | Carbon Management & Platform Integration | Partial (emission factor CRUD done) |
+| Wave 11 | Optimization & Testing | Planned |
+
+**Current stage**: Wave 5 complete — deleted 24 placeholder entry pages, reorganized enterprise menu (工作台/基础设置/数据填报/图表分析/报告管理), built extracted data overview page with backend API
+
 ## Development Setup
 
 ### Frontend
@@ -78,6 +94,40 @@ mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
 - **AntV X6**: Energy flow diagram visualization
 - **ECharts**: Data dashboards
 - **OnlyOffice**: Online document editing
+- **SpreadJS v18.2.5**: Excel-like data entry interface
+  - Files served locally from `audit-ui/public/spreadjs/` (CDN cdn.grapecity.com is blocked in Replit)
+  - npm packages: `@grapecity/spread-sheets{,-designer,-designer-resources-en,-io,-shapes,-charts,-print,-barcode}@18.2.5`
+  - V18 file layout differs from V17: CSS in `styles/`, designer is `designer.all.min.js`
+  - License key stored in `VITE_SPREADJS_LICENSE` env var, initialized via `src/utils/spreadjs-license.ts`
+  - V18 API change: `GC.Spread.Sheets.Designer` is the constructor directly (not `Designer.Designer`)
+  - `SpreadDesigner/index.vue` uses `resolveDesignerConstructor()` to handle both V17 and V18 patterns
+- **AntV X6**: Energy flow diagram visualization (FlowEditor.vue — skeleton placeholder)
+- **ECharts**: Data dashboards (ChartCard.vue — not yet created)
+- **OnlyOffice**: Online document editing (DocEditor.vue — skeleton placeholder)
+
+## Key Backend Patterns
+- **SecurityUtils**: Always use `getRequired*` variants
+- **Axios interceptor**: `request.ts` already extracts `res.data` — never add extra `.then((r: any) => r.data)`
+- **Tag mapping rules**: Named Range(1x1)→SCALAR; Named Range(multi)→TABLE auto; Cell Tag→SCALAR default, TABLE requires cellRange+headerRow
+- **BusinessTablePersister**: `NamedParameterJdbcTemplate`; column names validated via `^[a-z][a-z0-9_]{0,63}$`; `camelToSnake()` lowercases mixed-case with underscores
+- **de_* tables**: delete by `submission_id` (NOT enterprise_id+audit_year) for isolation
+- **PageResult**: Backend returns `rows` (not `list`). `setting.ts` is canonical pattern.
+- **Backend login**: `POST /api/auth/login`; dev: `admin/admin123` (userType=1), `enterprise/admin123` (userType=3, enterpriseId=1)
+- **MyBatis mapper XML**: `audit-dao/src/main/resources/mapper/{module}/`; MapperScan: `com.energy.audit.dao.mapper`
+
+## Important Files
+- `DEVELOPMENT_PLAN.md` — full development roadmap (Wave 0-11)
+- `audit-ui/src/config/menus.ts` — enterprise/admin/auditor menu definitions
+- `audit-ui/src/components/SpreadDesigner/index.vue` — V18 API compat with resolveDesignerConstructor()
+- `audit-ui/src/utils/spreadjs-license.ts` — centralized SpreadJS license initialization
+- `audit-ui/src/types/spreadjs.d.ts` — SpreadJS TypeScript declarations (V18 shape)
+- `audit-web/src/main/java/com/energy/audit/web/controller/data/ExtractedDataController.java` — extracted data overview API (GET /tables + GET /{tableName})
+- `audit-ui/src/api/extracted-data.ts` — frontend API for extracted data queries
+- `audit-ui/src/views/enterprise/data/overview/index.vue` — extracted data overview page with year filter + 10 el-tabs
+- `audit-service/src/main/java/com/energy/audit/service/template/BusinessTablePersister.java` — dynamic business table routing
+- `audit-service/src/main/java/com/energy/audit/service/template/SpreadsheetDataExtractor.java` — SCALAR+TABLE extraction
+- `audit-service/src/main/java/com/energy/audit/service/template/impl/DataPersistenceServiceImpl.java` — dispatch logic
+- `audit-web/src/main/resources/schema-h2.sql` — H2 dev schema (all de_* tables)
 
 ## Deployment
 - Static deployment: builds `audit-ui/dist`
