@@ -3,6 +3,7 @@ import request from '@/utils/request'
 export interface TableMeta {
   tableName: string
   label: string
+  count: number
 }
 
 export function getTableList(): Promise<TableMeta[]> {

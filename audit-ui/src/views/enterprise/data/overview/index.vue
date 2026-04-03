@@ -185,12 +185,13 @@ onMounted(async () => {
       activeTab.value = tables.value[0].tableName
     }
   } catch (e: any) {
-    ElMessage.error('Failed to load table list')
+    ElMessage.error('加载表列表失败')
   } finally {
     loading.value = false
   }
 })
 
+// activeTab 赋值会触发 watch → loadTableData()，无需在 onMounted 中额外调用
 watch([activeTab, auditYear], () => {
   if (activeTab.value) loadTableData()
 })
@@ -246,7 +247,7 @@ function getColumnLabel(tableName: string, column: string): string {
         <el-tab-pane
           v-for="t in tables"
           :key="t.tableName"
-          :label="t.label"
+          :label="t.count > 0 ? `${t.label} (${t.count})` : t.label"
           :name="t.tableName"
         >
           <el-table

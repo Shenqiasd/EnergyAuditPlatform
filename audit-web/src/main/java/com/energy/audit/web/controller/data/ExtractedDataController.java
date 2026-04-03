@@ -1,5 +1,6 @@
 package com.energy.audit.web.controller.data;
 
+import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.service.template.BusinessTablePersister;
@@ -15,6 +16,8 @@ import java.util.*;
 @RestController
 @RequestMapping("/extracted-data")
 public class ExtractedDataController {
+
+    private static final int MAX_ROWS = 1000;
 
     private static final Map<String, String> TABLE_LABELS;
     static {
@@ -52,14 +55,30 @@ public class ExtractedDataController {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    @Operation(summary = "List available business tables with labels")
+    private void requireEnterprise() {
+        Integer userType = SecurityUtils.getCurrentUserType();
+        if (userType == null || userType != 3) {
+            throw new BusinessException(403, "该操作仅企业用户可执行");
+        }
+    }
+
+    @Operation(summary = "List available business tables with labels and record counts")
     @GetMapping("/tables")
-    public R<List<Map<String, String>>> listTables() {
-        List<Map<String, String>> result = new ArrayList<>();
+    public R<List<Map<String, Object>>> listTables() {
+        requireEnterprise();
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+
+        List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<String, String> e : TABLE_LABELS.entrySet()) {
-            Map<String, String> item = new LinkedHashMap<>();
+            String countSql = "SELECT COUNT(*) FROM " + e.getKey()
+                    + " WHERE enterprise_id = :enterpriseId AND deleted = 0";
+            MapSqlParameterSource params = new MapSqlParameterSource("enterpriseId", enterpriseId);
+            int count = jdbcTemplate.queryForObject(countSql, params, Integer.class);
+
+            Map<String, Object> item = new LinkedHashMap<>();
             item.put("tableName", e.getKey());
             item.put("label", e.getValue());
+            item.put("count", count);
             result.add(item);
         }
         return R.ok(result);
@@ -70,6 +89,8 @@ public class ExtractedDataController {
     public R<List<Map<String, Object>>> queryTable(
             @PathVariable String tableName,
             @RequestParam(required = false) Integer auditYear) {
+
+        requireEnterprise();
 
         String table = tableName.toLowerCase();
         if (!BusinessTablePersister.ALLOWED_TABLES.contains(table)) {
@@ -88,7 +109,7 @@ public class ExtractedDataController {
             params.addValue("auditYear", auditYear);
         }
 
-        sql.append(" ORDER BY id ASC");
+        sql.append(" ORDER BY id ASC LIMIT ").append(MAX_ROWS);
 
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql.toString(), params);
         return R.ok(rows);
