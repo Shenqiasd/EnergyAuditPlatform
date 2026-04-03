@@ -237,7 +237,7 @@ watch(activeTab, () => {
 })
 
 onMounted(() => {
-  loadSummary().then(() => loadTableData())
+  loadSummary()
 })
 </script>
 

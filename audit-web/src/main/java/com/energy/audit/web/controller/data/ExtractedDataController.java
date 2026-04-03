@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 
 @Tag(name = "ExtractedData", description = "抽取数据总览")
 @RestController
@@ -60,28 +61,34 @@ public class ExtractedDataController {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
 
+        MapSqlParameterSource params = new MapSqlParameterSource();
+        params.addValue("enterpriseId", enterpriseId);
+
+        String yearFilter = "";
+        if (auditYear != null) {
+            yearFilter = " AND audit_year = :auditYear";
+            params.addValue("auditYear", auditYear);
+        }
+
+        StringJoiner unionJoiner = new StringJoiner(" UNION ALL ");
+        for (String tableName : TABLE_LABELS.keySet()) {
+            unionJoiner.add("SELECT '" + tableName + "' AS table_name, COUNT(*) AS cnt FROM "
+                    + tableName + " WHERE enterprise_id = :enterpriseId AND deleted = 0" + yearFilter);
+        }
+
+        List<Map<String, Object>> countRows = jdbcTemplate.queryForList(unionJoiner.toString(), params);
+
+        Map<String, Long> countMap = new LinkedHashMap<>();
+        for (Map<String, Object> row : countRows) {
+            countMap.put((String) row.get("table_name"), ((Number) row.get("cnt")).longValue());
+        }
+
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<String, String> entry : TABLE_LABELS.entrySet()) {
-            String tableName = entry.getKey();
-            String label = entry.getValue();
-
-            StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM ")
-                    .append(tableName)
-                    .append(" WHERE enterprise_id = :enterpriseId AND deleted = 0");
-            MapSqlParameterSource params = new MapSqlParameterSource();
-            params.addValue("enterpriseId", enterpriseId);
-
-            if (auditYear != null) {
-                sql.append(" AND audit_year = :auditYear");
-                params.addValue("auditYear", auditYear);
-            }
-
-            Long count = jdbcTemplate.queryForObject(sql.toString(), params, Long.class);
-
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("tableName", tableName);
-            item.put("label", label);
-            item.put("count", count != null ? count : 0);
+            item.put("tableName", entry.getKey());
+            item.put("label", entry.getValue());
+            item.put("count", countMap.getOrDefault(entry.getKey(), 0L));
             result.add(item);
         }
         return R.ok(result);
@@ -117,9 +124,11 @@ public class ExtractedDataController {
         Long total = jdbcTemplate.queryForObject(countSql, params, Long.class);
         if (total == null) total = 0L;
 
-        int offset = (pageNum - 1) * pageSize;
+        long offset = (long)(pageNum - 1) * pageSize;
         String dataSql = "SELECT * FROM " + tableName + where
-                + " ORDER BY id DESC LIMIT " + pageSize + " OFFSET " + offset;
+                + " ORDER BY id DESC LIMIT :limit OFFSET :offset";
+        params.addValue("limit", pageSize);
+        params.addValue("offset", offset);
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(dataSql, params);
 
         return R.ok(PageResult.of(total, rows));
