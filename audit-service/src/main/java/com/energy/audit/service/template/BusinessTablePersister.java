@@ -21,7 +21,12 @@ public class BusinessTablePersister {
     public static final Set<String> ALLOWED_TABLES = Set.of(
             "de_company_overview", "de_tech_indicator", "de_energy_consumption",
             "de_energy_conversion", "de_product_unit_consumption", "de_equipment_detail",
-            "de_carbon_emission", "de_energy_balance", "de_energy_flow", "de_five_year_target"
+            "de_carbon_emission", "de_energy_balance", "de_energy_flow", "de_five_year_target",
+            "de_tech_reform_history", "de_saving_project", "de_product_output",
+            "de_meter_instrument", "de_meter_config_rate", "de_obsolete_equipment",
+            "de_product_energy_cost", "de_saving_calculation", "de_management_policy",
+            "de_saving_potential", "de_management_suggestion", "de_tech_reform_suggestion",
+            "de_rectification", "de_report_text"
     );
 
     private static final Set<String> SYSTEM_COLUMNS = Set.of(

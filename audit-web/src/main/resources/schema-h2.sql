@@ -236,6 +236,13 @@ CREATE TABLE IF NOT EXISTS ent_enterprise_setting (
     superior_department    VARCHAR(256),
     unit_nature            VARCHAR(64),
     energy_enterprise_type VARCHAR(64),
+    is_central_enterprise  TINYINT       DEFAULT 0,
+    group_name             VARCHAR(256),
+    admin_division_code    VARCHAR(16),
+    energy_leader_phone    VARCHAR(20),
+    energy_dept_leader_phone VARCHAR(20),
+    energy_manager_cert    VARCHAR(128),
+    has_energy_center      TINYINT       DEFAULT 0,
     remark                 VARCHAR(512),
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -407,7 +414,7 @@ CREATE TABLE IF NOT EXISTS sys_operation_log (
 
 -- ============================================================================
 -- Data Extraction Tables (de_*)
--- 10 key business tables + 2 generic storage tables
+-- 24 key business tables + 2 generic storage tables
 -- ============================================================================
 
 -- 21. de_company_overview (Sheet 4/12 scalar fields)
@@ -457,6 +464,10 @@ CREATE TABLE IF NOT EXISTS de_tech_indicator (
     saving_benefit               DECIMAL(18,4),
     coal_target                  DECIMAL(18,4),
     coal_actual                  DECIMAL(18,4),
+    employee_count               INT,
+    energy_manager_count         INT,
+    total_energy_equiv_excl_green DECIMAL(18,4),
+    total_energy_equal_excl_green DECIMAL(18,4),
     create_by                    VARCHAR(64),
     create_time                  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by                    VARCHAR(64),
@@ -486,6 +497,12 @@ CREATE TABLE IF NOT EXISTS de_energy_consumption (
     equiv_factor           DECIMAL(18,6),
     equal_factor           DECIMAL(18,6),
     standard_coal          DECIMAL(18,4),
+    non_industrial_consumption DECIMAL(18,4),
+    consumption_total      DECIMAL(18,4),
+    ref_factor             DECIMAL(18,6),
+    transfer_out           DECIMAL(18,4),
+    gain_loss              DECIMAL(18,4),
+    unit_price             DECIMAL(18,4),
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by              VARCHAR(64),
@@ -567,6 +584,8 @@ CREATE TABLE IF NOT EXISTS de_equipment_detail (
     energy_efficiency      VARCHAR(32),
     install_location       VARCHAR(256),
     detail_json            CLOB,
+    equipment_overview     VARCHAR(512),
+    obsolete_status        VARCHAR(128),
     remark                 VARCHAR(512),
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -588,6 +607,14 @@ CREATE TABLE IF NOT EXISTS de_carbon_emission (
     emission_factor        DECIMAL(18,6),
     activity_data          DECIMAL(18,4),
     co2_emission           DECIMAL(18,4),
+    low_heat_value         DECIMAL(18,6),
+    carbon_content         DECIMAL(18,6),
+    oxidation_rate         DECIMAL(8,4),
+    conversion_output      DECIMAL(18,4),
+    recovery_amount        DECIMAL(18,4),
+    unit_output_emission   DECIMAL(18,6),
+    total_energy_consumption DECIMAL(18,4),
+    unit_output_energy     DECIMAL(18,6),
     remark                 VARCHAR(512),
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -607,6 +634,8 @@ CREATE TABLE IF NOT EXISTS de_energy_balance (
     row_category           VARCHAR(64),
     energy_name            VARCHAR(128),
     energy_value           DECIMAL(18,4),
+    measurement_unit       VARCHAR(32),
+    row_seq                INT,
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by              VARCHAR(64),
@@ -695,6 +724,316 @@ CREATE TABLE IF NOT EXISTS de_submission_table (
     row_index              INT           NOT NULL,
     row_key                VARCHAR(256),
     column_values          CLOB,
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- ============================================================================
+-- Wave 6: Additional Data Extraction Tables (14 new de_* tables)
+-- ============================================================================
+
+-- 33. de_tech_reform_history (Sheet 2 — prior energy-saving retrofit projects)
+CREATE TABLE IF NOT EXISTS de_tech_reform_history (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    seq_no                 INT,
+    project_name           VARCHAR(256),
+    main_content           CLOB,
+    investment             DECIMAL(18,4),
+    designed_saving        DECIMAL(18,4),
+    payback_period         DECIMAL(8,2),
+    completion_date        VARCHAR(32),
+    actual_saving          DECIMAL(18,4),
+    is_contract_energy     VARCHAR(8),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 34. de_saving_project (Sheet 3 — energy-saving projects)
+CREATE TABLE IF NOT EXISTS de_saving_project (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    project_type           VARCHAR(64),
+    project_name           VARCHAR(256),
+    impl_status            VARCHAR(32),
+    impl_date              VARCHAR(32),
+    investment             DECIMAL(18,4),
+    saving_amount          DECIMAL(18,4),
+    carbon_reduction       DECIMAL(18,4),
+    is_contract_energy     VARCHAR(8),
+    approval_dept          VARCHAR(128),
+    main_content           CLOB,
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 35. de_product_output (Sheet 4.5 — product output by year)
+CREATE TABLE IF NOT EXISTS de_product_output (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    product_name           VARCHAR(128),
+    annual_capacity        DECIMAL(18,4),
+    capacity_unit          VARCHAR(32),
+    annual_output          DECIMAL(18,4),
+    output_unit            VARCHAR(32),
+    unit_consumption       DECIMAL(18,6),
+    consumption_unit       VARCHAR(32),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 36. de_meter_instrument (Sheet 9 — energy metering instruments)
+CREATE TABLE IF NOT EXISTS de_meter_instrument (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    management_no          VARCHAR(64),
+    model_spec             VARCHAR(128),
+    manufacturer           VARCHAR(128),
+    serial_no              VARCHAR(64),
+    meter_name             VARCHAR(128),
+    multiplier             DECIMAL(10,4),
+    accuracy_class         VARCHAR(32),
+    energy_type            VARCHAR(64),
+    measurement_range      VARCHAR(128),
+    department             VARCHAR(128),
+    accuracy_grade         VARCHAR(32),
+    install_location       VARCHAR(256),
+    status                 VARCHAR(32),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 37. de_meter_config_rate (Sheet 10 — metering instrument configuration rate)
+CREATE TABLE IF NOT EXISTS de_meter_config_rate (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    energy_type            VARCHAR(64),
+    config_level           VARCHAR(32),
+    standard_rate          DECIMAL(8,4),
+    required_count         INT,
+    actual_count           INT,
+    actual_rate            DECIMAL(8,4),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 38. de_obsolete_equipment (Sheet 15 — obsolete equipment catalog)
+CREATE TABLE IF NOT EXISTS de_obsolete_equipment (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    seq_no                 INT,
+    equipment_name         VARCHAR(128),
+    model_spec             VARCHAR(128),
+    quantity               INT,
+    start_use_date         VARCHAR(32),
+    planned_retire_date    VARCHAR(32),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 39. de_product_energy_cost (Sheet 23 — product energy cost)
+CREATE TABLE IF NOT EXISTS de_product_energy_cost (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    seq_no                 INT,
+    product_name           VARCHAR(128),
+    energy_cost            DECIMAL(18,4),
+    production_cost        DECIMAL(18,4),
+    cost_ratio             DECIMAL(8,4),
+    energy_total_ratio     DECIMAL(8,4),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 40. de_saving_calculation (Sheet 24 — energy saving calculation data)
+CREATE TABLE IF NOT EXISTS de_saving_calculation (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    energy_equal_current   DECIMAL(18,4),
+    energy_equiv_current   DECIMAL(18,4),
+    gross_output_current   DECIMAL(18,4),
+    product_output_current DECIMAL(18,4),
+    product_unit_current   VARCHAR(32),
+    energy_equal_base      DECIMAL(18,4),
+    energy_equiv_base      DECIMAL(18,4),
+    gross_output_base      DECIMAL(18,4),
+    product_output_base    DECIMAL(18,4),
+    product_unit_base      VARCHAR(32),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 41. de_management_policy (Sheet 25 — energy management policies)
+CREATE TABLE IF NOT EXISTS de_management_policy (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    seq_no                 INT,
+    policy_name            VARCHAR(256),
+    main_content           CLOB,
+    supervise_dept         VARCHAR(128),
+    publish_date           VARCHAR(32),
+    valid_period           VARCHAR(64),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 42. de_saving_potential (Sheet 26 — energy saving potential details)
+CREATE TABLE IF NOT EXISTS de_saving_potential (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    seq_no                 INT,
+    category               VARCHAR(64),
+    project_name           VARCHAR(256),
+    main_content           CLOB,
+    saving_potential       DECIMAL(18,4),
+    calc_description       CLOB,
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 43. de_management_suggestion (Sheet 27 — energy management improvement suggestions)
+CREATE TABLE IF NOT EXISTS de_management_suggestion (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    seq_no                 INT,
+    project_name           VARCHAR(256),
+    main_content           CLOB,
+    investment             DECIMAL(18,4),
+    annual_saving          DECIMAL(18,4),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 44. de_tech_reform_suggestion (Sheet 28 — energy-saving retrofit suggestions)
+CREATE TABLE IF NOT EXISTS de_tech_reform_suggestion (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    seq_no                 INT,
+    project_name           VARCHAR(256),
+    main_content           CLOB,
+    investment             DECIMAL(18,4),
+    annual_saving          DECIMAL(18,4),
+    payback_period         DECIMAL(8,2),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 45. de_rectification (Sheet 29 — energy-saving rectification measures)
+CREATE TABLE IF NOT EXISTS de_rectification (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    seq_no                 INT,
+    project_name           VARCHAR(256),
+    measures               CLOB,
+    target_date            VARCHAR(32),
+    responsible_person     VARCHAR(64),
+    estimated_cost         DECIMAL(18,4),
+    annual_saving          DECIMAL(18,4),
+    annual_benefit         DECIMAL(18,4),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 46. de_report_text (Sheet 32 — supplementary report text)
+CREATE TABLE IF NOT EXISTS de_report_text (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    section_code           VARCHAR(16),
+    section_name           VARCHAR(128),
+    content                CLOB,
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by              VARCHAR(64),

@@ -29,16 +29,30 @@ public class ExtractedDataController {
     private static final Map<String, String> TABLE_LABELS = new LinkedHashMap<>();
 
     static {
-        TABLE_LABELS.put("de_company_overview", "企业概况");
-        TABLE_LABELS.put("de_tech_indicator", "技术指标");
-        TABLE_LABELS.put("de_energy_consumption", "能源消费");
-        TABLE_LABELS.put("de_energy_conversion", "能源加工转换");
-        TABLE_LABELS.put("de_product_unit_consumption", "单位产品能耗");
-        TABLE_LABELS.put("de_equipment_detail", "设备明细");
-        TABLE_LABELS.put("de_carbon_emission", "碳排放");
-        TABLE_LABELS.put("de_energy_balance", "能源平衡");
-        TABLE_LABELS.put("de_energy_flow", "能源流向");
-        TABLE_LABELS.put("de_five_year_target", "五年目标");
+        TABLE_LABELS.put("de_company_overview",         "企业概况");
+        TABLE_LABELS.put("de_tech_indicator",           "技术经济指标");
+        TABLE_LABELS.put("de_energy_consumption",       "能源消费量");
+        TABLE_LABELS.put("de_energy_conversion",        "能源加工转换");
+        TABLE_LABELS.put("de_product_unit_consumption", "产品单耗");
+        TABLE_LABELS.put("de_equipment_detail",         "设备明细");
+        TABLE_LABELS.put("de_carbon_emission",          "碳排放");
+        TABLE_LABELS.put("de_energy_balance",           "能源平衡");
+        TABLE_LABELS.put("de_energy_flow",              "能源流向");
+        TABLE_LABELS.put("de_five_year_target",         "十四五目标");
+        TABLE_LABELS.put("de_tech_reform_history",      "节能改造历史");
+        TABLE_LABELS.put("de_saving_project",           "节能项目");
+        TABLE_LABELS.put("de_product_output",           "产品产量");
+        TABLE_LABELS.put("de_meter_instrument",         "计量器具");
+        TABLE_LABELS.put("de_meter_config_rate",        "计量器具配备率");
+        TABLE_LABELS.put("de_obsolete_equipment",       "淘汰设备");
+        TABLE_LABELS.put("de_product_energy_cost",      "产品能源成本");
+        TABLE_LABELS.put("de_saving_calculation",       "节能量计算");
+        TABLE_LABELS.put("de_management_policy",        "管理制度");
+        TABLE_LABELS.put("de_saving_potential",         "节能潜力");
+        TABLE_LABELS.put("de_management_suggestion",    "管理建议");
+        TABLE_LABELS.put("de_tech_reform_suggestion",   "技改建议");
+        TABLE_LABELS.put("de_rectification",            "整改措施");
+        TABLE_LABELS.put("de_report_text",              "报告文本");
     }
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
