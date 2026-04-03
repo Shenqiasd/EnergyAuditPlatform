@@ -29,6 +29,9 @@ public class BusinessTablePersister {
             "create_by", "create_time", "update_by", "update_time", "deleted"
     );
 
+    private static final java.util.regex.Pattern SAFE_COLUMN_PATTERN =
+            java.util.regex.Pattern.compile("^[a-z][a-z0-9_]{0,63}$");
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public BusinessTablePersister(NamedParameterJdbcTemplate jdbcTemplate) {
@@ -56,6 +59,10 @@ public class BusinessTablePersister {
         if (!isBusinessTable(tableName)) return;
 
         String columnName = camelToSnake(fieldName);
+        if (!SAFE_COLUMN_PATTERN.matcher(columnName).matches()) {
+            log.warn("Skipping unsafe column name '{}' for scalar persist to '{}'", columnName, tableName);
+            return;
+        }
         Map<String, Object> row = new HashMap<>();
         row.put("submission_id", submissionId);
         row.put("enterprise_id", enterpriseId);
@@ -87,6 +94,10 @@ public class BusinessTablePersister {
                 if (key.startsWith("_")) continue;
                 String colName = camelToSnake(key);
                 if (!SYSTEM_COLUMNS.contains(colName)) {
+                    if (!SAFE_COLUMN_PATTERN.matcher(colName).matches()) {
+                        log.warn("Skipping unsafe column name '{}' for table '{}'", colName, tableName);
+                        continue;
+                    }
                     dbRow.put(colName, convertValue(entry.getValue()));
                 }
             }
