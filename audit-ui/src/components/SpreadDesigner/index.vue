@@ -53,7 +53,7 @@ function resolveDesignerConstructor(): (GCSpreadDesignerConstructor | null) {
 function resolveDefaultConfig(): object {
   const ns = window.GC?.Spread?.Sheets?.Designer as any
   if (!ns) return {}
-  return ns.DefaultConfig ?? (typeof ns === 'function' ? (ns as any).DefaultConfig : {}) ?? {}
+  return ns.DefaultConfig ?? {}
 }
 
 function initDesigner() {
