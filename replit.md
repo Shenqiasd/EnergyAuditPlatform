@@ -30,11 +30,38 @@ A comprehensive enterprise-level web application for managing energy consumption
 | Wave 3 | SpreadJS Template Engine | ✅ Completed |
 | Wave 4 | Template-Driven Data Extraction | ✅ Completed |
 | Wave 5 | Menu Restructure & Extracted Data Overview | ✅ Completed |
-| Wave 6-9 | Flow Diagram, Charts, Reports, Workflow | Planned |
+| Wave 6 | Schema (24 de_* tables) | ✅ Completed |
+| Wave 9.1 | Audit Task Management (3-portal workflow) | ✅ Completed |
+| Wave 9.2 | Rectification Tracking & Overdue Warning | ✅ Completed |
+| Wave 7-8 | Flow Diagram, Charts, Reports | Planned |
 | Wave 10 | Carbon Management & Platform Integration | Partial (emission factor CRUD done) |
 | Wave 11 | Optimization & Testing | Planned |
 
-**Current stage**: Wave 5 complete — deleted 24 placeholder entry pages, reorganized enterprise menu (工作台/基础设置/数据填报/图表分析/报告管理), built extracted data overview page with backend API
+**Current stage**: Wave 9.2 complete — Rectification tracking with overdue warning, auditor can create items, enterprise updates progress, daily overdue detection job
+
+## Wave 9.1 — Audit Task Management
+- **Tables**: `aw_audit_task`, `aw_audit_log` (H2 + MySQL schema)
+- **Entities**: `AwAuditTask`, `AwAuditLog` with transient `enterpriseName`, `assigneeName`
+- **Mapper**: XML with JOIN queries, `selectList` dynamic conditions, `clearResult` for resubmit
+- **Service**: `AuditTaskServiceImpl` — submitForAudit (auto-assign round-robin), assign, approve, reject, comment
+- **Controller**: `AuditTaskController` — object-level access control (enterprise=own tasks, auditor=assigned tasks, admin=all)
+- **ExtractedDataController**: Updated to allow auditor/admin access with `enterpriseId` param
+- **Frontend API**: `audit-task.ts` with status maps and action labels
+- **Pages**: Enterprise generate/index.vue (submit-audit), admin audit-manage (task list + assign dialog + detail drawer), auditor dashboard/tasks/review
+- **Seed user**: `auditor/admin123` (userType=2, id=3)
+
+## Wave 9.2 — Rectification Tracking & Overdue Warning
+- **Table**: `aw_rectification_track` (H2 + MySQL schema) — status: 0=未启动, 1=进行中, 2=已完成, 3=超期
+- **Entity**: `AwRectificationTrack` with transient `enterpriseName`, `taskTitle`
+- **Mapper**: XML with JOIN queries, `selectOverdueCandidates` for deadline check, `batchUpdateStatus`
+- **Service**: `RectificationServiceImpl` — createItems (batch), updateProgress (enterprise), acceptItem (auditor, status=1 only), markOverdueItems (scheduled)
+- **Controller**: `RectificationController` at `/audit/rectification` — IDOR-safe access control per endpoint
+- **Scheduled Job**: `RectificationOverdueJob` — daily at 01:00, marks overdue items (status 0/1 past deadline → 3)
+- **Frontend API**: `rectification.ts` with status maps
+- **Auditor review**: Added 整改管理 card with table + create dialog (batch add items with name/requirement/deadline) + 验收 button
+- **Enterprise dashboard**: Replaced mock todos with real rectification items from API, with update progress dialog
+- **Admin audit-manage**: Added 超期 column (red badge) + 仅超期 filter checkbox, batch query overdue counts
+- **Security**: Role-based + ownership checks prevent IDOR — auditors can only see/act on assigned tasks
 
 ## Development Setup
 
@@ -115,7 +142,7 @@ mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
 - **BusinessTablePersister**: `NamedParameterJdbcTemplate`; column names validated via `^[a-z][a-z0-9_]{0,63}$`; `camelToSnake()` lowercases mixed-case with underscores
 - **de_* tables**: delete by `submission_id` (NOT enterprise_id+audit_year) for isolation
 - **PageResult**: Backend returns `rows` (not `list`). `setting.ts` is canonical pattern.
-- **Backend login**: `POST /api/auth/login`; dev: `admin/admin123` (userType=1), `enterprise/admin123` (userType=3, enterpriseId=1)
+- **Backend login**: `POST /api/auth/login`; dev: `admin/admin123` (userType=1), `enterprise/admin123` (userType=3, enterpriseId=1), `auditor/admin123` (userType=2)
 - **MyBatis mapper XML**: `audit-dao/src/main/resources/mapper/{module}/`; MapperScan: `com.energy.audit.dao.mapper`
 
 ## Important Files

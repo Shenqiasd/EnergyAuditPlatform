@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.audit.AwRectificationTrackMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.audit.AwRectificationTrack">
+        <id     column="id"              property="id"/>
+        <result column="task_id"         property="taskId"/>
+        <result column="enterprise_id"   property="enterpriseId"/>
+        <result column="audit_year"      property="auditYear"/>
+        <result column="item_name"       property="itemName"/>
+        <result column="requirement"     property="requirement"/>
+        <result column="status"          property="status"/>
+        <result column="deadline"        property="deadline"/>
+        <result column="complete_time"   property="completeTime"/>
+        <result column="result"          property="result"/>
+        <result column="create_by"       property="createBy"/>
+        <result column="create_time"     property="createTime"/>
+        <result column="update_by"       property="updateBy"/>
+        <result column="update_time"     property="updateTime"/>
+        <result column="deleted"         property="deleted"/>
+        <result column="enterprise_name" property="enterpriseName"/>
+        <result column="task_title"      property="taskTitle"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        t.id, t.task_id, t.enterprise_id, t.audit_year, t.item_name,
+        t.requirement, t.status, t.deadline, t.complete_time, t.result,
+        t.create_by, t.create_time, t.update_by, t.update_time, t.deleted
+    </sql>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>,
+               e.enterprise_name AS enterprise_name,
+               at.task_title AS task_title
+        FROM aw_rectification_track t
+        LEFT JOIN ent_enterprise e ON e.id = t.enterprise_id AND e.deleted = 0
+        LEFT JOIN aw_audit_task at ON at.id = t.task_id AND at.deleted = 0
+        WHERE t.id = #{id} AND t.deleted = 0
+    </select>
+
+    <select id="selectList" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>,
+               e.enterprise_name AS enterprise_name,
+               at.task_title AS task_title
+        FROM aw_rectification_track t
+        LEFT JOIN ent_enterprise e ON e.id = t.enterprise_id AND e.deleted = 0
+        LEFT JOIN aw_audit_task at ON at.id = t.task_id AND at.deleted = 0
+        WHERE t.deleted = 0
+        <if test="taskId != null">
+            AND t.task_id = #{taskId}
+        </if>
+        <if test="enterpriseId != null">
+            AND t.enterprise_id = #{enterpriseId}
+        </if>
+        <if test="auditYear != null">
+            AND t.audit_year = #{auditYear}
+        </if>
+        <if test="status != null">
+            AND t.status = #{status}
+        </if>
+        ORDER BY t.create_time DESC
+    </select>
+
+    <select id="selectByTaskId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>,
+               e.enterprise_name AS enterprise_name,
+               at.task_title AS task_title
+        FROM aw_rectification_track t
+        LEFT JOIN ent_enterprise e ON e.id = t.enterprise_id AND e.deleted = 0
+        LEFT JOIN aw_audit_task at ON at.id = t.task_id AND at.deleted = 0
+        WHERE t.task_id = #{taskId} AND t.deleted = 0
+        ORDER BY t.create_time DESC
+    </select>
+
+    <select id="selectByEnterpriseId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>,
+               e.enterprise_name AS enterprise_name,
+               at.task_title AS task_title
+        FROM aw_rectification_track t
+        LEFT JOIN ent_enterprise e ON e.id = t.enterprise_id AND e.deleted = 0
+        LEFT JOIN aw_audit_task at ON at.id = t.task_id AND at.deleted = 0
+        WHERE t.enterprise_id = #{enterpriseId} AND t.deleted = 0
+        ORDER BY
+            CASE WHEN t.status = 3 THEN 0
+                 WHEN t.status = 0 THEN 1
+                 WHEN t.status = 1 THEN 2
+                 ELSE 3 END,
+            t.deadline ASC
+    </select>
+
+    <select id="countOverdueByTaskId" resultType="int">
+        SELECT COUNT(*) FROM aw_rectification_track
+        WHERE task_id = #{taskId} AND status = 3 AND deleted = 0
+    </select>
+
+    <select id="selectOverdueCandidates" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM aw_rectification_track t
+        WHERE t.deleted = 0
+          AND t.status IN (0, 1)
+          AND t.deadline IS NOT NULL
+          AND t.deadline &lt; NOW()
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO aw_rectification_track (task_id, enterprise_id, audit_year, item_name,
+            requirement, status, deadline, result, create_by)
+        VALUES (#{taskId}, #{enterpriseId}, #{auditYear}, #{itemName},
+            #{requirement}, #{status}, #{deadline}, #{result}, #{createBy})
+    </insert>
+
+    <update id="updateById">
+        UPDATE aw_rectification_track
+        <set>
+            update_time = NOW(),
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="completeTime != null">complete_time = #{completeTime},</if>
+            <if test="result != null">result = #{result},</if>
+            <if test="itemName != null">item_name = #{itemName},</if>
+            <if test="requirement != null">requirement = #{requirement},</if>
+            <if test="deadline != null">deadline = #{deadline},</if>
+        </set>
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="batchUpdateStatus">
+        UPDATE aw_rectification_track
+        SET status = #{status}, update_time = NOW(), update_by = #{updateBy}
+        WHERE deleted = 0 AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+</mapper>

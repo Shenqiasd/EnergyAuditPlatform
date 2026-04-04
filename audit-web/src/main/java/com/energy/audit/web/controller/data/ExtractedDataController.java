@@ -4,6 +4,8 @@ import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.common.result.PageResult;
 import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
+import com.energy.audit.dao.mapper.audit.AwAuditTaskMapper;
+import com.energy.audit.model.entity.audit.AwAuditTask;
 import com.energy.audit.service.template.BusinessTablePersister;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -56,27 +58,50 @@ public class ExtractedDataController {
     }
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final AwAuditTaskMapper auditTaskMapper;
 
-    public ExtractedDataController(NamedParameterJdbcTemplate jdbcTemplate) {
+    public ExtractedDataController(NamedParameterJdbcTemplate jdbcTemplate, AwAuditTaskMapper auditTaskMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.auditTaskMapper = auditTaskMapper;
     }
 
-    private void requireEnterprise() {
+    private Long resolveEnterpriseId(Long paramEnterpriseId) {
         Integer userType = SecurityUtils.getCurrentUserType();
-        if (userType == null || userType != 3) {
-            throw new BusinessException(403, "该操作仅企业用户可执行");
+        if (userType != null && userType == 3) {
+            return SecurityUtils.getRequiredCurrentEnterpriseId();
         }
+        if (userType != null && userType == 1) {
+            if (paramEnterpriseId == null) {
+                throw new BusinessException(400, "请指定企业ID");
+            }
+            return paramEnterpriseId;
+        }
+        if (userType != null && userType == 2) {
+            if (paramEnterpriseId == null) {
+                throw new BusinessException(400, "请指定企业ID");
+            }
+            Long currentUserId = SecurityUtils.getRequiredCurrentUserId();
+            AwAuditTask query = new AwAuditTask();
+            query.setAssigneeId(currentUserId);
+            query.setEnterpriseId(paramEnterpriseId);
+            List<AwAuditTask> tasks = auditTaskMapper.selectList(query);
+            if (tasks.isEmpty()) {
+                throw new BusinessException(403, "您没有该企业的审核任务，无权查看数据");
+            }
+            return paramEnterpriseId;
+        }
+        throw new BusinessException(403, "无权访问");
     }
 
     @Operation(summary = "获取所有抽取表的记录数")
     @GetMapping("/tables")
     public R<List<Map<String, Object>>> listTables(
-            @RequestParam(required = false) Integer auditYear) {
-        requireEnterprise();
-        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+            @RequestParam(required = false) Integer auditYear,
+            @RequestParam(required = false) Long enterpriseId) {
+        Long resolvedId = resolveEnterpriseId(enterpriseId);
 
         MapSqlParameterSource params = new MapSqlParameterSource();
-        params.addValue("enterpriseId", enterpriseId);
+        params.addValue("enterpriseId", resolvedId);
 
         String yearFilter = "";
         if (auditYear != null) {
@@ -113,10 +138,10 @@ public class ExtractedDataController {
     public R<PageResult<Map<String, Object>>> queryTable(
             @PathVariable String tableName,
             @RequestParam(required = false) Integer auditYear,
+            @RequestParam(required = false) Long enterpriseId,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "20") Integer pageSize) {
-        requireEnterprise();
-        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        Long resolvedId = resolveEnterpriseId(enterpriseId);
 
         if (!BusinessTablePersister.ALLOWED_TABLES.contains(tableName)) {
             throw new BusinessException(400, "不允许查询的表: " + tableName);
@@ -126,7 +151,7 @@ public class ExtractedDataController {
         if (pageSize > 100) pageSize = 100;
 
         MapSqlParameterSource params = new MapSqlParameterSource();
-        params.addValue("enterpriseId", enterpriseId);
+        params.addValue("enterpriseId", resolvedId);
 
         StringBuilder where = new StringBuilder(" WHERE enterprise_id = :enterpriseId AND deleted = 0");
         if (auditYear != null) {

@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import {
+  getMyRectificationList,
+  updateRectificationProgress,
+  type RectificationItem,
+} from '@/api/rectification'
 
 const stats = ref([
   {
@@ -49,12 +55,86 @@ const progressItems = ref([
   { name: '审计报告生成与提交',               pct: 0,   color: '#ef5350' },
 ])
 
-const todos = ref([
-  { icon: '🔴', name: '温室气体排放表填报',  meta: '截止 2024-12-31 · 已逾期', chip: '逾期',  chipStyle: 'background:#fdecea;color:#ef5350' },
-  { icon: '🟡', name: '节能潜力明细填报',    meta: '截止 2025-01-15',          chip: '待填',  chipStyle: 'background:#fff8e1;color:#ffa726' },
-  { icon: '🔵', name: '能源流程图完善',      meta: '进行中 · 60% 完成',        chip: '进行中',chipStyle: 'background:#e0f2f0;color:#00897B' },
-  { icon: '✅', name: '基本设置配置',        meta: '完成于 2024-11-20',        chip: '已完成',chipStyle: 'background:#e8f5e9;color:#43a047' },
-])
+const rectItems = ref<RectificationItem[]>([])
+const rectLoading = ref(false)
+
+const progressDialogVisible = ref(false)
+const currentRectId = ref<number | null>(null)
+const progressForm = ref({ status: 1 as number, result: '' })
+
+async function loadRectItems() {
+  rectLoading.value = true
+  try {
+    rectItems.value = await getMyRectificationList()
+  } catch {
+    rectItems.value = []
+  } finally {
+    rectLoading.value = false
+  }
+}
+
+function rectIcon(status: number | undefined) {
+  if (status === 3) return '🔴'
+  if (status === 0) return '🟡'
+  if (status === 1) return '🔵'
+  if (status === 2) return '✅'
+  return '⚪'
+}
+
+function rectChip(status: number | undefined) {
+  const map: Record<number, { label: string; style: string }> = {
+    0: { label: '未启动', style: 'background:#fff8e1;color:#ffa726' },
+    1: { label: '进行中', style: 'background:#e0f2f0;color:#00897B' },
+    2: { label: '已完成', style: 'background:#e8f5e9;color:#43a047' },
+    3: { label: '超期', style: 'background:#fdecea;color:#ef5350' },
+  }
+  return map[status ?? 0] ?? map[0]
+}
+
+function rectMeta(item: RectificationItem) {
+  if (item.status === 3) {
+    return `截止 ${formatDate(item.deadline)} · 已逾期`
+  }
+  if (item.status === 2) {
+    return `完成于 ${formatDate(item.completeTime)}`
+  }
+  if (item.deadline) {
+    return `截止 ${formatDate(item.deadline)}`
+  }
+  return ''
+}
+
+function formatDate(dt: string | undefined) {
+  if (!dt) return '—'
+  return dt.substring(0, 10)
+}
+
+function openProgressDialog(item: RectificationItem) {
+  currentRectId.value = item.id!
+  progressForm.value = {
+    status: item.status === 0 ? 1 : (item.status ?? 1),
+    result: item.result || '',
+  }
+  progressDialogVisible.value = true
+}
+
+async function submitProgress() {
+  if (!currentRectId.value) return
+  try {
+    await updateRectificationProgress(
+      currentRectId.value,
+      progressForm.value.status,
+      progressForm.value.result || undefined,
+    )
+    ElMessage.success('整改进度已更新')
+    progressDialogVisible.value = false
+    loadRectItems()
+  } catch (e: any) {
+    ElMessage.error('更新失败：' + (e?.message ?? ''))
+  }
+}
+
+onMounted(loadRectItems)
 </script>
 
 <template>
@@ -64,7 +144,6 @@ const todos = ref([
       <div class="page-desc">上海XX制造有限公司 · 2024年度能碳审计数据汇总</div>
     </div>
 
-    <!-- Stats -->
     <div class="stats-grid">
       <div
         v-for="s in stats"
@@ -98,9 +177,7 @@ const todos = ref([
       </div>
     </div>
 
-    <!-- Bottom grid -->
     <div class="bottom-grid">
-      <!-- Progress -->
       <div class="g-card">
         <div class="card-header">
           <div class="card-title">填报进度</div>
@@ -122,23 +199,56 @@ const todos = ref([
         </div>
       </div>
 
-      <!-- Todo -->
       <div class="g-card">
         <div class="card-header">
-          <div class="card-title">当前待办</div>
+          <div class="card-title">整改任务</div>
         </div>
-        <div class="todo-list">
-          <div v-for="item in todos" :key="item.name" class="todo-item">
-            <span class="todo-icon">{{ item.icon }}</span>
-            <div class="todo-info">
-              <div class="todo-name">{{ item.name }}</div>
-              <div class="todo-meta">{{ item.meta }}</div>
+        <div v-loading="rectLoading">
+          <div v-if="rectItems.length === 0 && !rectLoading" style="color: #909399; text-align: center; padding: 20px; font-size: 13px">
+            暂无整改任务
+          </div>
+          <div class="todo-list">
+            <div v-for="item in rectItems" :key="item.id" class="todo-item">
+              <span class="todo-icon">{{ rectIcon(item.status) }}</span>
+              <div class="todo-info">
+                <div class="todo-name">{{ item.itemName }}</div>
+                <div v-if="item.requirement" class="todo-requirement">{{ item.requirement }}</div>
+                <div class="todo-meta">{{ rectMeta(item) }}</div>
+              </div>
+              <span class="todo-chip" :style="rectChip(item.status).style">{{ rectChip(item.status).label }}</span>
+              <el-button
+                v-if="item.status !== 2"
+                link
+                type="primary"
+                size="small"
+                @click="openProgressDialog(item)"
+                style="margin-left: 4px"
+              >
+                更新
+              </el-button>
             </div>
-            <span class="todo-chip" :style="item.chipStyle">{{ item.chip }}</span>
           </div>
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="progressDialogVisible" title="更新整改进度" width="450px">
+      <el-form label-width="80px">
+        <el-form-item label="状态">
+          <el-select v-model="progressForm.status" style="width: 100%">
+            <el-option label="进行中" :value="1" />
+            <el-option label="已完成" :value="2" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="整改结果">
+          <el-input v-model="progressForm.result" type="textarea" :rows="3" placeholder="请描述整改结果..." />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="progressDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitProgress">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -192,7 +302,7 @@ const todos = ref([
 
 .bottom-grid {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr 380px;
   gap: 14px;
 }
 
@@ -216,6 +326,7 @@ const todos = ref([
   .todo-icon { font-size: 15px; flex-shrink: 0; }
   .todo-info { flex: 1; min-width: 0; }
   .todo-name { font-size: 13px; color: $text-primary; font-weight: 500; }
+  .todo-requirement { font-size: 12px; color: $text-secondary; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .todo-meta { font-size: 11.5px; color: $text-tertiary; margin-top: 1px; }
   .todo-chip {
     font-size: 11px; padding: 2px 8px; border-radius: 4px;

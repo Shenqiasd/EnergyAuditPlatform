@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.audit.AwAuditLogMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.audit.AwAuditLog">
+        <id     column="id"              property="id"/>
+        <result column="task_id"         property="taskId"/>
+        <result column="operator_id"     property="operatorId"/>
+        <result column="action"          property="action"/>
+        <result column="comment"         property="comment"/>
+        <result column="operation_time"  property="operationTime"/>
+        <result column="create_by"       property="createBy"/>
+        <result column="create_time"     property="createTime"/>
+        <result column="update_by"       property="updateBy"/>
+        <result column="update_time"     property="updateTime"/>
+        <result column="deleted"         property="deleted"/>
+        <result column="operator_name"   property="operatorName"/>
+    </resultMap>
+
+    <select id="selectByTaskId" resultMap="BaseResultMap">
+        SELECT l.id, l.task_id, l.operator_id, l.action, l.comment,
+               l.operation_time, l.create_by, l.create_time, l.update_by, l.update_time, l.deleted,
+               u.real_name AS operator_name
+        FROM aw_audit_log l
+        LEFT JOIN sys_user u ON u.id = l.operator_id AND u.deleted = 0
+        WHERE l.task_id = #{taskId} AND l.deleted = 0
+        ORDER BY l.operation_time DESC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO aw_audit_log (task_id, operator_id, action, comment, operation_time, create_by)
+        VALUES (#{taskId}, #{operatorId}, #{action}, #{comment}, #{operationTime}, #{createBy})
+    </insert>
+
+</mapper>

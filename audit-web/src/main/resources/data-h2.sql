@@ -76,6 +76,34 @@ MERGE INTO sys_user_role (id, user_id, role_id, create_by, update_by, deleted)
 KEY (user_id, role_id)
 VALUES (2, 2, 2, 'system', 'system', 0);
 
+-- Seed auditor user (username=auditor, password=admin123)
+MERGE INTO sys_user (
+    id, username, password, real_name, phone, email,
+    user_type, enterprise_id, status, password_changed,
+    create_by, create_time, update_by, update_time, deleted
+) KEY (username) VALUES (
+    3,
+    'auditor',
+    '$2a$10$0T0mZTyDLfErwhn/qSjIG.MlhJOt9BdDpKQ58iXLRMNlwqI2pmbpK',
+    '审核员张工',
+    '13800000003',
+    'auditor@energy-audit.com',
+    2,
+    NULL,
+    1,
+    0,
+    'system',
+    CURRENT_TIMESTAMP,
+    'system',
+    CURRENT_TIMESTAMP,
+    0
+);
+
+-- Bind auditor user to ROLE_AUDITOR
+MERGE INTO sys_user_role (id, user_id, role_id, create_by, update_by, deleted)
+KEY (user_id, role_id)
+VALUES (3, 3, 3, 'system', 'system', 0);
+
 -- Seed published template (for enterprise report-input testing in H2 dev env)
 MERGE INTO tpl_template (
     id, template_name, template_code, module_type, description,

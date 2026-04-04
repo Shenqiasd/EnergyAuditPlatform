@@ -10,6 +10,12 @@ import {
   type TplTemplate,
   type TplSubmission,
 } from '@/api/template'
+import {
+  submitForAudit,
+  getMyAuditStatus,
+  AUDIT_STATUS_MAP,
+  type AuditTask,
+} from '@/api/audit-task'
 
 const router = useRouter()
 const loading = ref(false)
@@ -18,6 +24,8 @@ const templates = ref<TplTemplate[]>([])
 const selectedYear = ref<number>(new Date().getFullYear())
 const yearOptions = Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - i)
 const submittingId = ref<number | null>(null)
+const auditTask = ref<AuditTask | null>(null)
+const submittingAudit = ref(false)
 
 interface Row {
   template: TplTemplate
@@ -38,6 +46,23 @@ const rows = computed<Row[]>(() => {
   })
 })
 
+const allSubmitted = computed(() => {
+  if (rows.value.length === 0) return false
+  return rows.value.every(r => r.status === 1)
+})
+
+const canSubmitAudit = computed(() => {
+  if (!allSubmitted.value) return false
+  if (!auditTask.value) return true
+  return auditTask.value.status === 3
+})
+
+const auditStatusInfo = computed(() => {
+  if (!auditTask.value) return null
+  const s = auditTask.value.status ?? -1
+  return AUDIT_STATUS_MAP[s] ?? null
+})
+
 const STATUS_MAP: Record<number, { label: string; type: 'info' | 'warning' | 'success' }> = {
   [-1]: { label: '未开始', type: 'info' },
   0: { label: '草稿', type: 'warning' },
@@ -47,12 +72,14 @@ const STATUS_MAP: Record<number, { label: string; type: 'info' | 'warning' | 'su
 async function loadData() {
   loading.value = true
   try {
-    const [subs, tpls] = await Promise.all([
+    const [subs, tpls, task] = await Promise.all([
       listSubmissions(),
       getTemplateList({ status: 1, pageSize: 200 }).then(r => r.rows ?? []),
+      getMyAuditStatus(selectedYear.value),
     ])
     submissions.value = subs
     templates.value = tpls
+    auditTask.value = task
   } finally {
     loading.value = false
   }
@@ -89,6 +116,28 @@ async function handleSubmit(row: Row) {
   }
 }
 
+async function handleSubmitAudit() {
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${selectedYear.value} 年度所有填报数据提交审核？提交后审核员将审查您的数据。`,
+      '提交审核确认',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  submittingAudit.value = true
+  try {
+    await submitForAudit(selectedYear.value)
+    ElMessage.success('已提交审核')
+    loadData()
+  } catch (e: any) {
+    ElMessage.error('提交审核失败：' + (e?.message ?? '未知错误'))
+  } finally {
+    submittingAudit.value = false
+  }
+}
+
 function goToFill(row: Row) {
   router.push({
     path: '/enterprise/report/input',
@@ -105,19 +154,52 @@ onMounted(loadData)
 
 <template>
   <div class="page-container">
+    <!-- Audit Status Banner -->
+    <el-alert
+      v-if="auditTask && auditTask.status === 3"
+      type="error"
+      :closable="false"
+      style="margin-bottom: 16px"
+    >
+      <template #title>
+        <strong>审核已退回</strong> — {{ auditTask.result || '请查看审核意见并修改后重新提交' }}
+      </template>
+    </el-alert>
+
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span class="card-title">填报进度概览</span>
+          <div class="header-left">
+            <span class="card-title">填报进度概览</span>
+            <el-tag
+              v-if="auditStatusInfo"
+              :type="auditStatusInfo.type"
+              size="small"
+              style="margin-left: 12px"
+            >
+              审核状态：{{ auditStatusInfo.label }}
+            </el-tag>
+          </div>
           <div class="header-right">
             <el-select
               v-model="selectedYear"
               style="width:110px;margin-right:12px"
               size="small"
+              @change="loadData"
             >
               <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
             </el-select>
             <el-button @click="loadData" :loading="loading" size="small">刷新</el-button>
+            <el-button
+              type="primary"
+              size="small"
+              :disabled="!canSubmitAudit"
+              :loading="submittingAudit"
+              @click="handleSubmitAudit"
+              style="margin-left: 8px"
+            >
+              {{ auditTask?.status === 3 ? '重新提交审核' : '提交审核' }}
+            </el-button>
           </div>
         </div>
       </template>
@@ -175,6 +257,12 @@ onMounted(loadData)
           </template>
         </el-table-column>
       </el-table>
+
+      <div v-if="!allSubmitted && rows.length > 0" class="submit-hint">
+        <el-text type="warning" size="small">
+          提示：需所有模板填报完成并提交数据后，方可提交审核
+        </el-text>
+      </div>
     </el-card>
   </div>
 </template>
@@ -190,6 +278,11 @@ onMounted(loadData)
   justify-content: space-between;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
 .card-title {
   font-size: 15px;
   font-weight: 600;
@@ -199,5 +292,10 @@ onMounted(loadData)
 .header-right {
   display: flex;
   align-items: center;
+}
+
+.submit-hint {
+  margin-top: 12px;
+  text-align: center;
 }
 </style>

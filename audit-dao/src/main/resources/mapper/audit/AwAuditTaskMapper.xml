@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.audit.AwAuditTaskMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.audit.AwAuditTask">
+        <id     column="id"              property="id"/>
+        <result column="enterprise_id"   property="enterpriseId"/>
+        <result column="audit_year"      property="auditYear"/>
+        <result column="task_type"       property="taskType"/>
+        <result column="task_title"      property="taskTitle"/>
+        <result column="status"          property="status"/>
+        <result column="assignee_id"     property="assigneeId"/>
+        <result column="assign_time"     property="assignTime"/>
+        <result column="deadline"        property="deadline"/>
+        <result column="complete_time"   property="completeTime"/>
+        <result column="result"          property="result"/>
+        <result column="create_by"       property="createBy"/>
+        <result column="create_time"     property="createTime"/>
+        <result column="update_by"       property="updateBy"/>
+        <result column="update_time"     property="updateTime"/>
+        <result column="deleted"         property="deleted"/>
+        <result column="enterprise_name" property="enterpriseName"/>
+        <result column="assignee_name"   property="assigneeName"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        t.id, t.enterprise_id, t.audit_year, t.task_type, t.task_title,
+        t.status, t.assignee_id, t.assign_time, t.deadline, t.complete_time,
+        t.result, t.create_by, t.create_time, t.update_by, t.update_time, t.deleted
+    </sql>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>,
+               e.enterprise_name AS enterprise_name,
+               u.real_name AS assignee_name
+        FROM aw_audit_task t
+        LEFT JOIN ent_enterprise e ON e.id = t.enterprise_id AND e.deleted = 0
+        LEFT JOIN sys_user u ON u.id = t.assignee_id AND u.deleted = 0
+        WHERE t.id = #{id} AND t.deleted = 0
+    </select>
+
+    <select id="selectList" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>,
+               e.enterprise_name AS enterprise_name,
+               u.real_name AS assignee_name
+        FROM aw_audit_task t
+        LEFT JOIN ent_enterprise e ON e.id = t.enterprise_id AND e.deleted = 0
+        LEFT JOIN sys_user u ON u.id = t.assignee_id AND u.deleted = 0
+        WHERE t.deleted = 0
+        <if test="enterpriseId != null">
+            AND t.enterprise_id = #{enterpriseId}
+        </if>
+        <if test="auditYear != null">
+            AND t.audit_year = #{auditYear}
+        </if>
+        <if test="status != null">
+            AND t.status = #{status}
+        </if>
+        <if test="assigneeId != null">
+            AND t.assignee_id = #{assigneeId}
+        </if>
+        <if test="taskType != null">
+            AND t.task_type = #{taskType}
+        </if>
+        ORDER BY t.create_time DESC
+    </select>
+
+    <select id="selectByAssignee" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>,
+               e.enterprise_name AS enterprise_name,
+               u.real_name AS assignee_name
+        FROM aw_audit_task t
+        LEFT JOIN ent_enterprise e ON e.id = t.enterprise_id AND e.deleted = 0
+        LEFT JOIN sys_user u ON u.id = t.assignee_id AND u.deleted = 0
+        WHERE t.deleted = 0 AND t.assignee_id = #{assigneeId}
+        <if test="status != null">
+            AND t.status = #{status}
+        </if>
+        ORDER BY t.create_time DESC
+    </select>
+
+    <select id="selectByEnterpriseAndYear" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>,
+               e.enterprise_name AS enterprise_name,
+               u.real_name AS assignee_name
+        FROM aw_audit_task t
+        LEFT JOIN ent_enterprise e ON e.id = t.enterprise_id AND e.deleted = 0
+        LEFT JOIN sys_user u ON u.id = t.assignee_id AND u.deleted = 0
+        WHERE t.enterprise_id = #{enterpriseId}
+          AND t.audit_year = #{auditYear}
+          AND t.deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="countByStatus" resultType="int">
+        SELECT COUNT(*) FROM aw_audit_task
+        WHERE deleted = 0
+        <if test="assigneeId != null">
+            AND assignee_id = #{assigneeId}
+        </if>
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO aw_audit_task (enterprise_id, audit_year, task_type, task_title,
+            status, assignee_id, assign_time, deadline, result, create_by)
+        VALUES (#{enterpriseId}, #{auditYear}, #{taskType}, #{taskTitle},
+            #{status}, #{assigneeId}, #{assignTime}, #{deadline}, #{result}, #{createBy})
+    </insert>
+
+    <update id="updateById">
+        UPDATE aw_audit_task
+        <set>
+            update_time = NOW(),
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="assigneeId != null">assignee_id = #{assigneeId},</if>
+            <if test="assignTime != null">assign_time = #{assignTime},</if>
+            <if test="deadline != null">deadline = #{deadline},</if>
+            <if test="completeTime != null">complete_time = #{completeTime},</if>
+            <if test="result != null">result = #{result},</if>
+            <if test="taskTitle != null">task_title = #{taskTitle},</if>
+        </set>
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="clearResult">
+        UPDATE aw_audit_task
+        SET result = NULL, update_time = NOW()
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+</mapper>
