@@ -11,11 +11,14 @@ import {
   type AuditLog,
 } from '@/api/audit-task'
 import { listUsers, type SysUser } from '@/api/user'
+import { getList as getEnterpriseList, type Enterprise } from '@/api/enterprise'
 
 const loading = ref(false)
 const tasks = ref<AuditTask[]>([])
 const filterStatus = ref<number | undefined>(undefined)
 const filterYear = ref<number | undefined>(undefined)
+const filterEnterpriseId = ref<number | undefined>(undefined)
+const enterprises = ref<Enterprise[]>([])
 const yearOptions = Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - i)
 
 const assignDialogVisible = ref(false)
@@ -35,9 +38,19 @@ async function loadTasks() {
     tasks.value = await getAuditTaskList({
       status: filterStatus.value,
       auditYear: filterYear.value,
+      enterpriseId: filterEnterpriseId.value,
     })
   } finally {
     loading.value = false
+  }
+}
+
+async function loadEnterprises() {
+  try {
+    const result = await getEnterpriseList({ pageSize: 500 })
+    enterprises.value = result.rows ?? []
+  } catch {
+    enterprises.value = []
   }
 }
 
@@ -87,7 +100,10 @@ function statusTag(status: number | undefined) {
   return AUDIT_STATUS_MAP[status] ?? { label: '未知', type: 'info' as const }
 }
 
-onMounted(loadTasks)
+onMounted(() => {
+  loadTasks()
+  loadEnterprises()
+})
 </script>
 
 <template>
@@ -97,6 +113,22 @@ onMounted(loadTasks)
         <div class="card-header">
           <span class="card-title">审计管理</span>
           <div class="header-right">
+            <el-select
+              v-model="filterEnterpriseId"
+              placeholder="企业筛选"
+              clearable
+              filterable
+              style="width:180px;margin-right:8px"
+              size="small"
+              @change="loadTasks"
+            >
+              <el-option
+                v-for="e in enterprises"
+                :key="e.id"
+                :label="e.enterpriseName"
+                :value="e.id!"
+              />
+            </el-select>
             <el-select
               v-model="filterYear"
               placeholder="审计年度"

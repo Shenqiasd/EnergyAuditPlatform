@@ -5,7 +5,11 @@ import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.model.entity.audit.AwAuditLog;
 import com.energy.audit.model.entity.audit.AwAuditTask;
+import com.energy.audit.model.entity.enterprise.EntEnterprise;
+import com.energy.audit.model.entity.enterprise.EntEnterpriseSetting;
 import com.energy.audit.service.audit.AuditTaskService;
+import com.energy.audit.service.enterprise.EnterpriseSettingService;
+import com.energy.audit.dao.mapper.enterprise.EntEnterpriseMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
@@ -19,9 +23,15 @@ import java.util.Map;
 public class AuditTaskController {
 
     private final AuditTaskService auditTaskService;
+    private final EnterpriseSettingService settingService;
+    private final EntEnterpriseMapper enterpriseMapper;
 
-    public AuditTaskController(AuditTaskService auditTaskService) {
+    public AuditTaskController(AuditTaskService auditTaskService,
+                               EnterpriseSettingService settingService,
+                               EntEnterpriseMapper enterpriseMapper) {
         this.auditTaskService = auditTaskService;
+        this.settingService = settingService;
+        this.enterpriseMapper = enterpriseMapper;
     }
 
     @Operation(summary = "企业提交审核")
@@ -141,6 +151,33 @@ public class AuditTaskController {
         AwAuditTask task = auditTaskService.getById(id);
         checkTaskVisibility(task);
         return R.ok(auditTaskService.getTaskLogs(id));
+    }
+
+    @Operation(summary = "查询任务关联企业信息")
+    @GetMapping("/{id}/enterprise-info")
+    public R<Map<String, Object>> enterpriseInfo(@PathVariable Long id) {
+        AwAuditTask task = auditTaskService.getById(id);
+        checkTaskVisibility(task);
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        EntEnterprise enterprise = enterpriseMapper.selectById(task.getEnterpriseId());
+        if (enterprise != null) {
+            result.put("enterpriseName", enterprise.getEnterpriseName());
+            result.put("creditCode", enterprise.getCreditCode());
+            result.put("contactPerson", enterprise.getContactPerson());
+            result.put("contactPhone", enterprise.getContactPhone());
+            result.put("contactEmail", enterprise.getContactEmail());
+        }
+        EntEnterpriseSetting setting = settingService.get(task.getEnterpriseId());
+        if (setting != null) {
+            result.put("enterpriseAddress", setting.getEnterpriseAddress());
+            result.put("legalRepresentative", setting.getLegalRepresentative());
+            result.put("industryCategory", setting.getIndustryCategory());
+            result.put("industryName", setting.getIndustryName());
+            result.put("unitNature", setting.getUnitNature());
+            result.put("energyEnterpriseType", setting.getEnergyEnterpriseType());
+            result.put("registeredCapital", setting.getRegisteredCapital());
+        }
+        return R.ok(result);
     }
 
     private void checkTaskVisibility(AwAuditTask task) {

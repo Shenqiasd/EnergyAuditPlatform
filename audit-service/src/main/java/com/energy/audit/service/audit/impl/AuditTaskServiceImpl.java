@@ -4,9 +4,13 @@ import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.dao.mapper.audit.AwAuditLogMapper;
 import com.energy.audit.dao.mapper.audit.AwAuditTaskMapper;
 import com.energy.audit.dao.mapper.system.SysUserMapper;
+import com.energy.audit.dao.mapper.template.TplSubmissionMapper;
+import com.energy.audit.dao.mapper.template.TplTemplateMapper;
 import com.energy.audit.model.entity.audit.AwAuditLog;
 import com.energy.audit.model.entity.audit.AwAuditTask;
 import com.energy.audit.model.entity.system.SysUser;
+import com.energy.audit.model.entity.template.TplTemplate;
+import com.energy.audit.model.entity.template.TplSubmission;
 import com.energy.audit.service.audit.AuditTaskService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,16 +26,24 @@ public class AuditTaskServiceImpl implements AuditTaskService {
     private final AwAuditTaskMapper taskMapper;
     private final AwAuditLogMapper logMapper;
     private final SysUserMapper userMapper;
+    private final TplTemplateMapper templateMapper;
+    private final TplSubmissionMapper submissionMapper;
 
-    public AuditTaskServiceImpl(AwAuditTaskMapper taskMapper, AwAuditLogMapper logMapper, SysUserMapper userMapper) {
+    public AuditTaskServiceImpl(AwAuditTaskMapper taskMapper, AwAuditLogMapper logMapper,
+                                SysUserMapper userMapper, TplTemplateMapper templateMapper,
+                                TplSubmissionMapper submissionMapper) {
         this.taskMapper = taskMapper;
         this.logMapper = logMapper;
         this.userMapper = userMapper;
+        this.templateMapper = templateMapper;
+        this.submissionMapper = submissionMapper;
     }
 
     @Override
     @Transactional
     public AwAuditTask submitForAudit(Long enterpriseId, Integer auditYear, String username) {
+        validateAllTemplatesSubmitted(enterpriseId, auditYear);
+
         AwAuditTask existing = taskMapper.selectByEnterpriseAndYear(enterpriseId, auditYear);
         if (existing != null) {
             if (existing.getStatus() == 3) {
@@ -194,6 +206,23 @@ public class AuditTaskServiceImpl implements AuditTaskService {
         if (username == null) return null;
         SysUser user = userMapper.selectByUsername(username);
         return user != null ? user.getId() : null;
+    }
+
+    private void validateAllTemplatesSubmitted(Long enterpriseId, Integer auditYear) {
+        TplTemplate tplQuery = new TplTemplate();
+        tplQuery.setStatus(1);
+        List<TplTemplate> publishedTemplates = templateMapper.selectList(tplQuery);
+        if (publishedTemplates.isEmpty()) {
+            return;
+        }
+        for (TplTemplate tpl : publishedTemplates) {
+            TplSubmission sub = submissionMapper.selectByEnterpriseTemplateYear(
+                    enterpriseId, tpl.getId(), auditYear);
+            if (sub == null || sub.getStatus() != 1) {
+                throw new BusinessException(400,
+                        "模板「" + tpl.getTemplateName() + "」尚未提交，请先完成所有模板填报并提交数据");
+            }
+        }
     }
 
     private Long autoAssign() {

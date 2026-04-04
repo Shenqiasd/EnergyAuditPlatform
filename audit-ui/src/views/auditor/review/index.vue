@@ -8,10 +8,12 @@ import {
   approveAuditTask,
   rejectAuditTask,
   addAuditComment,
+  getTaskEnterpriseInfo,
   AUDIT_STATUS_MAP,
   ACTION_LABEL_MAP,
   type AuditTask,
   type AuditLog,
+  type EnterpriseInfo,
 } from '@/api/audit-task'
 import {
   getExtractedTables,
@@ -25,6 +27,7 @@ const loading = ref(false)
 const task = ref<AuditTask | null>(null)
 const logs = ref<AuditLog[]>([])
 const logsLoading = ref(false)
+const enterpriseInfo = ref<EnterpriseInfo | null>(null)
 
 const tables = ref<TableSummary[]>([])
 const activeTab = ref('')
@@ -49,6 +52,7 @@ async function loadTask() {
     task.value = await getAuditTask(id)
     loadLogs()
     loadTables()
+    loadEnterpriseInfo()
   } catch (e: any) {
     ElMessage.error('加载任务失败：' + (e?.message ?? ''))
     router.push('/auditor/tasks')
@@ -64,6 +68,15 @@ async function loadLogs() {
     logs.value = await getAuditLogs(task.value.id)
   } finally {
     logsLoading.value = false
+  }
+}
+
+async function loadEnterpriseInfo() {
+  if (!task.value?.id) return
+  try {
+    enterpriseInfo.value = await getTaskEnterpriseInfo(task.value.id)
+  } catch {
+    enterpriseInfo.value = null
   }
 }
 
@@ -201,6 +214,27 @@ onMounted(loadTask)
           <el-descriptions-item label="审核员">{{ task.assigneeName || '未分配' }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ task.createTime }}</el-descriptions-item>
           <el-descriptions-item label="审核结果" v-if="task.result">{{ task.result }}</el-descriptions-item>
+        </el-descriptions>
+      </el-card>
+
+      <!-- Enterprise Profile -->
+      <el-card v-if="enterpriseInfo" shadow="never" style="margin-bottom: 16px">
+        <template #header>
+          <span class="card-title">企业基本信息</span>
+        </template>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="企业名称">{{ enterpriseInfo.enterpriseName || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="统一信用代码">{{ enterpriseInfo.creditCode || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="法人代表">{{ enterpriseInfo.legalRepresentative || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="企业地址">{{ enterpriseInfo.enterpriseAddress || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="行业类别">{{ enterpriseInfo.industryCategory || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="行业名称">{{ enterpriseInfo.industryName || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="单位性质">{{ enterpriseInfo.unitNature || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="用能企业类型">{{ enterpriseInfo.energyEnterpriseType || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="注册资本(万元)">{{ enterpriseInfo.registeredCapital ?? '—' }}</el-descriptions-item>
+          <el-descriptions-item label="联系人">{{ enterpriseInfo.contactPerson || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="联系电话">{{ enterpriseInfo.contactPhone || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="联系邮箱">{{ enterpriseInfo.contactEmail || '—' }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
 

@@ -4,6 +4,8 @@ import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.common.result.PageResult;
 import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
+import com.energy.audit.dao.mapper.audit.AwAuditTaskMapper;
+import com.energy.audit.model.entity.audit.AwAuditTask;
 import com.energy.audit.service.template.BusinessTablePersister;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -56,9 +58,11 @@ public class ExtractedDataController {
     }
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final AwAuditTaskMapper auditTaskMapper;
 
-    public ExtractedDataController(NamedParameterJdbcTemplate jdbcTemplate) {
+    public ExtractedDataController(NamedParameterJdbcTemplate jdbcTemplate, AwAuditTaskMapper auditTaskMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.auditTaskMapper = auditTaskMapper;
     }
 
     private Long resolveEnterpriseId(Long paramEnterpriseId) {
@@ -66,9 +70,23 @@ public class ExtractedDataController {
         if (userType != null && userType == 3) {
             return SecurityUtils.getRequiredCurrentEnterpriseId();
         }
-        if (userType != null && (userType == 1 || userType == 2)) {
+        if (userType != null && userType == 1) {
             if (paramEnterpriseId == null) {
                 throw new BusinessException(400, "请指定企业ID");
+            }
+            return paramEnterpriseId;
+        }
+        if (userType != null && userType == 2) {
+            if (paramEnterpriseId == null) {
+                throw new BusinessException(400, "请指定企业ID");
+            }
+            Long currentUserId = SecurityUtils.getRequiredCurrentUserId();
+            AwAuditTask query = new AwAuditTask();
+            query.setAssigneeId(currentUserId);
+            query.setEnterpriseId(paramEnterpriseId);
+            List<AwAuditTask> tasks = auditTaskMapper.selectList(query);
+            if (tasks.isEmpty()) {
+                throw new BusinessException(403, "您没有该企业的审核任务，无权查看数据");
             }
             return paramEnterpriseId;
         }

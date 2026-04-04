@@ -90,3 +90,22 @@ export function addAuditComment(id: number, comment: string): Promise<void> {
 export function getAuditLogs(id: number): Promise<AuditLog[]> {
   return request.get(`/audit/task/${id}/logs`)
 }
+
+export interface EnterpriseInfo {
+  enterpriseName?: string
+  creditCode?: string
+  contactPerson?: string
+  contactPhone?: string
+  contactEmail?: string
+  enterpriseAddress?: string
+  legalRepresentative?: string
+  industryCategory?: string
+  industryName?: string
+  unitNature?: string
+  energyEnterpriseType?: string
+  registeredCapital?: number
+}
+
+export function getTaskEnterpriseInfo(taskId: number): Promise<EnterpriseInfo> {
+  return request.get(`/audit/task/${taskId}/enterprise-info`)
+}
