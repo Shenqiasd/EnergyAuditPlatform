@@ -37,6 +37,7 @@
         <hutool.version>5.8.25</hutool.version>
         <pagehelper.version>2.1.0</pagehelper.version>
         <springdoc-openapi.version>2.3.0</springdoc-openapi.version>
+        <apache-poi.version>5.2.5</apache-poi.version>
     </properties>
 
     <dependencyManagement>
@@ -119,6 +120,23 @@
                 <groupId>org.springdoc</groupId>
                 <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
                 <version>${springdoc-openapi.version}</version>
+            </dependency>
+
+            <!-- Apache POI -->
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi</artifactId>
+                <version>${apache-poi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml</artifactId>
+                <version>${apache-poi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml-full</artifactId>
+                <version>${apache-poi.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
