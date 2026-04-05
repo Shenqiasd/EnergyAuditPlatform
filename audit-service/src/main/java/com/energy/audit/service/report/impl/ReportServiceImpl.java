@@ -129,7 +129,7 @@ public class ReportServiceImpl implements ReportService {
 
         try {
             Map<String, Object> enterprise = jdbcTemplate.queryForMap(
-                "SELECT enterprise_name, credit_code, contact_person, contact_email, contact_phone, remark " +
+                "SELECT enterprise_name, credit_code, contact_person, contact_phone, contact_email, remark " +
                 "FROM ent_enterprise WHERE id = ? AND deleted = 0", enterpriseId);
             data.put("enterpriseName", enterprise.getOrDefault("ENTERPRISE_NAME",
                 enterprise.getOrDefault("enterprise_name", "")));
@@ -141,11 +141,37 @@ public class ReportServiceImpl implements ReportService {
         }
 
         try {
+            Map<String, Object> setting = jdbcTemplate.queryForMap(
+                "SELECT legal_representative, enterprise_address, postal_code, fax, " +
+                "industry_category, industry_code, industry_name, compiler_name, " +
+                "compiler_contact, registered_capital, energy_cert " +
+                "FROM ent_enterprise_setting WHERE enterprise_id = ? AND deleted = 0", enterpriseId);
+            data.put("enterpriseSetting", setting);
+        } catch (Exception e) {
+            log.warn("Failed to load enterprise setting for id={}", enterpriseId, e);
+            data.put("enterpriseSetting", new HashMap<>());
+        }
+
+        try {
+            Map<String, Object> overview = jdbcTemplate.queryForMap(
+                "SELECT energy_leader_name, energy_leader_position, energy_dept_name, " +
+                "energy_dept_leader, fulltime_staff_count, parttime_staff_count, " +
+                "five_year_target_name, five_year_target_value, five_year_target_dept " +
+                "FROM de_company_overview WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0",
+                enterpriseId, auditYear);
+            data.put("companyOverview", overview);
+        } catch (Exception e) {
+            log.warn("Failed to load company overview for enterprise={} year={}", enterpriseId, auditYear, e);
+            data.put("companyOverview", new HashMap<>());
+        }
+
+        try {
             List<Map<String, Object>> indicators = jdbcTemplate.queryForList(
                 "SELECT * FROM de_tech_indicator WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
                 "ORDER BY indicator_year", enterpriseId, auditYear);
             data.put("techIndicators", indicators);
         } catch (Exception e) {
+            log.warn("Failed to load tech indicators", e);
             data.put("techIndicators", List.of());
         }
 
@@ -155,6 +181,7 @@ public class ReportServiceImpl implements ReportService {
                 "ORDER BY standard_coal_equiv DESC", enterpriseId, auditYear);
             data.put("energyBalance", balance);
         } catch (Exception e) {
+            log.warn("Failed to load energy balance", e);
             data.put("energyBalance", List.of());
         }
 
@@ -164,6 +191,7 @@ public class ReportServiceImpl implements ReportService {
                 "ORDER BY product_name, year_type", enterpriseId, auditYear);
             data.put("productConsumption", products);
         } catch (Exception e) {
+            log.warn("Failed to load product consumption", e);
             data.put("productConsumption", List.of());
         }
 
@@ -173,6 +201,7 @@ public class ReportServiceImpl implements ReportService {
                 "ORDER BY emission_type, annual_emission DESC", enterpriseId, auditYear);
             data.put("ghgEmission", ghg);
         } catch (Exception e) {
+            log.warn("Failed to load GHG emission", e);
             data.put("ghgEmission", List.of());
         }
 
@@ -182,6 +211,7 @@ public class ReportServiceImpl implements ReportService {
                 "ORDER BY flow_stage, seq_no", enterpriseId, auditYear);
             data.put("energyFlow", flows);
         } catch (Exception e) {
+            log.warn("Failed to load energy flow", e);
             data.put("energyFlow", List.of());
         }
 
