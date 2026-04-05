@@ -41,6 +41,12 @@ public class ReportServiceImpl implements ReportService {
             throw new RuntimeException("报告正在生成中，请稍候");
         }
 
+        if (existing != null) {
+            existing.setStatus(1);
+            existing.setUpdateBy(username);
+            reportMapper.update(existing);
+        }
+
         Map<String, Object> reportData = collectReportData(enterpriseId, auditYear);
 
         String enterpriseName = (String) reportData.getOrDefault("enterpriseName", "企业");
@@ -123,12 +129,13 @@ public class ReportServiceImpl implements ReportService {
 
         try {
             Map<String, Object> enterprise = jdbcTemplate.queryForMap(
-                "SELECT enterprise_name, credit_code, legal_person, address, industry " +
+                "SELECT enterprise_name, credit_code, contact_person, contact_email, contact_phone, remark " +
                 "FROM ent_enterprise WHERE id = ? AND deleted = 0", enterpriseId);
             data.put("enterpriseName", enterprise.getOrDefault("ENTERPRISE_NAME",
                 enterprise.getOrDefault("enterprise_name", "")));
             data.put("enterprise", enterprise);
         } catch (Exception e) {
+            log.warn("Failed to load enterprise info for id={}", enterpriseId, e);
             data.put("enterpriseName", "企业");
             data.put("enterprise", new HashMap<>());
         }

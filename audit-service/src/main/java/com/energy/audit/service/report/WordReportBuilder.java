@@ -105,9 +105,9 @@ public final class WordReportBuilder {
         String[][] infoRows = {
             {"企业名称", mapStr(ent, "ENTERPRISE_NAME", "enterprise_name")},
             {"统一社会信用代码", mapStr(ent, "CREDIT_CODE", "credit_code")},
-            {"法定代表人", mapStr(ent, "LEGAL_PERSON", "legal_person")},
-            {"企业地址", mapStr(ent, "ADDRESS", "address")},
-            {"所属行业", mapStr(ent, "INDUSTRY", "industry")},
+            {"联系人", mapStr(ent, "CONTACT_PERSON", "contact_person")},
+            {"联系电话", mapStr(ent, "CONTACT_PHONE", "contact_phone")},
+            {"联系邮箱", mapStr(ent, "CONTACT_EMAIL", "contact_email")},
         };
 
         XWPFTable table = doc.createTable(infoRows.length, 2);

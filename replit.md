@@ -38,7 +38,7 @@ A comprehensive enterprise-level web application for managing energy consumption
 | Wave 10 | Carbon Management & Platform Integration | Partial (emission factor CRUD done) |
 | Wave 11 | Optimization & Testing | Planned |
 
-**Current stage**: Wave 8 complete — ECharts Charts (PR #20)
+**Current stage**: Sprint 8.1 complete — Report Generation Engine (PR #22)
 
 ## Wave 8 — ECharts Charts (Standard + Report Assist)
 - **ChartCard component**: `audit-ui/src/components/ChartCard/index.vue` — reusable ECharts wrapper with auto-resize, loading state, v-loading
@@ -55,6 +55,24 @@ A comprehensive enterprise-level web application for managing energy consumption
 - **Packages**: `echarts` + `vue-echarts`
 - **H2 quirk**: `year` is reserved word — must quote as `"year"` in column aliases
 - **GitHub PR**: #20 feat/wave8-echarts-charts
+
+## Sprint 8.1 — Report Generation Engine (Apache POI)
+- **ArReport entity**: `audit-model/.../entity/report/ArReport.java` — enterprise_id, audit_year, report_name, report_type, status, generated_file_path
+- **ArReportMapper**: MyBatis XML with insert/update/selectById/selectByEnterprise/selectByEnterpriseAndYear
+- **ReportService**: generateReport (collect de_* data → POI Word → ar_report record), listReports, getReport, downloadReport
+- **WordReportBuilder**: generates 7-chapter Word document with tables:
+  1. Enterprise basic info
+  2. Tech indicators (multi-year comparison)
+  3. Energy balance (with totals)
+  4. Product unit consumption
+  5. GHG emissions (with totals)
+  6. Energy flow details
+  7. Energy saving suggestions
+- **ReportController**: `POST /report/generate`, `GET /report/list`, `GET /report/{id}`, `GET /report/{id}/download`
+- **H2 table**: `ar_report` added to schema-h2.sql
+- **Frontend**: `report.ts` API client, updated generate/index.vue with report generation card + report listing + download
+- **Dependency**: Apache POI `poi-ooxml` 5.2.5
+- **GitHub PR**: #22 feat/sprint8-report-generation
 
 ## Wave 7 — Energy Flow Diagram (AntV X6)
 - **Backend**: `EnergyFlowController` (GET /list, POST /save-batch, DELETE /{id}), `EnergyFlowService`, `DeEnergyFlowMapper`
