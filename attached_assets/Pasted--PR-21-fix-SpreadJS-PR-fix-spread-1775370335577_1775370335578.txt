@@ -1,0 +1,380 @@
+# PR #21 审核报告：fix: SpreadJS 部署授权配置修复
+
+## 一、PR 概览
+
+| 项目 | 内容 |
+|------|------|
+| **分支** | `fix/spreadjs-license-config` → `master` |
+| **文件变更** | 148 files, +9232 -1408 |
+| **PR 描述的核心改动** | SpreadJS 双 License Key 配置（Sheets + Designer） |
+| **实际包含** | SpreadJS License 修复 + Wave 7 能源流向图 + 企业设置/用户管理重构 |
+
+> **注意**：PR 标题为 "fix: SpreadJS 部署授权配置修复"，但实际包含 4 个 commit，远超 License 修复范围。建议未来将不同功能拆分为独立 PR。
+
+---
+
+## 二、核心改动审核（SpreadJS License 配置）
+
+### 2.1 `audit-ui/src/utils/spreadjs-license.ts`（新文件） ✅ PASS
+
+```typescript
+export function initSpreadJSLicense(): void {
+  if (typeof window.GC === 'undefined') return
+
+  const sheetsLicense = import.meta.env.VITE_SPREADJS_LICENSE
+  if (sheetsLicense && window.GC.Spread?.Sheets) {
+    window.GC.Spread.Sheets.LicenseKey = sheetsLicense
+  }
+
+  const designerLicense = import.meta.env.VITE_SPREADJS_DESIGNER_LICENSE
+  if (designerLicense && window.GC.Spread?.Sheets?.Designer) {
+    window.GC.Spread.Sheets.Designer.LicenseKey = designerLicense
+  }
+}
+```
+
+**评价**：
+- ✅ 双 License Key 分离（Sheets + Designer），符合 SpreadJS V18 授权模型
+- ✅ `typeof window.GC === 'undefined'` 安全守卫，CDN 未加载时优雅降级
+- ✅ 可选链 `?.` 防止命名空间不完整时崩溃
+- ✅ 环境变量通过 `import.meta.env` 读取，构建时注入，不暴露到运行时
+- ⚠️ 相比 master 分支版本，**移除了 `initialized` 幂等保护**和 `console.warn` 提示。虽然多次调用 `initSpreadJSLicense()` 只是重复赋值同一个 key（无副作用），但丢失了 trial mode 的开发者提示
+
+### 2.2 `audit-ui/src/components/SpreadDesigner/index.vue`（重写） ⚠️ 需关注
+
+PR 分支将 SpreadDesigner 从**完整功能组件**（142 行，含 designer 初始化、workbook 加载、readonly 保护、getJson 导出）重写为**占位符组件**（37 行，仅显示 "加载中..." 和调用 `initSpreadJSLicense()`）。
+
+**问题**：
+- Props 从 `templateJson` / `readonly` 变为 `templateId` / `versionId` / `readonly`
+- 移除了 `defineExpose({ getJson })` — 如果其他组件依赖 `getJson()` 会报错
+- 移除了 `resolveDesignerConstructor()` / `initDesigner()` / `applyReadonly()` 全部核心逻辑
+
+**评估**：这可能是有意为之（重构为新架构），但需要确认 SpreadDesigner 的实际使用方不受影响。
+
+### 2.3 `audit-ui/Dockerfile`（修改） ✅ PASS
+
+```dockerfile
+ARG VITE_SPREADJS_DESIGNER_LICENSE=""   # 新增
+ENV VITE_SPREADJS_DESIGNER_LICENSE=$VITE_SPREADJS_DESIGNER_LICENSE  # 新增
+RUN npm run build   # 从 npx vite build 改回
+```
+
+**评价**：
+- ✅ 新增 `VITE_SPREADJS_DESIGNER_LICENSE` ARG + ENV，与 `VITE_SPREADJS_LICENSE` 对称
+- ⚠️ 构建命令从 `npx vite build` 改回 `npm run build` — master 分支在 PR #18 中已改为 `npx vite build`，这里又改回去了。需确认 `package.json` 中 `build` script 的定义
+
+### 2.4 `audit-ui/src/env.d.ts`（修改） ✅ PASS
+
+```typescript
+interface ImportMetaEnv {
+  readonly VITE_SPREADJS_LICENSE: string
+  readonly VITE_SPREADJS_DESIGNER_LICENSE: string  // 新增
+}
+```
+
+**评价**：类型声明完整，与 `spreadjs-license.ts` 中的 `import.meta.env` 用法一致。
+
+---
+
+## 三、问题汇总
+
+### M-1（中等）：SpreadDesigner 组件功能回退
+
+**文件**：`audit-ui/src/components/SpreadDesigner/index.vue`
+
+SpreadDesigner 从完整功能组件退化为占位符。如果 master 分支中已有页面使用了 `<SpreadDesigner>` 的 `getJson()`、`templateJson` prop 或 readonly 保护功能，合并后会导致这些功能丢失。
+
+**建议**：确认是否有意重构。如果是，确保所有使用方已迁移到新架构。
+
+### M-2（中等）：`.replit` 硬编码 SpreadJS License Key
+
+**文件**：`.replit` → `[userenv.shared]` 部分
+
+SpreadJS 试用 License Key 仍然被硬编码在 `.replit` 文件中并提交到 Git 仓库。这是从 PR #11 起的老问题，每个新 PR 都在延续。
+
+**建议**：将 `.replit` 中的 `VITE_SPREADJS_LICENSE` 和 `VITE_SPREADJS_DESIGNER_LICENSE` 移到 Replit Secrets 或 `.env.local`（已加入 `.gitignore`）。
+
+### N-1（非阻塞）：`initSpreadJSLicense()` 移除幂等保护
+
+**文件**：`audit-ui/src/utils/spreadjs-license.ts`
+
+Master 分支版本有 `initialized` 标志防止重复执行，PR 分支移除了。虽然多次赋值 LicenseKey 无副作用，但丢失了 trial mode 的 `console.warn` 开发者提示。
+
+### N-2（非阻塞）：构建命令不一致
+
+**文件**：`audit-ui/Dockerfile`
+
+PR #18 将构建命令改为 `npx vite build`，此 PR 又改回 `npm run build`。两者功能等价（`package.json` 的 `build` script 就是 `vite build`），但来回切换增加了合并冲突风险。建议统一。
+
+---
+
+## 四、冲突分析
+
+### 4.1 冲突规模
+
+与 master 合并时产生 **39 个文件冲突**，按类型分为 4 类：
+
+| 冲突类型 | 文件数 | 根因 |
+|----------|--------|------|
+| **add/add**（双方新增同名文件） | 30 | PR 分支和 master 各自独立创建了相同路径的文件（如 Mapper、Entity、Service） |
+| **content**（内容冲突） | 6 | 双方修改了同一文件的不同部分（如 Dockerfile、package.json、menus.ts、env.d.ts） |
+| **rename/delete** | 3 | PR 分支重命名了 master 已删除的文件 |
+| **总计** | **39** | |
+
+### 4.2 冲突文件清单
+
+#### A 类：add/add 后端文件（30 个） — 策略：逐个对比取更完整版本
+
+**Mapper 接口（3 个）：**
+- `audit-dao/.../mapper/setting/BsEnergyCatalogMapper.java`
+- `audit-dao/.../mapper/template/TplEditLockMapper.java`
+- `audit-dao/.../mapper/template/TplTemplateVersionMapper.java`
+
+**Mapper XML（8 个）：**
+- `audit-dao/.../mapper/setting/BsEnergyCatalogMapper.xml`
+- `audit-dao/.../mapper/setting/BsEnergyMapper.xml`
+- `audit-dao/.../mapper/setting/BsProductMapper.xml`
+- `audit-dao/.../mapper/setting/BsUnitMapper.xml`
+- `audit-dao/.../mapper/system/SysRoleMapper.xml`
+- `audit-dao/.../mapper/template/TplEditLockMapper.xml`
+- `audit-dao/.../mapper/template/TplTemplateMapper.xml`
+- `audit-dao/.../mapper/template/TplTemplateVersionMapper.xml`
+
+**Entity / DTO（7 个）：**
+- `audit-model/.../dto/DiscoveredField.java`
+- `audit-model/.../dto/ImportCatalogRequest.java`
+- `audit-model/.../dto/SaveDraftRequest.java`
+- `audit-model/.../entity/setting/BsEnergyCatalog.java`
+- `audit-model/.../entity/setting/BsUnitEnergy.java`
+- `audit-model/.../entity/system/SysDictData.java`
+- `audit-model/.../entity/system/SysDictType.java`
+
+**Service 接口 + 实现（12 个）：**
+- `audit-service/.../setting/ProductSettingService.java` + `impl/`
+- `audit-service/.../setting/UnitSettingService.java` + `impl/`
+- `audit-service/.../system/SysDictService.java` + `impl/`
+- `audit-service/.../template/SubmissionService.java` + `impl/`
+- `audit-service/.../template/TagMappingService.java` + `impl/`
+- `audit-service/.../template/TemplateVersionService.java` + `impl/`
+
+#### B 类：content 冲突（6 个） — 策略：合并双方改动
+
+- `audit-ui/Dockerfile` — PR: 新增 Designer License ENV; master: build 命令变更
+- `audit-ui/package.json` — PR: 新增 @antv/x6 + SpreadJS 18.2.5; master: 依赖排序
+- `audit-ui/src/config/menus.ts` — PR: 新增 Wave 7 菜单; master: 菜单重组
+- `audit-ui/src/env.d.ts` — PR: 新增 Designer License 类型; master: 同
+- `audit-web/src/main/resources/data-h2.sql` — 双方各自新增测试数据
+- `audit-web/src/main/resources/schema-h2.sql` — 双方各自新增表定义
+- `replit.md` — 文档内容差异
+
+#### C 类：rename/delete（3 个） — 策略：保留 PR 分支版本
+
+- `audit-ui/src/views/admin/system/dict/index.vue`
+- `audit-ui/src/views/admin/system/users/index.vue`
+- `audit-ui/src/views/enterprise/data/overview/index.vue`
+
+---
+
+## 五、结论
+
+**建议：修复 M-1 确认后可合并，但需先解决 39 个文件冲突。**
+
+- **M-1**（SpreadDesigner 功能回退）需确认是否有意为之
+- **M-2**（.replit 硬编码 License Key）是老问题，建议后续统一处理
+- SpreadJS License 配置本身（核心改动）实现正确
+- 39 个冲突规模较大，但多数是 add/add 类型，解决方案相对机械
+
+---
+
+# 六、冲突处理方法论文档
+
+## EnergyAuditPlatform 合并冲突处理指南
+
+### 第一步：识别冲突类型
+
+执行试探性合并查看冲突列表：
+
+```bash
+git merge --no-commit --no-ff origin/master
+# 查看输出中的 CONFLICT 行
+git merge --abort  # 不要真正合并，先分析
+```
+
+冲突分为三种类型，每种有不同的处理策略：
+
+| 类型 | Git 标识 | 含义 | 典型场景 |
+|------|----------|------|----------|
+| **add/add** | `CONFLICT (add/add)` | 双方各自新建了同名文件 | 两个分支独立开发了同一个 Mapper/Entity |
+| **content** | `CONFLICT (content)` | 双方修改了同一文件的重叠区域 | Dockerfile 中一方改了 ENV，另一方改了 RUN |
+| **rename/delete** | `CONFLICT (rename/delete)` | 一方重命名，另一方删除 | 文件路径重组 |
+
+### 第二步：分析冲突内容
+
+对每个冲突文件，理解双方的改动意图：
+
+```bash
+# 查看冲突文件内容（包含 <<<<<<< / ======= / >>>>>>> 标记）
+cat <冲突文件>
+
+# 或使用 diff3 格式查看三方对比（HEAD / base / master）
+git config merge.conflictstyle diff3
+```
+
+冲突标记格式：
+```
+<<<<<<< HEAD          ← PR 分支（当前分支）的版本
+PR 分支代码
+||||||| <base-hash>   ← 共同祖先的版本（diff3 模式下显示）
+共同祖先代码
+=======
+master 分支代码
+>>>>>>> origin/master ← master（目标分支）的版本
+```
+
+### 第三步：选择解决策略
+
+#### 策略 A：保留一方（适用于 add/add 且一方是另一方的超集）
+
+**判断标准**：如果一方包含另一方的全部功能并有额外改进，直接取更完整的版本。
+
+**案例（PR #16）**：`ExtractedDataController.java`
+- PR 分支：使用 `resolveEnterpriseId()` 支持三角色访问（审核员、企业、管理员）
+- master：使用 `requireEnterprise()` 只支持企业角色
+- **决策**：PR 分支是 master 的功能超集 → 保留 PR 分支（HEAD）
+
+```bash
+# 保留 PR 分支版本
+git checkout --ours <file>
+git add <file>
+
+# 或保留 master 版本
+git checkout --theirs <file>
+git add <file>
+```
+
+#### 策略 B：合并双方改动（适用于 content 冲突且改动不重叠）
+
+**判断标准**：双方修改了文件的不同部分，且改动互不冲突。
+
+**案例（PR #18）**：`audit-ui/Dockerfile`
+- PR 分支：新增 `ENV VITE_SPREADJS_LICENSE=$VITE_SPREADJS_LICENSE`
+- master：将 `npm run build` 改为 `npx vite build`
+- **决策**：两个改动独立 → 手动合并保留两者
+
+```bash
+# 手动编辑文件，删除冲突标记，保留双方改动
+vim <file>
+# 删除 <<<<<<< HEAD / ||||||| / ======= / >>>>>>> 行
+# 保留双方有效代码
+git add <file>
+```
+
+#### 策略 C：语义合并（适用于双方修改了同一逻辑）
+
+**判断标准**：双方对同一段代码做了不同修改，需要理解业务意图后决策。
+
+**案例（PR #21）**：`audit-ui/src/utils/spreadjs-license.ts`
+- PR 分支：双 License Key（Sheets + Designer），无幂等保护
+- master：单 License Key，有 `initialized` 幂等保护 + `console.warn`
+- **决策**：需要手动合并 — 保留 PR 分支的双 Key 逻辑，考虑恢复 master 的幂等保护
+
+```typescript
+// 合并后的版本（示例）
+let initialized = false
+
+export function initSpreadJSLicense(): void {
+  if (initialized) return
+  if (typeof window.GC === 'undefined') return
+
+  const sheetsLicense = import.meta.env.VITE_SPREADJS_LICENSE
+  if (!sheetsLicense) {
+    console.warn('[SpreadJS] VITE_SPREADJS_LICENSE not set — running in trial mode')
+    return
+  }
+  if (window.GC.Spread?.Sheets) {
+    window.GC.Spread.Sheets.LicenseKey = sheetsLicense
+  }
+
+  const designerLicense = import.meta.env.VITE_SPREADJS_DESIGNER_LICENSE
+  if (designerLicense && window.GC.Spread?.Sheets?.Designer) {
+    window.GC.Spread.Sheets.Designer.LicenseKey = designerLicense
+  }
+
+  initialized = true
+}
+```
+
+#### 策略 D：rename/delete 处理
+
+**判断标准**：一方重命名了文件，另一方删除了文件。
+
+```bash
+# 如果重命名后的文件是需要的
+git add <新路径文件>
+git rm <旧路径文件>  # 如果还存在
+
+# 如果删除是正确的
+git rm <文件>
+```
+
+### 第四步：批量处理 add/add 冲突
+
+当大量 add/add 冲突文件属于同一模式（如本 PR 的 30 个后端文件），可以批量处理：
+
+```bash
+# 1. 列出所有 add/add 冲突文件
+git status | grep "both added"
+
+# 2. 对每个文件，用 diff 比较双方版本
+git diff :2:<file> :3:<file>
+# :2: = ours (PR branch), :3: = theirs (master)
+
+# 3. 如果 PR 分支包含 master 的所有方法 + 额外方法，批量取 PR 版本
+git checkout --ours <file1> <file2> <file3> ...
+git add <file1> <file2> <file3> ...
+```
+
+### 第五步：验证
+
+解决所有冲突后，务必验证：
+
+```bash
+# 1. 确认没有遗留冲突标记
+rg "<<<<<<< " --type java --type xml --type ts --type vue
+
+# 2. 后端编译
+mvn compile -pl audit-web
+
+# 3. 前端编译
+cd audit-ui && npm run build
+
+# 4. 四层对齐检查
+# MySQL (sql/00-schema.sql) ↔ H2 (schema-h2.sql) ↔ Entity ↔ Mapper XML
+```
+
+### 决策流程图
+
+```
+冲突文件
+  │
+  ├─ add/add（双方新建同名文件）
+  │    ├─ 内容完全相同 → 取任意一方
+  │    ├─ 一方是超集 → 取超集方（策略 A）
+  │    └─ 双方各有独特改动 → 语义合并（策略 C）
+  │
+  ├─ content（内容冲突）
+  │    ├─ 改动在不同区域 → 合并双方（策略 B）
+  │    └─ 改动在同一段代码 → 语义合并（策略 C）
+  │
+  └─ rename/delete
+       ├─ 重命名有意义 → 保留重命名后的文件（策略 D）
+       └─ 删除有意义 → 删除文件
+```
+
+### 本项目历史冲突案例汇总
+
+| PR | 冲突文件数 | 主要类型 | 解决策略 | 结果 |
+|----|-----------|---------|---------|------|
+| #16 | 2 | add/add + content | 保留 PR 分支（功能超集） | ✅ |
+| #18 | 1 | content (Dockerfile) | 合并双方：ENV + build 命令 | ✅ |
+| #21 | 39 | add/add (30) + content (6) + rename/delete (3) | 待处理 | ⏳ |
