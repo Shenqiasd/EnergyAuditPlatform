@@ -1,8 +1,12 @@
 FROM node:20-alpine AS build
+ARG VITE_SPREADJS_LICENSE=""
+ARG VITE_SPREADJS_DESIGNER_LICENSE=""
 WORKDIR /app
 COPY package.json ./
 RUN npm install --registry=https://registry.npmmirror.com
 COPY . .
+ENV VITE_SPREADJS_LICENSE=$VITE_SPREADJS_LICENSE
+ENV VITE_SPREADJS_DESIGNER_LICENSE=$VITE_SPREADJS_DESIGNER_LICENSE
 RUN npx vite build
 
 FROM nginx:alpine

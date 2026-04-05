@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_SPREADJS_LICENSE: string
+  readonly VITE_SPREADJS_DESIGNER_LICENSE: string
 }
 
 interface ImportMeta {
