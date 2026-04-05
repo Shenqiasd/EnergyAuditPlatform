@@ -9,6 +9,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/login/index.vue'),
     meta: { requiresAuth: false },
   },
+  {
+    path: '/register',
+    name: 'Register',
+    component: () => import('@/views/register/index.vue'),
+    meta: { requiresAuth: false },
+  },
   // Enterprise portal
   {
     path: '/enterprise',

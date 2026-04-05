@@ -5,6 +5,8 @@ import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance } from 'element-plus'
 import * as userApi from '@/api/user'
 import type { SysUser } from '@/api/user'
+import * as enterpriseApi from '@/api/enterprise'
+import type { Enterprise } from '@/api/enterprise'
 
 const loading = ref(false)
 const tableData = ref<SysUser[]>([])
@@ -30,6 +32,7 @@ const form = reactive<Partial<SysUser>>({
   phone: '',
   email: '',
   userType: 1,
+  enterpriseId: undefined,
   status: 1,
 })
 
@@ -37,7 +40,15 @@ const resetPwdDialogVisible = ref(false)
 const resetPwdTarget = ref<SysUser | null>(null)
 const newPassword = ref('')
 
-const userTypeMap: Record<number, string> = { 1: '管理员', 2: '审核员' }
+const userTypeMap: Record<number, string> = { 1: '管理员', 2: '审核员', 3: '企业用户' }
+
+const enterpriseList = ref<Enterprise[]>([])
+async function loadEnterprises() {
+  try {
+    const res = await enterpriseApi.getList({ pageNum: 1, pageSize: 999 })
+    enterpriseList.value = res.rows
+  } catch {}
+}
 
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -75,7 +86,7 @@ function handleReset() {
 function handleCreate() {
   isEdit.value = false
   dialogTitle.value = '新建用户'
-  Object.assign(form, { id: undefined, username: '', password: '', realName: '', phone: '', email: '', userType: 1, status: 1 })
+  Object.assign(form, { id: undefined, username: '', password: '', realName: '', phone: '', email: '', userType: 1, enterpriseId: undefined, status: 1 })
   dialogVisible.value = true
 }
 
@@ -142,7 +153,10 @@ async function handleDelete(row: SysUser) {
   } catch {}
 }
 
-onMounted(fetchData)
+onMounted(() => {
+  fetchData()
+  loadEnterprises()
+})
 </script>
 
 <template>
@@ -159,6 +173,7 @@ onMounted(fetchData)
           <el-select v-model="query.userType" placeholder="全部" clearable style="width:120px">
             <el-option label="管理员" :value="1" />
             <el-option label="审核员" :value="2" />
+            <el-option label="企业用户" :value="3" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -188,7 +203,7 @@ onMounted(fetchData)
         <el-table-column prop="realName" label="姓名" width="120" />
         <el-table-column label="用户类型" width="100" align="center">
           <template #default="{ row }">
-            <el-tag type="primary" size="small">{{ userTypeMap[row.userType] || '未知' }}</el-tag>
+            <el-tag :type="row.userType === 1 ? 'danger' : row.userType === 2 ? 'warning' : 'success'" size="small">{{ userTypeMap[row.userType] || '未知' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="phone" label="电话" width="130" />
@@ -237,9 +252,15 @@ onMounted(fetchData)
           <el-input v-model="form.realName" placeholder="真实姓名" />
         </el-form-item>
         <el-form-item label="用户类型" prop="userType">
-          <el-select v-model="form.userType" style="width:100%">
+          <el-select v-model="form.userType" style="width:100%" :disabled="isEdit" @change="() => { if (form.userType !== 3) form.enterpriseId = undefined }">
             <el-option label="管理员" :value="1" />
             <el-option label="审核员" :value="2" />
+            <el-option label="企业用户" :value="3" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="form.userType === 3" label="所属企业">
+          <el-select v-model="form.enterpriseId" placeholder="请选择企业" filterable style="width:100%" :disabled="isEdit">
+            <el-option v-for="ent in enterpriseList" :key="ent.id" :label="ent.enterpriseName" :value="ent.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="电话">
