@@ -16,6 +16,13 @@ import {
   AUDIT_STATUS_MAP,
   type AuditTask,
 } from '@/api/audit-task'
+import {
+  generateReport,
+  listReports,
+  downloadReport,
+  REPORT_STATUS_MAP,
+  type ArReport,
+} from '@/api/report'
 
 const router = useRouter()
 const loading = ref(false)
@@ -26,6 +33,8 @@ const yearOptions = Array.from({ length: 6 }, (_, i) => new Date().getFullYear()
 const submittingId = ref<number | null>(null)
 const auditTask = ref<AuditTask | null>(null)
 const submittingAudit = ref(false)
+const generatingReport = ref(false)
+const reports = ref<ArReport[]>([])
 
 interface Row {
   template: TplTemplate
@@ -72,14 +81,16 @@ const STATUS_MAP: Record<number, { label: string; type: 'info' | 'warning' | 'su
 async function loadData() {
   loading.value = true
   try {
-    const [subs, tpls, task] = await Promise.all([
+    const [subs, tpls, task, rpts] = await Promise.all([
       listSubmissions(),
       getTemplateList({ status: 1, pageSize: 200 }).then(r => r.rows ?? []),
       getMyAuditStatus(selectedYear.value),
+      listReports(selectedYear.value),
     ])
     submissions.value = subs
     templates.value = tpls
     auditTask.value = task
+    reports.value = (rpts as ArReport[]) || []
   } finally {
     loading.value = false
   }
@@ -147,6 +158,42 @@ function goToFill(row: Row) {
 
 function viewDetail(row: Row) {
   router.push({ path: '/enterprise/report/detail', query: { id: row.submission?.id } })
+}
+
+async function handleGenerateReport() {
+  try {
+    await ElMessageBox.confirm(
+      `确认为 ${selectedYear.value} 年度生成审计报告（Word文档）？系统将根据已提交的数据自动生成报告。`,
+      '生成报告',
+      { type: 'info' }
+    )
+  } catch {
+    return
+  }
+  generatingReport.value = true
+  try {
+    await generateReport(selectedYear.value)
+    ElMessage.success('报告生成成功')
+    loadData()
+  } catch (e: any) {
+    ElMessage.error('报告生成失败：' + (e?.message ?? '未知错误'))
+  } finally {
+    generatingReport.value = false
+  }
+}
+
+async function handleDownloadReport(report: ArReport) {
+  try {
+    const blob = await downloadReport(report.id) as unknown as Blob
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = (report.reportName || '审计报告') + '.docx'
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (e: any) {
+    ElMessage.error('下载失败：' + (e?.message ?? '未知错误'))
+  }
 }
 
 onMounted(loadData)
@@ -263,6 +310,59 @@ onMounted(loadData)
           提示：需所有模板填报完成并提交数据后，方可提交审核
         </el-text>
       </div>
+    </el-card>
+
+    <el-card shadow="never" style="margin-top: 16px">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">审计报告</span>
+          <el-button
+            type="success"
+            size="small"
+            :loading="generatingReport"
+            @click="handleGenerateReport"
+          >
+            生成审计报告
+          </el-button>
+        </div>
+      </template>
+
+      <el-empty v-if="reports.length === 0" description="暂无报告，点击上方按钮生成" />
+
+      <el-table v-else :data="reports" border stripe>
+        <el-table-column label="报告名称" prop="reportName" min-width="240" />
+        <el-table-column label="审计年度" prop="auditYear" width="100" align="center" />
+        <el-table-column label="状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="REPORT_STATUS_MAP[row.status]?.type || 'info'" size="small">
+              {{ REPORT_STATUS_MAP[row.status]?.label || '未知' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="生成时间" width="170">
+          <template #default="{ row }">{{ row.generateTime ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              :disabled="row.status < 2"
+              @click="handleDownloadReport(row)"
+            >
+              下载
+            </el-button>
+            <el-button
+              link
+              type="success"
+              :loading="generatingReport"
+              @click="handleGenerateReport"
+            >
+              重新生成
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
   </div>
 </template>

@@ -260,3 +260,22 @@ CREATE TABLE IF NOT EXISTS de_energy_flow (
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted INT DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS ar_report (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    enterprise_id BIGINT NOT NULL,
+    audit_year INT NOT NULL,
+    report_name VARCHAR(256),
+    report_type INT DEFAULT 1,
+    status INT DEFAULT 0,
+    generated_file_path VARCHAR(512),
+    uploaded_file_path VARCHAR(512),
+    onlyoffice_doc_key VARCHAR(128),
+    generate_time TIMESTAMP,
+    submit_time TIMESTAMP,
+    create_by VARCHAR(64),
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by VARCHAR(64),
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted INT DEFAULT 0
+);
