@@ -8,6 +8,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ChangePasswordDialog: typeof import('./components/ChangePasswordDialog.vue')['default']
+    ChartCard: typeof import('./components/ChartCard/index.vue')['default']
     DictSelect: typeof import('./components/DictSelect.vue')['default']
     DictTag: typeof import('./components/DictTag.vue')['default']
     DocEditor: typeof import('./components/DocEditor/index.vue')['default']

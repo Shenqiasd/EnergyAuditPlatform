@@ -33,11 +33,38 @@ A comprehensive enterprise-level web application for managing energy consumption
 | Wave 6 | Schema (24 de_* tables) | ✅ Completed |
 | Wave 9.1 | Audit Task Management (3-portal workflow) | ✅ Completed |
 | Wave 9.2 | Rectification Tracking & Overdue Warning | ✅ Completed |
-| Wave 7-8 | Flow Diagram, Charts, Reports | Planned |
+| Wave 7 | Energy Flow Diagram (AntV X6) | ✅ Completed |
+| Wave 8 | ECharts Charts (Standard + Report Assist) | ✅ Completed |
 | Wave 10 | Carbon Management & Platform Integration | Partial (emission factor CRUD done) |
 | Wave 11 | Optimization & Testing | Planned |
 
-**Current stage**: Wave 9.2 complete — Rectification tracking with overdue warning, auditor can create items, enterprise updates progress, daily overdue detection job
+**Current stage**: Wave 8 complete — ECharts Charts (PR #20)
+
+## Wave 8 — ECharts Charts (Standard + Report Assist)
+- **ChartCard component**: `audit-ui/src/components/ChartCard/index.vue` — reusable ECharts wrapper with auto-resize, loading state, v-loading
+- **ChartDataController**: `audit-web/src/main/java/.../controller/data/ChartDataController.java` — 5 JdbcTemplate endpoints with enterprise isolation
+  - `/energy-structure` — energy balance by type (pie chart)
+  - `/energy-trend` — multi-year trend (bar+line)
+  - `/product-consumption` — product unit consumption comparison
+  - `/ghg-emission` — GHG emission by source/type
+  - `/summary` — key indicators
+- **API client**: `audit-ui/src/api/chartData.ts`
+- **Standard Charts**: `enterprise/charts/standard/index.vue` — 4 charts (energy structure donut, GHG nested pie, energy trend bar+line, product unit consumption bar)
+- **Report Assist Charts**: `enterprise/charts/report-assist/index.vue` — 4 charts (equiv vs equal bar, energy by category, emission horizontal bar, output vs energy dual-axis)
+- **H2 tables**: `de_energy_balance`, `de_tech_indicator`, `de_product_unit_consumption`, `de_ghg_emission` with seed data
+- **Packages**: `echarts` + `vue-echarts`
+- **H2 quirk**: `year` is reserved word — must quote as `"year"` in column aliases
+- **GitHub PR**: #20 feat/wave8-echarts-charts
+
+## Wave 7 — Energy Flow Diagram (AntV X6)
+- **Backend**: `EnergyFlowController` (GET /list, POST /save-batch, DELETE /{id}), `EnergyFlowService`, `DeEnergyFlowMapper`
+- **Frontend**: `FlowEditor/index.vue` — AntV X6 canvas with 6 node types (purchased=#409EFF, conversion=#E6A23C, distribution=#67C23A, terminal=#909399, product=#F56C6C, non_production=#C0C4CC), auto-layout, edge labels, export PNG
+- **Page**: `enterprise/charts/energy-flow/index.vue` — load/save/export/sample-data actions
+- **API**: `energyFlow.ts` — getFlowData, saveBatch, deleteFlow
+- **Menu**: Energy flow entry in enterprise charts section
+- **Seed**: 9 energy flow records (purchased→conversion→distribution→terminal) for enterprise 1, year 2024
+- **Dev login**: enterprise1/admin123 (userType=3, enterpriseId=1), admin/admin123 (userType=1)
+- **GitHub PR**: #19 feat/wave7-energy-flow-diagram
 
 ## Wave 9.1 — Audit Task Management
 - **Tables**: `aw_audit_task`, `aw_audit_log` (H2 + MySQL schema)
@@ -121,19 +148,9 @@ mvn package -DskipTests -pl audit-web -am   # no -P dev → H2 excluded
   - License key stored in `VITE_SPREADJS_LICENSE` env var, initialized via `src/utils/spreadjs-license.ts`
   - V18 API change: `GC.Spread.Sheets.Designer` is the constructor directly (not `Designer.Designer`)
   - `SpreadDesigner/index.vue` uses `resolveDesignerConstructor()` to handle both V17 and V18 patterns
-- **AntV X6**: Energy flow diagram visualization
-- **ECharts**: Data dashboards
-- **OnlyOffice**: Online document editing
-- **SpreadJS v18.2.5**: Excel-like data entry interface
-  - Files served locally from `audit-ui/public/spreadjs/` (CDN cdn.grapecity.com is blocked in Replit)
-  - npm packages: `@grapecity/spread-sheets{,-designer,-designer-resources-en,-io,-shapes,-charts,-print,-barcode}@18.2.5`
-  - V18 file layout differs from V17: CSS in `styles/`, designer is `designer.all.min.js`
-  - License key stored in `VITE_SPREADJS_LICENSE` env var, initialized via `src/utils/spreadjs-license.ts`
-  - V18 API change: `GC.Spread.Sheets.Designer` is the constructor directly (not `Designer.Designer`)
-  - `SpreadDesigner/index.vue` uses `resolveDesignerConstructor()` to handle both V17 and V18 patterns
-- **AntV X6**: Energy flow diagram visualization (FlowEditor.vue — skeleton placeholder)
-- **ECharts**: Data dashboards (ChartCard.vue — not yet created)
-- **OnlyOffice**: Online document editing (DocEditor.vue — skeleton placeholder)
+- **AntV X6 v2**: Energy flow diagram visualization (FlowEditor.vue — fully implemented)
+- **ECharts**: Data dashboards (8 charts across 2 pages — standard + report assist)
+- **OnlyOffice**: Online document editing (planned)
 
 ## Key Backend Patterns
 - **SecurityUtils**: Always use `getRequired*` variants
