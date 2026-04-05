@@ -146,24 +146,26 @@ function renderFlow(items: EnergyFlowItem[]) {
     }
   }
 
+  const cells: Cell[] = []
+
   for (let col = 0; col < stagesPresent.length; col++) {
     const stage = stagesPresent[col]
     const x = START_X + col * STAGE_X_GAP
-    graph!.addNode({
-      id: `header-${stage}`,
-      x: x,
-      y: START_Y - 45,
-      width: NODE_W,
-      height: 30,
-      label: NODE_LABELS[stage] || stage,
-      attrs: {
-        body: { fill: 'transparent', stroke: 'none' },
-        label: { fontSize: 13, fontWeight: 'bold', fill: '#333' },
-      },
-    })
+    cells.push(
+      graph!.createNode({
+        id: `header-${stage}`,
+        x: x,
+        y: START_Y - 45,
+        width: NODE_W,
+        height: 30,
+        label: NODE_LABELS[stage] || stage,
+        attrs: {
+          body: { fill: 'transparent', stroke: 'none' },
+          label: { fontSize: 13, fontWeight: 'bold', fill: '#333' },
+        },
+      })
+    )
   }
-
-  const cells: Cell[] = []
 
   for (const node of nodeMap.values()) {
     const pos = nodePositions.get(node.id)!

@@ -40,4 +40,10 @@ public class EnergyFlowServiceImpl implements EnergyFlowService {
             }
         }
     }
+
+    @Override
+    public void deleteByIdAndEnterprise(Long id, Long enterpriseId) {
+        String operator = SecurityUtils.getCurrentUsername();
+        energyFlowMapper.softDeleteByIdAndEnterprise(id, enterpriseId, operator);
+    }
 }

@@ -21,3 +21,7 @@ export function getEnergyFlowList(auditYear: number): Promise<EnergyFlowItem[]> 
 export function saveEnergyFlowBatch(auditYear: number, data: EnergyFlowItem[]): Promise<void> {
   return request.post('/energy-flow/save', data, { params: { auditYear } })
 }
+
+export function deleteEnergyFlow(id: number): Promise<void> {
+  return request.delete(`/energy-flow/${id}`)
+}
