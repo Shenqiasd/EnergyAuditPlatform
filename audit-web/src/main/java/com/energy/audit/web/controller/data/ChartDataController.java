@@ -24,8 +24,8 @@ public class ChartDataController {
     private JdbcTemplate jdbcTemplate;
 
     private void requireEnterprise() {
-        int userType = SecurityUtils.getCurrentUserType();
-        if (userType != 3) {
+        Integer userType = SecurityUtils.getCurrentUserType();
+        if (userType == null || userType != 3) {
             throw new com.energy.audit.common.exception.BusinessException("仅企业用户可访问图表数据");
         }
     }

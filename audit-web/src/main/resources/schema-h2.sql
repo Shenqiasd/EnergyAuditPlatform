@@ -420,7 +420,7 @@ CREATE TABLE IF NOT EXISTS sys_operation_log (
 -- 21. de_company_overview (Sheet 4/12 scalar fields)
 CREATE TABLE IF NOT EXISTS de_company_overview (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     energy_leader_name     VARCHAR(64),
@@ -443,7 +443,7 @@ CREATE TABLE IF NOT EXISTS de_company_overview (
 -- 22. de_tech_indicator (Sheet 4/12 economic & energy indicators)
 CREATE TABLE IF NOT EXISTS de_tech_indicator (
     id                           BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id                BIGINT        NOT NULL,
+    submission_id                BIGINT        NOT NULL DEFAULT 0,
     enterprise_id                BIGINT        NOT NULL,
     audit_year                   INT           NOT NULL,
     indicator_year               INT           NOT NULL,
@@ -456,7 +456,7 @@ CREATE TABLE IF NOT EXISTS de_tech_indicator (
     total_energy_equiv           DECIMAL(18,4),
     total_energy_equal           DECIMAL(18,4),
     total_energy_excl_material   DECIMAL(18,4),
-    unit_output_energy_equiv     DECIMAL(18,6),
+    unit_output_energy           DECIMAL(18,6),
     unit_output_energy_equal     DECIMAL(18,6),
     saving_project_count         INT,
     saving_invest_total          DECIMAL(18,4),
@@ -479,7 +479,7 @@ CREATE TABLE IF NOT EXISTS de_tech_indicator (
 -- 23. de_energy_consumption (Sheet 5/8 energy purchase/consumption/stock by energy type)
 CREATE TABLE IF NOT EXISTS de_energy_consumption (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     energy_code            VARCHAR(16),
@@ -514,7 +514,7 @@ CREATE TABLE IF NOT EXISTS de_energy_consumption (
 -- 24. de_energy_conversion (Sheet 6 energy processing/conversion)
 CREATE TABLE IF NOT EXISTS de_energy_conversion (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     energy_name            VARCHAR(128),
@@ -545,20 +545,16 @@ CREATE TABLE IF NOT EXISTS de_energy_conversion (
 -- 25. de_product_unit_consumption (Sheet 7 product unit energy consumption)
 CREATE TABLE IF NOT EXISTS de_product_unit_consumption (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
-    indicator_name         VARCHAR(256),
-    indicator_unit         VARCHAR(64),
-    numerator_unit         VARCHAR(64),
-    denominator_unit       VARCHAR(64),
-    conversion_factor      DECIMAL(18,6),
-    current_indicator      DECIMAL(18,6),
-    current_numerator      DECIMAL(18,4),
-    current_denominator    DECIMAL(18,4),
-    previous_indicator     DECIMAL(18,6),
-    previous_numerator     DECIMAL(18,4),
-    previous_denominator   DECIMAL(18,4),
+    product_id             BIGINT        NOT NULL,
+    product_name           VARCHAR(128),
+    year_type              VARCHAR(16)   NOT NULL,
+    measurement_unit       VARCHAR(32),
+    output                 DECIMAL(18,4),
+    energy_consumption     DECIMAL(18,4),
+    unit_consumption       DECIMAL(18,6),
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by              VARCHAR(64),
@@ -570,7 +566,7 @@ CREATE TABLE IF NOT EXISTS de_product_unit_consumption (
 -- 26. de_equipment_detail (Sheet 13/14 equipment with type discriminator + JSON details)
 CREATE TABLE IF NOT EXISTS de_equipment_detail (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     equipment_type         VARCHAR(32)   NOT NULL,
@@ -598,7 +594,7 @@ CREATE TABLE IF NOT EXISTS de_equipment_detail (
 -- 27. de_carbon_emission (Sheet 16-20 carbon emission summary + details)
 CREATE TABLE IF NOT EXISTS de_carbon_emission (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     emission_category      VARCHAR(32)   NOT NULL,
@@ -624,18 +620,45 @@ CREATE TABLE IF NOT EXISTS de_carbon_emission (
     PRIMARY KEY (id)
 );
 
+-- 27b. de_ghg_emission (GHG emission by energy source for chart C5)
+CREATE TABLE IF NOT EXISTS de_ghg_emission (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    emission_type          VARCHAR(64)   NOT NULL,
+    energy_id              BIGINT,
+    energy_name            VARCHAR(128),
+    main_equipment         VARCHAR(256),
+    measurement_unit       VARCHAR(32),
+    activity_data          DECIMAL(18,4),
+    annual_emission        DECIMAL(18,4),
+    total_emission         DECIMAL(18,4),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
 -- 28. de_energy_balance (Sheet 11/31 energy consumption balance matrix)
 CREATE TABLE IF NOT EXISTS de_energy_balance (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
-    row_label              VARCHAR(128),
-    row_category           VARCHAR(64),
+    energy_id              BIGINT        NOT NULL,
     energy_name            VARCHAR(128),
-    energy_value           DECIMAL(18,4),
+    energy_category        VARCHAR(64),
+    standard_coal_equiv    DECIMAL(18,4),
+    opening_stock          DECIMAL(18,4),
+    purchase_amount        DECIMAL(18,4),
+    consumption_amount     DECIMAL(18,4),
+    transfer_out_amount    DECIMAL(18,4),
+    closing_stock          DECIMAL(18,4),
     measurement_unit       VARCHAR(32),
-    row_seq                INT,
+    energy_unit_price      DECIMAL(18,4),
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by              VARCHAR(64),
@@ -647,7 +670,7 @@ CREATE TABLE IF NOT EXISTS de_energy_balance (
 -- 29. de_energy_flow (Sheet 21 energy flow diagram 2D table)
 CREATE TABLE IF NOT EXISTS de_energy_flow (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     flow_stage             VARCHAR(32),
@@ -669,7 +692,7 @@ CREATE TABLE IF NOT EXISTS de_energy_flow (
 -- 30. de_five_year_target (Sheet 30 five-year energy saving targets)
 CREATE TABLE IF NOT EXISTS de_five_year_target (
     id                          BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id               BIGINT        NOT NULL,
+    submission_id               BIGINT        NOT NULL DEFAULT 0,
     enterprise_id               BIGINT        NOT NULL,
     audit_year                  INT           NOT NULL,
     section_type                VARCHAR(32)   NOT NULL,
@@ -698,7 +721,7 @@ CREATE TABLE IF NOT EXISTS de_five_year_target (
 -- 31. de_submission_field (generic scalar storage for tags not mapped to key tables)
 CREATE TABLE IF NOT EXISTS de_submission_field (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     tag_name               VARCHAR(128)  NOT NULL,
@@ -717,7 +740,7 @@ CREATE TABLE IF NOT EXISTS de_submission_field (
 -- 32. de_submission_table (generic table/array storage for tags not mapped to key tables)
 CREATE TABLE IF NOT EXISTS de_submission_table (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     tag_name               VARCHAR(128)  NOT NULL,
@@ -739,7 +762,7 @@ CREATE TABLE IF NOT EXISTS de_submission_table (
 -- 33. de_tech_reform_history (Sheet 2 — prior energy-saving retrofit projects)
 CREATE TABLE IF NOT EXISTS de_tech_reform_history (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     seq_no                 INT,
@@ -763,7 +786,7 @@ CREATE TABLE IF NOT EXISTS de_tech_reform_history (
 -- 34. de_saving_project (Sheet 3 — energy-saving projects)
 CREATE TABLE IF NOT EXISTS de_saving_project (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     project_type           VARCHAR(64),
@@ -788,7 +811,7 @@ CREATE TABLE IF NOT EXISTS de_saving_project (
 -- 35. de_product_output (Sheet 4.5 — product output by year)
 CREATE TABLE IF NOT EXISTS de_product_output (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     product_name           VARCHAR(128),
@@ -809,7 +832,7 @@ CREATE TABLE IF NOT EXISTS de_product_output (
 -- 36. de_meter_instrument (Sheet 9 — energy metering instruments)
 CREATE TABLE IF NOT EXISTS de_meter_instrument (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     management_no          VARCHAR(64),
@@ -837,7 +860,7 @@ CREATE TABLE IF NOT EXISTS de_meter_instrument (
 -- 37. de_meter_config_rate (Sheet 10 — metering instrument configuration rate)
 CREATE TABLE IF NOT EXISTS de_meter_config_rate (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     energy_type            VARCHAR(64),
@@ -857,7 +880,7 @@ CREATE TABLE IF NOT EXISTS de_meter_config_rate (
 -- 38. de_obsolete_equipment (Sheet 15 — obsolete equipment catalog)
 CREATE TABLE IF NOT EXISTS de_obsolete_equipment (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     seq_no                 INT,
@@ -878,7 +901,7 @@ CREATE TABLE IF NOT EXISTS de_obsolete_equipment (
 -- 39. de_product_energy_cost (Sheet 23 — product energy cost)
 CREATE TABLE IF NOT EXISTS de_product_energy_cost (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     seq_no                 INT,
@@ -899,7 +922,7 @@ CREATE TABLE IF NOT EXISTS de_product_energy_cost (
 -- 40. de_saving_calculation (Sheet 24 — energy saving calculation data)
 CREATE TABLE IF NOT EXISTS de_saving_calculation (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     energy_equal_current   DECIMAL(18,4),
@@ -923,7 +946,7 @@ CREATE TABLE IF NOT EXISTS de_saving_calculation (
 -- 41. de_management_policy (Sheet 25 — energy management policies)
 CREATE TABLE IF NOT EXISTS de_management_policy (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     seq_no                 INT,
@@ -944,7 +967,7 @@ CREATE TABLE IF NOT EXISTS de_management_policy (
 -- 42. de_saving_potential (Sheet 26 — energy saving potential details)
 CREATE TABLE IF NOT EXISTS de_saving_potential (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     seq_no                 INT,
@@ -965,7 +988,7 @@ CREATE TABLE IF NOT EXISTS de_saving_potential (
 -- 43. de_management_suggestion (Sheet 27 — energy management improvement suggestions)
 CREATE TABLE IF NOT EXISTS de_management_suggestion (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     seq_no                 INT,
@@ -985,7 +1008,7 @@ CREATE TABLE IF NOT EXISTS de_management_suggestion (
 -- 44. de_tech_reform_suggestion (Sheet 28 — energy-saving retrofit suggestions)
 CREATE TABLE IF NOT EXISTS de_tech_reform_suggestion (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     seq_no                 INT,
@@ -1006,7 +1029,7 @@ CREATE TABLE IF NOT EXISTS de_tech_reform_suggestion (
 -- 45. de_rectification (Sheet 29 — energy-saving rectification measures)
 CREATE TABLE IF NOT EXISTS de_rectification (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     seq_no                 INT,
@@ -1028,7 +1051,7 @@ CREATE TABLE IF NOT EXISTS de_rectification (
 -- 46. de_report_text (Sheet 32 — supplementary report text)
 CREATE TABLE IF NOT EXISTS de_report_text (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
-    submission_id          BIGINT        NOT NULL,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     section_code           VARCHAR(16),
