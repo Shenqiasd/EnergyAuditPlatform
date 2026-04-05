@@ -1,0 +1,177 @@
+# SpreadJS 授权失败深度诊断报告（第二轮）
+
+**项目：** EnergyAuditPlatform / audit-ui  
+**问题：** 页面持续显示 `Deployment License Key not found`  
+**诊断时间：** 2026-04-05  
+**诊断方式：** 直接下载线上打包产物进行内容比对
+
+---
+
+## 一、诊断结论
+
+### 铁证：打包产物 hash 未变，说明 Railway 未执行真正的重新构建
+
+通过对比两次部署后线上实际运行的 JS chunk 文件名：
+
+| 部署时间 | spreadjs-license chunk 文件名 |
+|---|---|
+| 修复前（旧版） | `spreadjs-license-CZmfWz55.js` |
+| "重新部署"后 | `spreadjs-license-CZmfWz55.js` |
+
+**两次完全相同。**
+
+Vite 的 chunk 文件名 hash 是根据**文件内容**生成的，内容不变则 hash 不变。这意味着：
+
+> **Railway 这次"重新部署"实际上只是重启了容器，使用的仍是之前缓存的旧镜像，根本没有重新执行 `docker build`。**
+
+### 打包产物内容（仍然是旧版错误代码）
+
+```javascript
+// spreadjs-license-CZmfWz55.js（线上实际运行内容）
+function n() {
+  if (!(typeof window.GC > "u")) {
+    console.warn("[SpreadJS] VITE_SPREADJS_LICENSE not set — running in trial mode");
+    return;
+  }
+}
+export { n as i };
+```
+
+`GC.Spread.Sheets.LicenseKey` 和 `GC.Spread.Sheets.Designer.LicenseKey` **均未被赋值**，授权 Key 为 `undefined`，因此 SpreadJS 持续报授权错误。
+
+---
+
+## 二、代码层面已确认修复（master 分支）
+
+经过对 GitHub master 分支的逐文件核查，以下三个文件的代码**均已正确**：
+
+### `src/utils/spreadjs-license.ts` ✅
+
+```typescript
+export function initSpreadJSLicense(): void {
+  if (initialized) return;
+  if (typeof window.GC === 'undefined') return;
+
+  const sheetsKey = import.meta.env.VITE_SPREADJS_LICENSE;
+  if (!sheetsKey) {
+    console.warn('[SpreadJS] VITE_SPREADJS_LICENSE not set — running in trial mode');
+    return;
+  }
+
+  if (window.GC.Spread?.Sheets) {
+    window.GC.Spread.Sheets.LicenseKey = sheetsKey;
+  }
+
+  const designerKey = import.meta.env.VITE_SPREADJS_DESIGNER_LICENSE;
+  if (designerKey && window.GC.Spread?.Sheets?.Designer) {
+    window.GC.Spread.Sheets.Designer.LicenseKey = designerKey;
+  }
+
+  initialized = true;
+}
+```
+
+### `Dockerfile` ✅
+
+```dockerfile
+FROM node:20-alpine AS build
+ARG VITE_SPREADJS_LICENSE=""
+ARG VITE_SPREADJS_DESIGNER_LICENSE=""
+WORKDIR /app
+COPY package.json ./
+RUN npm install --registry=https://registry.npmmirror.com
+COPY . .
+ENV VITE_SPREADJS_LICENSE=$VITE_SPREADJS_LICENSE
+ENV VITE_SPREADJS_DESIGNER_LICENSE=$VITE_SPREADJS_DESIGNER_LICENSE
+RUN npx vite build
+...
+```
+
+`ARG → COPY → ENV → RUN build` 顺序正确。
+
+### `src/env.d.ts` ✅
+
+两个变量的 TypeScript 类型声明均已存在。
+
+---
+
+## 三、问题根源：Railway 使用了构建缓存，未触发真正的重新构建
+
+代码已经正确，但线上运行的仍是旧镜像。Railway 在某些情况下会复用之前的 Docker 构建缓存，导致即使点击了"Redeploy"，也不会重新执行 `docker build`，环境变量的变更无法生效。
+
+---
+
+## 四、修复方案（三选一，按优先级排序）
+
+### 方案一（最推荐）：推送一个 commit 强制触发全新构建
+
+在 `audit-ui/Dockerfile` 中任意位置添加一行注释，然后 push 到 master：
+
+```dockerfile
+# Force rebuild: 2026-04-05
+```
+
+这会改变 Dockerfile 的内容，使 Railway 无法命中构建缓存，从而强制执行完整的 `docker build`，确保环境变量在构建时被正确注入。
+
+**操作步骤：**
+```bash
+# 在 Dockerfile 第一行后添加注释
+git add audit-ui/Dockerfile
+git commit -m "chore: force rebuild to inject SpreadJS license env"
+git push origin master
+```
+
+### 方案二：在 Railway 控制台清除构建缓存后重新部署
+
+1. 登录 Railway → 进入 `audit-ui` 服务
+2. 点击 **Settings** 标签
+3. 找到 **"Clear Build Cache"** 按钮，点击清除
+4. 回到 **Deployments** 标签，点击 **"Redeploy"**
+
+### 方案三：在 Railway Variables 中修改任意变量值触发重建
+
+修改 `VITE_SPREADJS_LICENSE` 变量的值（例如在末尾加一个空格再删除），保存后 Railway 通常会触发新的构建。
+
+---
+
+## 五、验证方法
+
+重新构建完成后，通过以下两种方式验证：
+
+### 方法一：检查 chunk 文件名 hash
+
+在浏览器中访问 `https://sjs.ben-china.org.cn/`，查看页面源码中 `spreadjs-license` chunk 的文件名：
+
+- **修复成功：** 文件名 hash **不再是 `CZmfWz55`**，变为新的 hash 值
+- **仍未修复：** 文件名仍为 `spreadjs-license-CZmfWz55.js`，说明仍在使用缓存
+
+### 方法二：浏览器控制台验证
+
+访问 `https://sjs.ben-china.org.cn/admin/template`，按 **F12** 打开控制台，执行：
+
+```javascript
+GC.Spread.Sheets.LicenseKey
+```
+
+- **修复成功：** 返回以 `sjs.ben-china.org.cn,E329943...` 开头的完整字符串
+- **仍未修复：** 返回 `undefined` 或空字符串
+
+---
+
+## 六、问题链路总结
+
+```
+Railway Variables 中已设置两个 VITE_ 变量
+        ↓
+点击 Redeploy（实际上只是重启容器，未重新构建）
+        ↓
+Docker 镜像使用缓存，未执行 docker build
+        ↓
+Vite 构建未重新运行，环境变量未注入
+        ↓
+spreadjs-license chunk 内容不变（hash 仍为 CZmfWz55）
+        ↓
+LicenseKey 为空 → SpreadJS 授权失败
+```
+
+**根本解决：** 通过推送 commit 或清除构建缓存，强制 Railway 执行完整的 `docker build`，使 `VITE_SPREADJS_LICENSE` 在构建时被正确注入 Vite。
