@@ -1,0 +1,326 @@
+# PR #19 深度代码审查报告
+
+## 概览
+
+| 项目 | 详情 |
+|------|------|
+| PR | [#19 feat(wave7): Energy Flow Diagram module with AntV X6](https://github.com/Shenqiasd/EnergyAuditPlatform/pull/19) |
+| 分支 | `feat/wave7-energy-flow-diagram` → `master` |
+| 变更规模 | 147 文件, +9209 -1408 |
+| 提交数 | 3 (含 1 个 replit-agent 提交) |
+| 审查结论 | **🔴 Request Changes — 存在多个阻断合并的严重问题** |
+
+---
+
+## 问题汇总
+
+| 严重级别 | 数量 |
+|----------|------|
+| 🔴 Critical（阻断合并） | 5 |
+| 🟡 Medium（合并前应修复） | 4 |
+| 🟢 Non-blocking（可后续修复） | 4 |
+
+---
+
+## 🔴 Critical 问题（阻断合并）
+
+### C-1: 三个 Service 实现被空壳 stub 覆盖，master 上已有完整实现被回退
+
+**严重性**: 🔴 Critical — 数据丢失/功能回退
+
+**问题描述**: 此 PR 将 master 分支上已经实现了完整数据库操作的 3 个 Service 实现替换为仅返回 `null`/空集合的 stub：
+
+| 文件 | master 行数 | PR 行数 | 影响 |
+|------|------------|---------|------|
+| `TemplateVersionServiceImpl.java` | 106 行 (含 mapper 注入、createDraftVersion 持久化、saveJson、publish) | 67 行 (全部 stub) | 模板版本管理完全失效 |
+| `SubmissionServiceImpl.java` | 151 行 (含 saveDraft、submit 含数据抽取逻辑) | 52 行 (全部 stub) | 企业填报功能完全失效 |
+| `TagMappingServiceImpl.java` | 148 行 (含标签同步、替换逻辑) | 35 行 (全部 stub) | 标签映射管理完全失效 |
+
+**影响范围**: 合并此 PR 后，模板管理、企业填报、标签映射三大核心模块将全部回退为无操作，所有前端操作将静默失败。
+
+**修复建议**: 在合并时必须保留 master 的实现，通过冲突解决将这三个文件取 master 侧的版本。
+
+---
+
+### C-2: `TemplateVersionServiceImpl.createDraftVersion` 不持久化（即使单独看 PR 分支也是 Bug）
+
+**文件**: `audit-service/src/main/java/com/energy/audit/service/template/impl/TemplateVersionServiceImpl.java:42-49`
+
+```java
+public TplTemplateVersion createDraftVersion(Long templateId) {
+    TplTemplateVersion v = new TplTemplateVersion();
+    v.setTemplateId(templateId);
+    v.setVersion(1);
+    v.setPublished(0);
+    return v;  // ⚠️ 仅在内存构建对象，未调用 mapper.insert()
+}
+```
+
+`TemplateServiceImpl.create()` (第 75 行) 在 `@Transactional` 中调用此方法，模板行 `currentVersion=1` 被提交但 `tpl_template_version` 表无对应记录。下游 `publish()` 将抛出 "没有可发布的草稿版本"。
+
+> ✅ 与 Devin Review Comment #1 一致，确认有效。
+
+---
+
+### C-3: 能源流向图 H2 表结构与 MySQL 生产 Schema 完全不一致
+
+**H2 (schema-h2.sql)**: 单表 `de_energy_flow` — 扁平结构，每行一条 source→target 流向
+
+**MySQL (sql/00-schema.sql)**: 三表范式设计：
+- `de_energy_flow_diagram` — 主图表（含 `diagram_type`, `diagram_data` JSON）
+- `de_energy_flow_node` — 节点（含 `node_id`, `node_type`, `ref_type`, `ref_id`, `position_x/y`）
+- `de_energy_flow_edge` — 连线（含 `edge_id`, `source_node_id`, `target_node_id`, `energy_id`, `physical_amount`）
+
+**差异分析**:
+
+| 维度 | H2 `de_energy_flow` | MySQL 三表 |
+|------|---------------------|------------|
+| 结构 | 单表扁平 | 主表+节点+连线 |
+| 节点坐标 | 无 | `position_x`, `position_y` |
+| 图类型 | 无 | `diagram_type` (1/2/3) |
+| 关联引用 | 无 | `ref_type`, `ref_id` → bs_* |
+| X6 布局 | 无 | `diagram_data` JSON |
+
+**影响**: 当前 Entity (`DeEnergyFlow`)、Mapper XML、Service、Controller 全部基于 H2 的扁平表设计。切换到 MySQL 生产环境时将完全无法工作。需要重新设计为匹配三表结构的 Entity/Mapper/Service。
+
+---
+
+### C-4: 大量合并冲突（37个文件），含核心代码
+
+运行 `git merge --no-commit --no-ff origin/master` 发现 **37 个冲突文件**，涉及：
+
+| 类别 | 冲突文件数 | 关键文件 |
+|------|-----------|---------|
+| Mapper XML | 8 | BsEnergyCatalogMapper.xml, TplEditLockMapper.xml, TplTemplateVersionMapper.xml 等 |
+| Service/Impl | 8 | TemplateVersionServiceImpl, SubmissionServiceImpl, TagMappingServiceImpl 等 |
+| Entity/DTO | 5 | BsEnergyCatalog, SysDictData, SaveDraftRequest 等 |
+| Mapper Interface | 3 | TplEditLockMapper, TplTemplateVersionMapper, BsEnergyCatalogMapper |
+| Frontend | 6 | package.json, menus.ts, router, Dockerfile, SpreadDesigner 等 |
+| Schema | 2 | schema-h2.sql, data-h2.sql |
+| 其他 | 5 | replit.md, env.d.ts 等 |
+
+**特别危险**: `TemplateVersionServiceImpl.java`、`SubmissionServiceImpl.java`、`TagMappingServiceImpl.java` 的冲突为 add/add 类型，PR 侧是 stub 覆盖 master 侧的完整实现。自动合并策略无法正确处理，需要手动逐文件解决。
+
+---
+
+### C-5: `submit` 端点缺少企业归属校验（IDOR 漏洞）
+
+**文件**: `audit-web/src/main/java/com/energy/audit/web/controller/template/TemplateController.java:259-265`
+
+```java
+@PostMapping("/submission/{submissionId}/submit")
+public R<Void> submit(@PathVariable Long submissionId,
+                      @RequestParam Long templateVersionId) {
+    requireEnterprise();
+    // ⚠️ 未从安全上下文提取 enterpriseId 进行归属校验
+    submissionService.submit(submissionId, templateVersionId);
+    return R.ok();
+}
+```
+
+对比 `saveDraft` 端点正确地提取了 `SecurityUtils.getRequiredCurrentEnterpriseId()` 并传递给 service。任何企业用户只要知道另一企业的 `submissionId` 即可提交其数据。
+
+> 注: master 分支的 `SubmissionServiceImpl.submit()` 已内置了 enterpriseId 校验，但控制器层仍应传入以遵循防御性编程。
+> ✅ 与 Devin Review Comment #6 一致，确认有效。
+
+---
+
+## 🟡 Medium 问题（合并前应修复）
+
+### M-1: `EnergyFlowController` 缺少角色守卫
+
+**文件**: `audit-web/src/main/java/com/energy/audit/web/controller/data/EnergyFlowController.java`
+
+控制器的三个端点 (`GET /list`, `POST /save`, `DELETE /{id}`) 均通过 `SecurityUtils.getRequiredCurrentEnterpriseId()` 获取企业 ID（隐含要求企业用户），但没有显式的角色检查 (`requireEnterprise()`)。如果管理员或审核员的 token 中也有 `enterpriseId` 字段，则可能越权操作企业数据。
+
+**修复**: 在每个端点开头添加 `requireEnterprise()` 调用，与 `TemplateController` 的模式保持一致。
+
+---
+
+### M-2: `releaseLock` 无事务保护，存在 TOCTOU 竞态条件
+
+**文件**: `audit-service/src/main/java/com/energy/audit/service/template/EditLockService.java:85-98`
+
+`releaseLock()` 先 `selectByKey`（无 FOR UPDATE）再 `deleteByKey`，两步之间可能被其他用户的 `acquireLock`（带 @Transactional + FOR UPDATE）穿插，导致新用户的锁被错误删除。
+
+**修复建议**: 在 `deleteByKey` SQL 中增加 `AND lock_user_id = #{lockUserId}` 条件。
+
+> ✅ 与 Devin Review Comment #4 一致，确认有效。
+
+---
+
+### M-3: `EntEnterpriseMapper.xml` updateById 无法将 `expireDate` 清空为 NULL
+
+**文件**: `audit-dao/src/main/resources/mapper/enterprise/EntEnterpriseMapper.xml:74`
+
+```xml
+<if test="expireDate != null">expire_date = #{expireDate},</if>
+```
+
+`EnterpriseController.updateExpireDate()` 设计可接受 null 以清除过期日期，但 MyBatis 的 null-check 条件会跳过该列更新。
+
+**修复**: 新增专用 `updateExpireDate` SQL 语句，无条件设置 `expire_date = #{expireDate}`。
+
+> ✅ 与 Devin Review Comment #2 一致，确认有效。
+
+---
+
+### M-4: `SysRoleMapper.xml` updateById 缺少 `update_time` 自动更新
+
+**文件**: `audit-dao/src/main/resources/mapper/system/SysRoleMapper.xml:43-54`
+
+其他所有 Mapper XML 的 `updateById` 均包含 `update_time = CURRENT_TIMESTAMP`，唯独 SysRoleMapper 遗漏。角色更新后审计字段不会刷新。
+
+> ✅ 与 Devin Review Comment #5 一致，确认有效。
+
+---
+
+## 🟢 Non-blocking 问题（可后续修复）
+
+### N-1: `el-date-picker` 年度选择器类型不匹配
+
+**文件**: `audit-ui/src/views/enterprise/charts/energy-flow/index.vue:93-101`
+
+`auditYear` 初始化为 `ref(currentYear)` (number)，但 `el-date-picker type="year" value-format="YYYY"` 用户交互后返回 string `"2024"`，导致 TypeScript 类型契约违反。
+
+**修复**: 改用 `el-select` + 年份选项列表，保证 value 始终为 number 类型。
+
+> ✅ 与 Devin Review Comment #3 一致，确认有效。
+
+---
+
+### N-2: `.replit` 文件硬编码 SpreadJS 许可证密钥
+
+**文件**: `.replit:68`
+
+```toml
+VITE_SPREADJS_LICENSE = "E527756978111295#B1dWKlEVvFEdYR6aIJDcIh6M..."
+```
+
+商业许可证密钥明文提交到版本控制。虽然这是开发环境配置，但建议通过环境变量注入，避免泄露。
+
+---
+
+### N-3: `EnergyFlowServiceImpl.saveBatch` 逐条插入性能问题
+
+**文件**: `audit-service/src/main/java/com/energy/audit/service/data/impl/EnergyFlowServiceImpl.java:31-39`
+
+```java
+for (int i = 0; i < flows.size(); i++) {
+    energyFlowMapper.insert(flow);  // N 次 SQL INSERT
+}
+```
+
+当流向数据量较大时，逐条 INSERT 效率低。建议使用 MyBatis 的 `<foreach>` 批量插入优化。
+
+---
+
+### N-4: H2 开发 Schema 严重缺失（45 张表缺失）
+
+**H2 schema-h2.sql** 仅包含 11 张表，而 MySQL 生产 schema 包含 56 张表。缺失的 45 张表涵盖：
+
+- 系统模块: `sys_user_role`, `sys_role_menu`, `sys_menu`, `sys_dict_type`, `sys_dict_data`, `sys_config`, `sys_operation_log`
+- 企业模块: `ent_registration`, `ent_enterprise_setting`
+- 模板模块: `tpl_tag_mapping`, `tpl_submission`
+- 数据录入模块: 全部 `de_*` 表（除 `de_energy_flow`）
+- 审计报告/审核/碳排放/图表模块: 全部缺失
+
+这意味着使用 H2 开发 profile 时，大部分功能无法测试。虽然这是渐进开发的正常状态，但应在文档中注明。
+
+---
+
+## 四层对齐检查
+
+### 能源流向图模块 (`de_energy_flow`)
+
+| 层级 | 状态 | 说明 |
+|------|------|------|
+| MySQL Schema | ⚠️ 不匹配 | 使用三表设计 (`diagram/node/edge`)，与 H2 单表完全不同 |
+| H2 Schema | ✅ | `de_energy_flow` 单表，含 submission_id, enterprise_id, audit_year, flow_stage 等 |
+| Entity (`DeEnergyFlow.java`) | ✅ 匹配 H2 | 字段与 H2 一致 |
+| Mapper XML | ✅ 匹配 H2 | resultMap 和 SQL 均对应 H2 单表 |
+| **结论** | 🔴 | H2 ↔ Entity ↔ Mapper 三层内部一致，但与 MySQL 生产 Schema **完全不对齐** |
+
+### 其他已有表对齐
+
+| 表名 | MySQL ↔ H2 | H2 ↔ Entity | Entity ↔ Mapper |
+|------|-----------|-------------|-----------------|
+| `sys_user` | ✅ | ✅ | ✅ |
+| `sys_role` | ✅ | ✅ | ✅ (但缺 update_time 自动更新) |
+| `ent_enterprise` | ✅ | ✅ | ✅ (但 expireDate null 问题) |
+| `bs_energy` | ✅ | ✅ | ✅ |
+| `bs_energy_catalog` | ✅ | ✅ | ✅ |
+| `bs_unit` | ✅ | ✅ | ✅ |
+| `bs_product` | ✅ | ✅ | ✅ |
+| `tpl_template` | ✅ | ✅ | ✅ |
+| `tpl_template_version` | ✅ | ✅ | ✅ |
+| `tpl_edit_lock` | ✅ | ✅ | ✅ |
+
+---
+
+## 安全审计
+
+| 端点 | 角色检查 | 企业隔离 | 状态 |
+|------|---------|---------|------|
+| `GET /energy-flow/list` | ❌ 无显式角色守卫 | ✅ `getRequiredCurrentEnterpriseId()` | 🟡 应补充 |
+| `POST /energy-flow/save` | ❌ 无显式角色守卫 | ✅ `getRequiredCurrentEnterpriseId()` | 🟡 应补充 |
+| `DELETE /energy-flow/{id}` | ❌ 无显式角色守卫 | ✅ `getRequiredCurrentEnterpriseId()` + mapper 双重过滤 | 🟡 应补充 |
+| `POST /template/submission/{id}/submit` | ✅ `requireEnterprise()` | ❌ 未传入 enterpriseId | 🔴 IDOR |
+| `POST /template` | ✅ `requireAdmin()` | N/A | ✅ |
+| `PUT /template/{id}` | ✅ `requireAdmin()` | N/A | ✅ |
+| SQL 注入 | 所有 Mapper XML 均使用 `#{}` 参数化 | 无 `${}` 使用 | ✅ 安全 |
+
+---
+
+## 合并冲突分析
+
+**冲突文件总数**: 37 个
+
+**最高风险冲突**（Service Impl 文件，stub 覆盖真实实现）:
+1. `TemplateVersionServiceImpl.java` — PR: 67 行 stub vs master: 106 行完整实现
+2. `SubmissionServiceImpl.java` — PR: 52 行 stub vs master: 151 行完整实现  
+3. `TagMappingServiceImpl.java` — PR: 35 行 stub vs master: 148 行完整实现
+
+**合并策略建议**: 
+- 以上 3 个 Service 文件：取 master 侧
+- Mapper XML 文件：需逐文件对比，master 侧通常更完整
+- 前端文件：需手动合并，保留双方有效改动
+- Schema 文件：需将 PR 新增的 `de_energy_flow` 表追加到 master 的 schema 中
+
+---
+
+## 自动化审查评论验证
+
+| # | 评论 | 验证结果 |
+|---|------|---------|
+| 1 | TemplateVersionServiceImpl.createDraftVersion 是 no-op stub | ✅ 有效 — 确认未调用 mapper.insert() |
+| 2 | Enterprise expiry date 无法清空为 NULL | ✅ 有效 — MyBatis `<if test="expireDate != null">` 阻止 |
+| 3 | el-date-picker value-format="YYYY" 返回 string 类型不匹配 | ✅ 有效 — number ref 会被 string 覆盖 |
+| 4 | releaseLock 无事务保护，TOCTOU 竞态 | ✅ 有效 — selectByKey 与 deleteByKey 间可被穿插 |
+| 5 | SysRoleMapper.xml updateById 缺少 update_time | ✅ 有效 — 其他 mapper 均有，唯独此处遗漏 |
+| 6 | submit 端点缺少企业归属校验 IDOR | ✅ 有效 — 虽然 master 的 service 层有校验，控制器层仍应传入 |
+
+**结论**: 所有 6 条自动化审查评论均有效且分析准确。
+
+---
+
+## 最终建议
+
+### 🔴 建议: **Request Changes**
+
+此 PR 包含 5 个阻断合并的严重问题，其中最关键的是 **三个 Service 实现被 stub 覆盖** 和 **能源流向图 Schema 设计与生产环境不一致**。
+
+### 合并前必须完成:
+
+1. **解决 stub 覆盖问题** — 确保合并时保留 master 的 `TemplateVersionServiceImpl`、`SubmissionServiceImpl`、`TagMappingServiceImpl` 完整实现
+2. **统一能源流向图 Schema 设计** — 决定使用 MySQL 的三表设计还是修改 MySQL schema 为单表，确保四层对齐
+3. **解决 37 个合并冲突** — 逐文件手动解决，特别注意 Service 层取 master 侧
+4. **修复 submit 端点 IDOR 漏洞** — 控制器层传入 enterpriseId
+5. **为 EnergyFlowController 添加角色守卫** — 补充 `requireEnterprise()` 调用
+
+### 合并后可跟进:
+
+- SysRoleMapper update_time 修复
+- EntEnterpriseMapper expireDate null 处理
+- el-date-picker 类型修复
+- .replit SpreadJS 许可证密钥外移
