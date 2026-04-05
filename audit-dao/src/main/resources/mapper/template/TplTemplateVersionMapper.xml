@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.template.TplTemplateVersionMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.template.TplTemplateVersion">
+        <id column="id" property="id"/>
+        <result column="template_id" property="templateId"/>
+        <result column="version" property="version"/>
+        <result column="template_json" property="templateJson"/>
+        <result column="change_log" property="changeLog"/>
+        <result column="published" property="published"/>
+        <result column="publish_time" property="publishTime"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT * FROM tpl_template_version WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectByTemplateId" resultMap="BaseResultMap">
+        SELECT * FROM tpl_template_version WHERE template_id = #{templateId} AND deleted = 0 ORDER BY version DESC
+    </select>
+
+    <select id="selectListByTemplateId" resultMap="BaseResultMap">
+        SELECT id, template_id, version, change_log, published, publish_time, create_by, create_time, update_by, update_time, deleted
+        FROM tpl_template_version WHERE template_id = #{templateId} AND deleted = 0 ORDER BY version DESC
+    </select>
+
+    <select id="selectLatestByTemplateId" resultMap="BaseResultMap">
+        SELECT * FROM tpl_template_version WHERE template_id = #{templateId} AND deleted = 0 ORDER BY version DESC LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO tpl_template_version (template_id, version, template_json, change_log, published, create_by, update_by)
+        VALUES (#{templateId}, #{version}, #{templateJson}, #{changeLog}, #{published}, #{createBy}, #{updateBy})
+    </insert>
+
+    <update id="updateById">
+        UPDATE tpl_template_version
+        <set>
+            <if test="templateJson != null">template_json = #{templateJson},</if>
+            <if test="changeLog != null">change_log = #{changeLog},</if>
+            <if test="published != null">published = #{published},</if>
+            <if test="publishTime != null">publish_time = #{publishTime},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = CURRENT_TIMESTAMP,
+        </set>
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="deleteById">
+        UPDATE tpl_template_version SET deleted = 1, update_by = #{updateBy}, update_time = CURRENT_TIMESTAMP WHERE id = #{id}
+    </update>
+</mapper>

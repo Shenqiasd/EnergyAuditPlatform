@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.template.TplEditLockMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.template.TplEditLock">
+        <id column="id" property="id"/>
+        <result column="enterprise_id" property="enterpriseId"/>
+        <result column="template_id" property="templateId"/>
+        <result column="audit_year" property="auditYear"/>
+        <result column="lock_user_id" property="lockUserId"/>
+        <result column="lock_time" property="lockTime"/>
+        <result column="expire_time" property="expireTime"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <select id="selectByKeyForUpdate" resultMap="BaseResultMap">
+        SELECT * FROM tpl_edit_lock
+        WHERE enterprise_id = #{enterpriseId} AND template_id = #{templateId} AND audit_year = #{auditYear}
+        FOR UPDATE
+    </select>
+
+    <select id="selectByKey" resultMap="BaseResultMap">
+        SELECT * FROM tpl_edit_lock
+        WHERE enterprise_id = #{enterpriseId} AND template_id = #{templateId} AND audit_year = #{auditYear} AND deleted = 0
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO tpl_edit_lock (enterprise_id, template_id, audit_year, lock_user_id, lock_time, expire_time, create_by, update_by)
+        VALUES (#{enterpriseId}, #{templateId}, #{auditYear}, #{lockUserId}, #{lockTime}, #{expireTime}, #{createBy}, #{updateBy})
+    </insert>
+
+    <update id="updateByKey">
+        UPDATE tpl_edit_lock SET lock_user_id = #{lockUserId}, lock_time = #{lockTime}, expire_time = #{expireTime},
+            update_by = #{updateBy}, update_time = CURRENT_TIMESTAMP, deleted = 0
+        WHERE enterprise_id = #{enterpriseId} AND template_id = #{templateId} AND audit_year = #{auditYear}
+    </update>
+
+    <update id="deleteByKey">
+        UPDATE tpl_edit_lock SET deleted = 1, update_by = #{updateBy}, update_time = CURRENT_TIMESTAMP
+        WHERE enterprise_id = #{enterpriseId} AND template_id = #{templateId} AND audit_year = #{auditYear}
+    </update>
+</mapper>

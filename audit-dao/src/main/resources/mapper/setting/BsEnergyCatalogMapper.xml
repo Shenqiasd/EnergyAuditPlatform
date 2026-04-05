@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.setting.BsEnergyCatalogMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.setting.BsEnergyCatalog">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="category" property="category"/>
+        <result column="measurement_unit" property="measurementUnit"/>
+        <result column="equivalent_value" property="equivalentValue"/>
+        <result column="equal_value" property="equalValue"/>
+        <result column="low_heat_value" property="lowHeatValue"/>
+        <result column="carbon_content" property="carbonContent"/>
+        <result column="oxidation_rate" property="oxidationRate"/>
+        <result column="color" property="color"/>
+        <result column="is_active" property="isActive"/>
+        <result column="sort_order" property="sortOrder"/>
+        <result column="remark" property="remark"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT * FROM bs_energy_catalog WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectList" resultMap="BaseResultMap">
+        SELECT * FROM bs_energy_catalog WHERE deleted = 0
+        <if test="name != null and name != ''">AND name LIKE CONCAT('%', #{name}, '%')</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        ORDER BY sort_order ASC, create_time DESC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bs_energy_catalog (name, category, measurement_unit, equivalent_value, equal_value, low_heat_value, carbon_content, oxidation_rate, color, is_active, sort_order, remark, create_by, update_by)
+        VALUES (#{name}, #{category}, #{measurementUnit}, #{equivalentValue}, #{equalValue}, #{lowHeatValue}, #{carbonContent}, #{oxidationRate}, #{color}, #{isActive}, #{sortOrder}, #{remark}, #{createBy}, #{updateBy})
+    </insert>
+
+    <update id="updateById">
+        UPDATE bs_energy_catalog
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="category != null">category = #{category},</if>
+            <if test="measurementUnit != null">measurement_unit = #{measurementUnit},</if>
+            <if test="equivalentValue != null">equivalent_value = #{equivalentValue},</if>
+            <if test="equalValue != null">equal_value = #{equalValue},</if>
+            <if test="lowHeatValue != null">low_heat_value = #{lowHeatValue},</if>
+            <if test="carbonContent != null">carbon_content = #{carbonContent},</if>
+            <if test="oxidationRate != null">oxidation_rate = #{oxidationRate},</if>
+            <if test="color != null">color = #{color},</if>
+            <if test="isActive != null">is_active = #{isActive},</if>
+            <if test="sortOrder != null">sort_order = #{sortOrder},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = CURRENT_TIMESTAMP,
+        </set>
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="deleteById">
+        UPDATE bs_energy_catalog SET deleted = 1, update_by = #{updateBy}, update_time = CURRENT_TIMESTAMP WHERE id = #{id}
+    </update>
+</mapper>
