@@ -4,7 +4,7 @@ import ChartCard from '@/components/ChartCard/index.vue'
 import { getEnergyStructure, getEnergyTrend, getProductConsumption, getGhgEmission } from '@/api/chartData'
 import type { EChartsOption } from 'echarts'
 
-const auditYear = ref(2024)
+const auditYear = ref(new Date().getFullYear())
 const loading = reactive({
   structure: false,
   trend: false,

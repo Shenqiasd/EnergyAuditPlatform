@@ -23,9 +23,17 @@ public class ChartDataController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    private void requireEnterprise() {
+        int userType = SecurityUtils.getCurrentUserType();
+        if (userType != 3) {
+            throw new com.energy.audit.common.exception.BusinessException("仅企业用户可访问图表数据");
+        }
+    }
+
     @Operation(summary = "Energy consumption structure (pie chart)")
     @GetMapping("/energy-structure")
     public R<List<Map<String, Object>>> energyStructure(@RequestParam Integer auditYear) {
+        requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
             "SELECT energy_name AS name, standard_coal_equiv AS value, energy_category AS category " +
@@ -39,6 +47,7 @@ public class ChartDataController {
     @Operation(summary = "Energy consumption trends (line chart) — mapping C2 + C7")
     @GetMapping("/energy-trend")
     public R<List<Map<String, Object>>> energyTrend(@RequestParam Integer auditYear) {
+        requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
             "SELECT indicator_year AS \"year\", total_energy_equiv AS totalEnergy, " +
@@ -58,6 +67,7 @@ public class ChartDataController {
     @Operation(summary = "Product unit consumption comparison (bar chart)")
     @GetMapping("/product-consumption")
     public R<List<Map<String, Object>>> productConsumption(@RequestParam Integer auditYear) {
+        requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
             "SELECT product_name AS productName, year_type AS yearType, " +
@@ -72,6 +82,7 @@ public class ChartDataController {
     @Operation(summary = "GHG emission composition (pie + bar chart)")
     @GetMapping("/ghg-emission")
     public R<List<Map<String, Object>>> ghgEmission(@RequestParam Integer auditYear) {
+        requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
             "SELECT emission_type AS emissionType, energy_name AS energyName, " +
@@ -86,6 +97,7 @@ public class ChartDataController {
     @Operation(summary = "Dashboard summary data")
     @GetMapping("/summary")
     public R<Map<String, Object>> summary(@RequestParam Integer auditYear) {
+        requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         Map<String, Object> result = new HashMap<>();
 
@@ -100,7 +112,7 @@ public class ChartDataController {
                 enterpriseId, auditYear, auditYear
             );
             result.put("indicator", indicator);
-        } catch (Exception e) {
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
             result.put("indicator", null);
         }
 
@@ -111,7 +123,7 @@ public class ChartDataController {
                 enterpriseId, auditYear
             );
             result.put("ghgTotal", ghgTotal);
-        } catch (Exception e) {
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
             result.put("ghgTotal", null);
         }
 
