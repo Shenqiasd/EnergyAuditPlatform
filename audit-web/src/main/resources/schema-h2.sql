@@ -166,6 +166,81 @@ CREATE TABLE IF NOT EXISTS bs_product (
     deleted INT DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS de_energy_balance (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    enterprise_id BIGINT NOT NULL,
+    audit_year INT NOT NULL,
+    energy_name VARCHAR(128),
+    energy_category VARCHAR(64),
+    measurement_unit VARCHAR(32),
+    opening_stock DECIMAL(18,4) DEFAULT 0,
+    purchase_amount DECIMAL(18,4) DEFAULT 0,
+    consumption_amount DECIMAL(18,4) DEFAULT 0,
+    transfer_out_amount DECIMAL(18,4) DEFAULT 0,
+    closing_stock DECIMAL(18,4) DEFAULT 0,
+    standard_coal_equiv DECIMAL(18,4) DEFAULT 0,
+    create_by VARCHAR(64),
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by VARCHAR(64),
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted INT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS de_tech_indicator (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    enterprise_id BIGINT NOT NULL,
+    audit_year INT NOT NULL,
+    indicator_year INT NOT NULL,
+    gross_output DECIMAL(18,4),
+    sales_revenue DECIMAL(18,4),
+    energy_total_cost DECIMAL(18,4),
+    production_cost DECIMAL(18,4),
+    energy_cost_ratio DECIMAL(8,4),
+    total_energy_equiv DECIMAL(18,4),
+    total_energy_equal DECIMAL(18,4),
+    unit_output_energy DECIMAL(18,6),
+    create_by VARCHAR(64),
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by VARCHAR(64),
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted INT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS de_product_unit_consumption (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    enterprise_id BIGINT NOT NULL,
+    audit_year INT NOT NULL,
+    product_name VARCHAR(128) NOT NULL,
+    year_type VARCHAR(16) NOT NULL,
+    measurement_unit VARCHAR(32),
+    output DECIMAL(18,4),
+    energy_consumption DECIMAL(18,4),
+    unit_consumption DECIMAL(18,6),
+    create_by VARCHAR(64),
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by VARCHAR(64),
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted INT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS de_ghg_emission (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    enterprise_id BIGINT NOT NULL,
+    audit_year INT NOT NULL,
+    emission_type VARCHAR(64) NOT NULL,
+    energy_name VARCHAR(128),
+    main_equipment VARCHAR(256),
+    activity_data DECIMAL(18,4),
+    annual_emission DECIMAL(18,4),
+    total_emission DECIMAL(18,4),
+    remark VARCHAR(512),
+    create_by VARCHAR(64),
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by VARCHAR(64),
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted INT DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS de_energy_flow (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     submission_id BIGINT,
