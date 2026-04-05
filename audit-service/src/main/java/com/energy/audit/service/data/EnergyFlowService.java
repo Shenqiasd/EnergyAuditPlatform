@@ -1,6 +1,6 @@
 package com.energy.audit.service.data;
 
-import com.energy.audit.model.entity.data.DeEnergyFlow;
+import com.energy.audit.model.entity.extraction.DeEnergyFlow;
 
 import java.util.List;
 

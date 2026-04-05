@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.energy.audit.dao.mapper.data.DeEnergyFlowMapper">
 
-    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.data.DeEnergyFlow">
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.extraction.DeEnergyFlow">
         <id column="id" property="id"/>
         <result column="submission_id" property="submissionId"/>
         <result column="enterprise_id" property="enterpriseId"/>

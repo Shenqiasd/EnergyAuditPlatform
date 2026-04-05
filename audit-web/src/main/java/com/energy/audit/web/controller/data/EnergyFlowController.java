@@ -2,7 +2,7 @@ package com.energy.audit.web.controller.data;
 
 import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
-import com.energy.audit.model.entity.data.DeEnergyFlow;
+import com.energy.audit.model.entity.extraction.DeEnergyFlow;
 import com.energy.audit.service.data.EnergyFlowService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;

@@ -1,6 +1,6 @@
 package com.energy.audit.dao.mapper.data;
 
-import com.energy.audit.model.entity.data.DeEnergyFlow;
+import com.energy.audit.model.entity.extraction.DeEnergyFlow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 

@@ -2,7 +2,7 @@ package com.energy.audit.service.data.impl;
 
 import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.dao.mapper.data.DeEnergyFlowMapper;
-import com.energy.audit.model.entity.data.DeEnergyFlow;
+import com.energy.audit.model.entity.extraction.DeEnergyFlow;
 import com.energy.audit.service.data.EnergyFlowService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
