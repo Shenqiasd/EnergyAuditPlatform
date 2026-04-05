@@ -16,7 +16,7 @@ body > .gc-designer-dialog {
   z-index: 100000 !important;
 }
 body > div:has(> .gc-designer-dialog-overlay) {
-  position: relative !important;
+  position: fixed !important;
   z-index: 100000 !important;
 }
 .gc-designer-dialog-overlay {

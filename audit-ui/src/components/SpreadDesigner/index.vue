@@ -46,7 +46,7 @@ function elevateSpreadJSNode(node: Node) {
     node.style.zIndex = isOverlay ? OVERLAY_Z : DIALOG_Z
   }
   if (!isSpreadJS && node.querySelector('.gc-designer-dialog-overlay, .gc-designer-dialog')) {
-    node.style.position = 'relative'
+    node.style.position = 'fixed'
     node.style.zIndex = DIALOG_Z
   }
 }
