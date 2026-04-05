@@ -36,14 +36,18 @@ public class ChartDataController {
         return R.ok(rows);
     }
 
-    @Operation(summary = "Energy consumption trends (line chart)")
+    @Operation(summary = "Energy consumption trends (line chart) — mapping C2 + C7")
     @GetMapping("/energy-trend")
     public R<List<Map<String, Object>>> energyTrend(@RequestParam Integer auditYear) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
             "SELECT indicator_year AS \"year\", total_energy_equiv AS totalEnergy, " +
-            "total_energy_equal AS totalEnergyEqual, unit_output_energy AS unitEnergy, " +
-            "gross_output AS grossOutput " +
+            "total_energy_equal AS totalEnergyEqual, " +
+            "total_energy_excl_material AS totalEnergyExclMaterial, " +
+            "unit_output_energy AS unitEnergy, " +
+            "gross_output AS grossOutput, sales_revenue AS salesRevenue, " +
+            "tax_paid AS taxPaid, production_cost AS productionCost, " +
+            "energy_total_cost AS energyTotalCost, energy_cost_ratio AS energyCostRatio " +
             "FROM de_tech_indicator WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
             "ORDER BY indicator_year ASC",
             enterpriseId, auditYear
@@ -87,7 +91,11 @@ public class ChartDataController {
 
         try {
             Map<String, Object> indicator = jdbcTemplate.queryForMap(
-                "SELECT total_energy_equiv, total_energy_equal, unit_output_energy, gross_output, energy_total_cost " +
+                "SELECT total_energy_equiv, total_energy_equal, total_energy_excl_material, " +
+                "unit_output_energy, gross_output, sales_revenue, tax_paid, " +
+                "energy_total_cost, production_cost, energy_cost_ratio, " +
+                "saving_project_count, saving_invest_total, saving_capacity, saving_benefit, " +
+                "coal_target, coal_actual " +
                 "FROM de_tech_indicator WHERE enterprise_id = ? AND audit_year = ? AND indicator_year = ? AND deleted = 0",
                 enterpriseId, auditYear, auditYear
             );
