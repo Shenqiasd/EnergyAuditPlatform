@@ -1,0 +1,160 @@
+# PR #20 二次审查报告：feat(wave8): ECharts chart pages
+
+## 一、PR 概览（Rebase 后）
+
+| 项目 | 详情 |
+|------|------|
+| **PR 编号** | #20 |
+| **分支** | `feat/wave8-echarts-charts` -> `master` |
+| **文件变更** | 12 个文件, +897 / -25 |
+| **提交数** | 4 commits |
+| **范围** | 仅 wave8 ECharts 图表相关变更（已 rebase 清理） |
+
+> **注**: PR 已从 154 文件 rebase 为仅 12 文件，之前的 C1-C4（EnterpriseController 权限、stub 服务）和 M1-M2（SysRoleMapper、EntEnterpriseMapper）问题**已不在本 PR 范围内**，不再列入本次审查。
+
+---
+
+## 二、首次审查问题修复验证
+
+### 已修复项
+
+| 编号 | 问题 | 修复状态 | 验证说明 |
+|------|------|---------|---------|
+| C5 | ChartDataController 缺少角色权限校验 | **已修复** | 新增 `requireEnterprise()` 方法，所有 5 个端点首行调用。`userType != 3` 时抛出 `BusinessException("仅企业用户可访问图表数据")` |
+| M3-M5 | MySQL schema 缺少冗余列 | **已修复** | `00-schema.sql` 已添加 `energy_name`/`energy_category`/`standard_coal_equiv`(de_energy_balance)、`product_name`(de_product_unit_consumption)、`energy_name`(de_ghg_emission) |
+| N3 | summary 端点 catch 通用 Exception | **已修复** | 改为 `catch (org.springframework.dao.EmptyResultDataAccessException e)` |
+| N5 | auditYear 硬编码 2024 | **已修复** | 改为 `ref(new Date().getFullYear())` |
+
+### 不再在 PR 范围内的问题
+
+| 编号 | 问题 | 状态 |
+|------|------|------|
+| C1 | EnterpriseController lock/unlock/expire 缺少 admin 权限 | 不在本 PR diff 中 |
+| C2 | TemplateVersionServiceImpl stub | 不在本 PR diff 中 |
+| C3 | SubmissionServiceImpl stub | 不在本 PR diff 中 |
+| C4 | TagMappingServiceImpl stub | 不在本 PR diff 中 |
+| M1 | SysRoleMapper.xml 缺少 update_time | 不在本 PR diff 中 |
+| M2 | EntEnterpriseMapper.xml 缺少 isLocked 过滤 | 不在本 PR diff 中 |
+
+---
+
+## 三、新发现问题
+
+### Critical — 1 个
+
+#### NEW-C1. H2 schema (schema-h2.sql) 与 data-h2.sql / ChartDataController SQL 严重不对齐 — H2 开发环境启动会失败
+
+**严重等级**: Critical  
+**文件**: `audit-web/src/main/resources/schema-h2.sql` (master 上的版本) vs `audit-web/src/main/resources/data-h2.sql` (本 PR 修改)
+
+**问题描述**: 本 PR 修改了 `data-h2.sql` 的 seed data INSERT 语句，使用了 MySQL schema (`00-schema.sql`) 中的列名。但 H2 schema (`schema-h2.sql`) **未被本 PR 修改**，其表结构与 MySQL schema 完全不同。合并后 H2 开发环境启动时 seed data 会因列不存在而报错。
+
+**详细对比**:
+
+| 表 | ChartDataController / data-h2.sql 使用的列 | H2 schema-h2.sql 实际有的列 | 匹配? |
+|----|-------------------------------------------|---------------------------|-------|
+| `de_energy_balance` | `energy_name`, `energy_category`, `standard_coal_equiv`, `purchase_amount`, `consumption_amount` | `row_label`, `row_category`, `energy_name`, `energy_value`, `measurement_unit` | **部分不匹配** — 缺少 `energy_category`, `standard_coal_equiv`, `purchase_amount`, `consumption_amount` |
+| `de_tech_indicator` | `indicator_year`, `gross_output`, `sales_revenue`, `energy_total_cost`, `total_energy_equiv`, `total_energy_equal`, `unit_output_energy` | 有 `indicator_year`, `gross_output`, `sales_revenue`, `energy_total_cost`, `total_energy_equiv`, `total_energy_equal` 但列名 `unit_output_energy` 在 H2 中是 `unit_output_energy_equiv` | **部分不匹配** — `unit_output_energy` vs `unit_output_energy_equiv` |
+| `de_product_unit_consumption` | `product_name`, `year_type`, `output`, `energy_consumption`, `unit_consumption` | `indicator_name`, `indicator_unit`, `current_indicator`, `current_numerator`, `current_denominator` | **完全不匹配** — H2 表结构完全不同 |
+| `de_ghg_emission` | `emission_type`, `energy_name`, `main_equipment`, `activity_data`, `annual_emission` | **表不存在** | **完全不匹配** — H2 中无此表 |
+
+**影响**: 
+- `data-h2.sql` INSERT 语句引用 `standard_coal_equiv`、`energy_category`（de_energy_balance）、`product_name`、`year_type`、`output`、`energy_consumption`、`unit_consumption`（de_product_unit_consumption）、以及整个 `de_ghg_emission` 表 — 这些列/表在 H2 schema 中**不存在**
+- H2 dev profile 启动时会抛出 SQL 异常，**整个应用无法启动**
+
+**修复建议**: 需要同步更新 `schema-h2.sql`，使 4 张 de_* 表的列定义与 MySQL `00-schema.sql` 一致（或至少包含 ChartDataController SQL 查询和 data-h2.sql INSERT 所需的所有列）。还需要在 H2 中新增 `de_ghg_emission` 表。
+
+---
+
+### Medium — 1 个
+
+#### NEW-M1. requireEnterprise() 存在 NPE 风险 — Integer 自动拆箱
+
+**严重等级**: Medium  
+**文件**: `audit-web/src/main/java/com/energy/audit/web/controller/data/ChartDataController.java:27`
+
+**问题描述**: `requireEnterprise()` 方法使用 `int userType = SecurityUtils.getCurrentUserType();`，但 `SecurityUtils.getCurrentUserType()` 返回 `Integer`（可为 null）。当 JWT 解析异常或 ThreadLocal 未设置时，`getCurrentUserType()` 返回 null，赋值给 `int` 会触发 `NullPointerException`。
+
+```java
+// 当前代码 — NPE 风险
+private void requireEnterprise() {
+    int userType = SecurityUtils.getCurrentUserType();  // Integer -> int auto-unboxing NPE
+    if (userType != 3) {
+        throw new BusinessException("仅企业用户可访问图表数据");
+    }
+}
+```
+
+**修复建议**: 改为与 TemplateController 一致的安全写法：
+```java
+private void requireEnterprise() {
+    Integer userType = SecurityUtils.getCurrentUserType();
+    if (userType == null || userType != 3) {
+        throw new BusinessException(403, "仅企业用户可访问图表数据");
+    }
+}
+```
+
+---
+
+### Non-blocking — 2 个（保留自首次审查）
+
+| 编号 | 问题 | 说明 |
+|------|------|------|
+| N1 | ChartCard 使用原生 echarts API 而非 vue-echarts | 功能正确，建议后续重构 |
+| N6 | echarts 全量导入可优化为按需加载 | 约 1MB gzipped，建议后续优化 |
+
+---
+
+## 四、SQL 注入安全审计（与首次一致）
+
+**所有 5 个 JdbcTemplate 端点均使用 `?` 参数化查询，不存在 SQL 注入风险。**
+
+---
+
+## 五、合并冲突分析
+
+执行 `git merge --no-commit --no-ff origin/master` 结果：**自动合并成功，无冲突。**
+
+> 首次审查的 30+ 冲突已通过 rebase 完全解决。
+
+---
+
+## 六、企业隔离审计
+
+| 端点 | enterpriseId 来源 | requireEnterprise() | 结论 |
+|------|------------------|-------------------|------|
+| `/chart-data/energy-structure` | JWT ThreadLocal | 有 | **安全** |
+| `/chart-data/energy-trend` | JWT ThreadLocal | 有 | **安全** |
+| `/chart-data/product-consumption` | JWT ThreadLocal | 有 | **安全** |
+| `/chart-data/ghg-emission` | JWT ThreadLocal | 有 | **安全** |
+| `/chart-data/summary` | JWT ThreadLocal | 有 | **安全** |
+
+---
+
+## 七、最终建议
+
+### Request Changes (请求修改)
+
+**必须在合并前修复**:
+
+1. **[NEW-C1] 同步更新 `schema-h2.sql`** — 当前 H2 schema 的 `de_energy_balance`、`de_product_unit_consumption` 表结构与 MySQL 完全不同，且缺少 `de_ghg_emission` 表。合并后 H2 dev profile 无法启动。需要：
+   - 更新 `de_energy_balance` 表定义，添加 `energy_category`、`standard_coal_equiv`、`purchase_amount`、`consumption_amount` 等列
+   - 更新 `de_product_unit_consumption` 表定义，添加 `product_name`、`year_type`、`output`、`energy_consumption`、`unit_consumption` 列
+   - 新增 `de_ghg_emission` 表
+   - 更新 `de_tech_indicator` 的 `unit_output_energy_equiv` 列名为 `unit_output_energy`（与 MySQL 一致）
+
+2. **[NEW-M1] 修复 `requireEnterprise()` Integer 自动拆箱 NPE** — 改为 `Integer userType` 并判空
+
+### 相比首次审查的改善
+
+- C5（角色权限）已修复
+- M3-M5（MySQL schema 对齐）已修复
+- N3（异常捕获）已修复
+- N5（硬编码年份）已修复
+- 合并冲突完全解决（从 30+ 文件降至 0）
+- PR 范围从 154 文件精简至 12 文件，聚焦 wave8 功能
+
+---
+
+*审查人: Devin AI | 二次审查时间: 2026-04-05*
