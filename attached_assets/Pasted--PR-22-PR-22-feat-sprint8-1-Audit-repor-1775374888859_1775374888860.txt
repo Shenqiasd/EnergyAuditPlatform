@@ -1,0 +1,412 @@
+# PR #22 深度代码审查报告
+
+## 审查概览
+
+| 项目 | 内容 |
+|------|------|
+| **PR** | [#22 feat(sprint8.1): Audit report generation engine (Apache POI)](https://github.com/Shenqiasd/EnergyAuditPlatform/pull/22) |
+| **分支** | `feat/sprint8-report-generation` → `master` |
+| **文件变更** | 164 files, +11820 -1431 |
+| **核心模块** | ReportController / ReportServiceImpl / WordReportBuilder / ArReportMapper |
+| **审查结论** | **Request Changes** — 存在 5 个 Critical 问题，需修复后方可合并 |
+
+---
+
+## 问题汇总
+
+| 序号 | 严重度 | 文件 | 问题描述 |
+|------|--------|------|----------|
+| C-1 | Critical | ReportServiceImpl.java:38-58 | 并发竞态：report generation 锁机制非原子操作 |
+| C-2 | Critical | ReportServiceImpl.java:100-118 | 路径遍历：downloadReport 直接用数据库路径读文件 |
+| C-3 | Critical | ReportServiceImpl.java:38-58 | 卡死状态：status=1(生成中) 无超时恢复机制 |
+| C-4 | Critical | ReportServiceImpl.java:60-87 | 同步阻塞：报告生成在 HTTP 请求线程中同步执行 |
+| C-5 | Critical | schema-h2.sql / 00-schema.sql | H2 缺少 6 张数据表，与 MySQL schema 严重不对齐 |
+| M-1 | Medium | ReportController.java:29 | 缺少角色校验：任何登录用户均可调用 generate |
+| M-2 | Medium | ReportServiceImpl.java:34-35 | 文件存储在相对路径，容器重启后丢失 |
+| M-3 | Medium | report.ts:18-24 | 前后端状态码不一致 |
+| M-4 | Medium | ArReportMapper.xml:69-76 | selectByEnterpriseAndYear 未过滤 status，可能返回失败记录 |
+| M-5 | Medium | ReportServiceImpl.java:121-213 | collectReportData 使用 JdbcTemplate 原始 SQL，绕过 Mapper 层 |
+| M-6 | Medium | merge conflicts | 与 master 存在 ~40 个冲突文件 |
+| N-1 | Non-blocking | WordReportBuilder.java | 大量 `@SuppressWarnings("unchecked")` |
+| N-2 | Non-blocking | WordReportBuilder.java:631-635 | mapStr 双 key 查找(大小写)属于 workaround |
+| N-3 | Non-blocking | ReportServiceImpl.java:86 | 异常消息暴露内部堆栈信息 |
+| N-4 | Non-blocking | generate/index.vue:358-361 | 重新生成按钮共享 generatingReport 状态 |
+| N-5 | Non-blocking | WordReportBuilder.java | 章节 1/3/5/6/7 大量占位文字 `（待填写）` |
+
+---
+
+## 一、Critical 问题详析
+
+### C-1: 并发竞态 — 报告生成锁非原子操作
+
+**文件**: `audit-service/.../report/impl/ReportServiceImpl.java:38-58`
+
+```java
+// 当前实现 — 经典 TOCTOU (time-of-check-to-time-of-use) 竞态
+ArReport record = reportMapper.selectByEnterpriseAndYear(enterpriseId, auditYear, 1);
+if (record != null && record.getStatus() == 1) {
+    throw new RuntimeException("报告正在生成中，请稍候");
+}
+// ← 此处有并发窗口：两个请求同时通过 check，都进入 insert/update
+if (record == null) {
+    record = new ArReport();
+    record.setStatus(1);
+    reportMapper.insert(record);
+} else {
+    record.setStatus(1);
+    reportMapper.update(record);
+}
+```
+
+**问题**: `selectByEnterpriseAndYear` 是普通 SELECT（ArReportMapper.xml:69-76），没有 `FOR UPDATE` 行锁，也没有 `@Transactional`。两个并发请求可以同时通过 status 检查，导致：
+1. 重复生成报告
+2. 两个线程同时写同一个文件
+
+**修复建议**:
+```java
+@Transactional
+public ArReport generateReport(...) {
+    // 使用 SELECT ... FOR UPDATE 或在 SQL 层用 
+    // INSERT ... ON DUPLICATE KEY UPDATE status=1 WHERE status != 1
+    // 或使用数据库唯一约束 (enterprise_id, audit_year, report_type) + 乐观锁
+}
+```
+
+对比 `TplEditLockMapper.xml:20-24` 中已有 `selectByKeyForUpdate`（带 `FOR UPDATE`），说明项目已有正确的并发控制模式，但报告模块未采用。
+
+---
+
+### C-2: 路径遍历漏洞 — downloadReport 直接用数据库路径读取文件
+
+**文件**: `audit-service/.../report/impl/ReportServiceImpl.java:100-118`
+
+```java
+public byte[] downloadReport(Long id) {
+    ArReport report = reportMapper.selectById(id);
+    String path = report.getGeneratedFilePath();
+    if (path == null || path.isEmpty()) {
+        path = report.getUploadedFilePath(); // ← uploadedFilePath 可能来自用户上传
+    }
+    return Files.readAllBytes(Paths.get(path)); // ← 直接读取任意路径!
+}
+```
+
+**问题**: 虽然 `generatedFilePath` 是系统生成的，但 `uploadedFilePath` 可能来自未来的用户上传功能。如果 `uploadedFilePath` 被恶意设置为 `/etc/passwd` 或 `../../sensitive-file`，将导致任意文件读取。
+
+此外，Controller 层虽然做了 `enterpriseId` 校验（IDOR 防护良好），但未校验文件路径是否在合法目录内。
+
+**修复建议**:
+```java
+Path resolved = Paths.get(uploadDir).resolve(path).normalize();
+if (!resolved.startsWith(Paths.get(uploadDir).normalize())) {
+    throw new RuntimeException("非法文件路径");
+}
+return Files.readAllBytes(resolved);
+```
+
+---
+
+### C-3: 卡死状态 — status=1 无超时恢复
+
+**文件**: `audit-service/.../report/impl/ReportServiceImpl.java:38-42`
+
+```java
+if (record != null && record.getStatus() == 1) {
+    throw new RuntimeException("报告正在生成中，请稍候");
+}
+```
+
+**问题**: 如果报告生成过程中服务器宕机或 JVM 被 kill，`status` 将永远停留在 `1`（生成中），企业将永远无法重新生成报告。
+
+**修复建议**:
+- 添加超时机制：如果 `update_time` 距今超过 N 分钟（如 10 分钟），自动将 status 重置为 3（失败）
+- 或者在 catch 块中增加重试计数器
+
+```java
+if (record != null && record.getStatus() == 1) {
+    // 检查是否超时卡死
+    if (record.getUpdateTime() != null && 
+        record.getUpdateTime().plusMinutes(10).isBefore(LocalDateTime.now())) {
+        log.warn("Report generation stuck, resetting status for enterprise={}", enterpriseId);
+        record.setStatus(3); // 标记失败
+        reportMapper.update(record);
+    } else {
+        throw new RuntimeException("报告正在生成中，请稍候");
+    }
+}
+```
+
+---
+
+### C-4: 同步阻塞 — 报告生成在请求线程中执行
+
+**文件**: `audit-service/.../report/impl/ReportServiceImpl.java:60-87`
+
+`generateReport()` 方法在 HTTP 请求线程中同步执行：
+1. 查询 8 张表的数据（`collectReportData`）
+2. 用 Apache POI 生成 Word 文档（可能耗时数秒到数十秒）
+3. 写入磁盘
+
+这意味着用户在报告生成期间的 HTTP 连接会一直挂起，容易触发网关超时（通常 30-60s）。且前端的 `generatingReport` loading 状态无法反映后端实际进度。
+
+**修复建议**:
+使用异步模式：
+1. `POST /report/generate` 仅创建任务记录（status=1），立即返回
+2. 使用 `@Async` 或消息队列在后台线程执行实际生成
+3. 前端轮询 `GET /report/{id}` 检查 status 变化
+
+---
+
+### C-5: H2 Schema 缺少大量表 — 四层对齐严重失败
+
+**MySQL schema** (`sql/00-schema.sql`) 定义了完整的 30+ 张表，但 **H2 schema** (`audit-web/src/main/resources/schema-h2.sql`) 仅包含以下表：
+
+| H2 中存在 | MySQL 中存在但 H2 缺失 |
+|-----------|----------------------|
+| sys_user | sys_user_role |
+| sys_role | sys_role_menu |
+| ent_enterprise | sys_menu |
+| ent_enterprise_setting | sys_dict_type |
+| de_company_overview | sys_dict_data |
+| tpl_template | sys_config |
+| tpl_template_version | sys_operation_log |
+| tpl_edit_lock | ent_registration |
+| bs_energy | tpl_submission |
+| bs_energy_catalog | tpl_tag_mapping |
+| bs_unit | de_equipment_energy |
+| bs_product | de_saving_project |
+| de_energy_balance | ar_report_section |
+| de_tech_indicator | ar_report_version |
+| de_product_unit_consumption | ar_attachment |
+| de_ghg_emission | aw_audit_task |
+| de_energy_flow | aw_audit_log |
+| ar_report | aw_rectification |
+| | cm_emission_factor |
+| | ch_chart_config |
+| | bs_unit_energy |
+| | 等其他 12+ 表 |
+
+**影响**: 开发环境（H2）下涉及缺失表的功能将直接报错。例如 `SysDictService` 查询 `sys_dict_type`/`sys_dict_data`，但这两张表在 H2 中不存在。
+
+---
+
+## 二、Medium 问题
+
+### M-1: 缺少角色校验
+
+**文件**: `audit-web/.../controller/report/ReportController.java`
+
+所有 4 个端点仅校验了 `enterpriseId != null`（即用户是企业用户），但未校验具体角色权限。管理员（userType=1）和审核员（userType=2）如果也关联了企业，理论上可以调用 generate。
+
+对比其他 Controller，整个项目目前似乎都没有角色注解（`@PreAuthorize` 等），这是一个系统性问题，不仅限于本 PR。
+
+### M-2: 报告文件存储不持久
+
+```java
+@Value("${app.report.upload-dir:upload/report}")
+private String uploadDir; // 默认值 "upload/report" 是相对路径
+```
+
+生成的文件存储在应用工作目录下的相对路径。Docker 容器重启后文件丢失。建议使用绝对路径或挂载持久卷。
+
+### M-3: 前后端状态码不一致
+
+**后端** (`ReportServiceImpl.java` + `00-schema.sql`):
+- 0=草稿, 1=生成中, 2=已生成, **3=失败**
+
+**前端** (`report.ts:18-24`):
+```typescript
+export const REPORT_STATUS_MAP = {
+  0: { label: '草稿', type: 'info' },
+  1: { label: '生成中', type: 'warning' },
+  2: { label: '已生成', type: 'success' },
+  3: { label: '已上传', type: 'primary' },  // ← 后端3=失败，前端3=已上传！
+  4: { label: '已提交', type: 'danger' },
+}
+```
+
+后端 `catch` 块将 status 设为 3 表示"失败"，但前端显示 3 为"已上传"。用户看到的状态将完全错误。
+
+### M-4: selectByEnterpriseAndYear 查询缺陷
+
+```xml
+<select id="selectByEnterpriseAndYear" resultMap="BaseResultMap">
+    SELECT * FROM ar_report
+    WHERE enterprise_id = #{enterpriseId}
+      AND audit_year = #{auditYear}
+      AND report_type = #{reportType}
+      AND deleted = 0
+    LIMIT 1
+</select>
+```
+
+此查询未指定 ORDER BY，`LIMIT 1` 返回的记录不确定。如果存在多条记录（如一条 status=3 失败记录 + 一条 status=2 已完成记录），可能返回错误的记录。
+
+### M-5: collectReportData 绕过 Mapper 层
+
+`ReportServiceImpl.collectReportData()` 直接使用 `JdbcTemplate` 执行原始 SQL 查询 8 张表。虽然使用了参数化查询（`?` 占位符），SQL 注入风险较低，但：
+1. 绕过了 MyBatis Mapper 层的统一管理
+2. 列名硬编码，schema 变更时容易遗漏
+3. H2（大写列名）vs MySQL（小写列名）的差异导致 WordReportBuilder 中需要 `mapStr(row, "UPPER_KEY", "lower_key")` 双 key 查找
+
+### M-6: 大量合并冲突
+
+尝试合并 master 后发现 **~40 个冲突文件**，主要集中在：
+- Mapper XML（BsEnergyCatalogMapper.xml, BsEnergyMapper.xml 等 ~10 个）
+- Entity 类（BsEnergyCatalog.java, SysDictType.java 等 ~6 个）
+- Service 层（SubmissionService, TagMappingService 等 ~8 个）
+- 前端（menus.ts, components.d.ts, generate/index.vue 等 ~8 个）
+- 配置文件（schema-h2.sql, data-h2.sql, pom.xml, package.json 等）
+
+大部分为 `add/add` 冲突（两个分支同时新增同名文件），解决难度中等但数量较多。
+
+---
+
+## 三、Non-blocking 问题
+
+### N-1: 大量 @SuppressWarnings("unchecked")
+
+`WordReportBuilder.java` 中有 8 处 `@SuppressWarnings("unchecked")`。建议引入强类型 DTO（如 `ReportDataDTO`）替代 `Map<String, Object>` 传递数据。
+
+### N-2: mapStr 双 key 查找是 workaround
+
+```java
+private static String mapStr(Map<String, Object> row, String upperKey, String lowerKey) {
+    Object v = row.get(upperKey);
+    if (v == null) v = row.get(lowerKey);
+    return v != null ? v.toString() : "";
+}
+```
+
+根本原因是 H2 返回大写列名而 MySQL 返回小写。应在 JdbcTemplate 查询时统一列名别名，或使用 MyBatis Mapper 替代。
+
+### N-3: 异常消息暴露内部信息
+
+```java
+throw new RuntimeException("报告生成失败: " + e.getMessage(), e);
+```
+
+`e.getMessage()` 可能包含 SQL 语句、文件路径等敏感信息，不应直接返回给前端。
+
+### N-4: 前端重新生成按钮状态共享
+
+`generate/index.vue:358-361` 中每行的"重新生成"按钮共享同一个 `generatingReport` 状态，点击任意一行的按钮都会触发所有行的 loading 状态。
+
+### N-5: 大量待填写占位文字
+
+WordReportBuilder 的章节 1、3、5（部分）、6（部分）、7 中大量使用 `（待填写：...）` 占位文本。这些章节生成的报告需要用户手动补充大量内容，实用性受限。建议在文档中标注哪些章节是自动生成、哪些需要手动编辑。
+
+---
+
+## 四、四层对齐检查
+
+### ar_report 表对齐情况
+
+| 层级 | 状态 | 说明 |
+|------|------|------|
+| MySQL (`00-schema.sql`) | ✓ | 完整定义，含索引 `idx_enterprise_year` |
+| H2 (`schema-h2.sql`) | ✓ | 结构一致（缺少索引定义，H2 可接受） |
+| Entity (`ArReport.java`) | ✓ | 字段与 schema 对齐，继承 BaseEntity |
+| Mapper XML (`ArReportMapper.xml`) | ✓ | resultMap 完整，CRUD 齐全 |
+
+**ar_report 四层对齐: PASS**
+
+### 其他表四层对齐抽检
+
+| 表名 | MySQL | H2 | Entity | Mapper XML | 状态 |
+|------|-------|-----|--------|-----------|------|
+| sys_user | ✓ | ✓ | ✓ | ✓ | PASS |
+| sys_role | ✓ | ✓ | ✓ | ✓ | PASS |
+| ent_enterprise | ✓ | ✓ | ✓ | ✓ | PASS |
+| ent_enterprise_setting | ✓ | ✓ | ✓ | 无独立 Mapper | WARN — 通过 JdbcTemplate 查询 |
+| bs_energy | ✓ | ✓ | ✓ | ✓ | PASS |
+| bs_energy_catalog | ✓ | ✓ | ✓ | ✓ | PASS |
+| bs_unit | ✓ | ✓ | ✓ | ✓ | PASS |
+| bs_product | ✓ | ✓ | ✓ | ✓ | PASS |
+| de_energy_flow | ✓ | ✓ | ✓ | ✓ | PASS |
+| de_energy_balance | ✓ | ✓ | 无 Entity | 无 Mapper | WARN — 仅通过 JdbcTemplate |
+| de_tech_indicator | ✓ | ✓ | 无 Entity | 无 Mapper | WARN — 仅通过 JdbcTemplate |
+| de_ghg_emission | ✓ | ✓ | 无 Entity | 无 Mapper | WARN — 仅通过 JdbcTemplate |
+| de_product_unit_consumption | ✓ | ✓ | 无 Entity | 无 Mapper | WARN — 仅通过 JdbcTemplate |
+| sys_dict_type | ✓ | **缺失** | ✓ | 无 Mapper | **FAIL** |
+| sys_dict_data | ✓ | **缺失** | ✓ | 无 Mapper | **FAIL** |
+| tpl_submission | ✓ | **缺失** | ✓ | 无独立 Mapper | **FAIL** |
+
+---
+
+## 五、并发控制分析（报告生成锁）
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| 锁获取是否原子 | **FAIL** | 普通 SELECT + Java if 判断，非原子 |
+| 是否使用事务 | **FAIL** | 无 `@Transactional` 注解 |
+| 是否使用行锁 | **FAIL** | 无 `FOR UPDATE`，对比 TplEditLockMapper 已有此模式 |
+| 失败状态恢复 | **PARTIAL** | catch 块设 status=3，但宕机场景无恢复 |
+| 超时恢复 | **FAIL** | 无超时检测，status=1 可永久卡死 |
+| 并发写文件 | **FAIL** | 文件名含时间戳可避免覆盖，但会产生孤立文件 |
+
+---
+
+## 六、Apache POI 资源管理分析
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| XWPFDocument 是否正确关闭 | **PASS** | `try (XWPFDocument doc = new XWPFDocument())` 使用 try-with-resources |
+| FileOutputStream 是否正确关闭 | **PASS** | 嵌套 `try (FileOutputStream fos = ...)` |
+| 异常时是否泄漏 | **PASS** | try-with-resources 确保异常时也关闭 |
+| 临时文件清理 | **WARN** | 失败时已写入的部分文件未清理（但不影响功能） |
+
+**POI 资源管理: PASS** — 这是本 PR 做得较好的部分。
+
+---
+
+## 七、安全审计
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| SQL 注入 | **PASS** | MyBatis 使用 `#{}` 参数化；JdbcTemplate 使用 `?` 占位符 |
+| IDOR 防护 | **PASS** | detail/download 端点校验 enterpriseId 归属 |
+| 路径遍历 | **FAIL** | downloadReport 直接用 DB 中路径读文件（见 C-2） |
+| 角色鉴权 | **WARN** | 无角色注解，但通过 enterpriseId 限制了企业隔离 |
+| 信息泄漏 | **WARN** | 异常消息含内部信息（见 N-3） |
+| CSRF | N/A | 使用 JWT，不受 CSRF 影响 |
+
+---
+
+## 八、冲突分析
+
+与 `origin/master` 合并测试结果：**约 40 个冲突文件**。
+
+主要冲突分类：
+1. **add/add 冲突**（~25 个）：两个分支同时新增的 Mapper XML、Entity、Service 文件
+2. **content 冲突**（~12 个）：`.gitignore`, `pom.xml`, `package.json`, `menus.ts`, `schema-h2.sql` 等配置文件
+3. **rename/delete 冲突**（~3 个）：前端页面重命名与删除冲突
+
+建议在修复 Critical 问题后，先合并 master 到该分支解决冲突，再请求 review。
+
+---
+
+## 九、Stub 服务检查
+
+未发现返回 null/空集合的 stub 实现。所有 Service 方法均连接了真实的 Mapper 或 JdbcTemplate 数据源。`collectReportData` 中的 try-catch 在查询失败时返回空 Map/List 是合理的 fallback 策略（报告中对应章节显示"暂无数据"）。
+
+---
+
+## 十、最终建议
+
+### 建议: **Request Changes**
+
+合并前必须修复的 Critical 问题：
+
+1. **C-1 并发竞态**: 添加 `@Transactional` + `SELECT FOR UPDATE` 或数据库唯一约束
+2. **C-2 路径遍历**: 对文件路径做目录白名单校验（`resolve().normalize().startsWith()`）
+3. **C-3 卡死恢复**: 添加超时检测机制（建议 10 分钟）
+4. **C-4 同步阻塞**: 改为异步生成模式，或至少设置合理的超时时间并在文档中说明
+5. **C-5 Schema 不对齐**: H2 中补齐缺失的表定义
+6. **M-3 状态码不一致**: 统一前后端 status 含义（3=失败 vs 3=已上传）
+7. **M-6 合并冲突**: 解决与 master 的 40+ 冲突
+
+---
+
+*审查人: Devin AI Code Review*
+*审查日期: 2026-04-05*
