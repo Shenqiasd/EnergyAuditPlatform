@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "oVFRTqkkMJMaa_KC3Vyhq"
+uri = "file://.local/report-data-mapping.md"
+type = "text"
+title = "能源审计报告 — 完整数据映射文档"
