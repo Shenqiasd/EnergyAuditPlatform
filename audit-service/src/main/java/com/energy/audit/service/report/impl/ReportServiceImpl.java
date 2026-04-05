@@ -36,60 +36,54 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     public ArReport generateReport(Long enterpriseId, Integer auditYear, String username) {
-        ArReport existing = reportMapper.selectByEnterpriseAndYear(enterpriseId, auditYear, 1);
-        if (existing != null && existing.getStatus() == 1) {
+        ArReport record = reportMapper.selectByEnterpriseAndYear(enterpriseId, auditYear, 1);
+        if (record != null && record.getStatus() == 1) {
             throw new RuntimeException("报告正在生成中，请稍候");
         }
 
-        if (existing != null) {
-            existing.setStatus(1);
-            existing.setUpdateBy(username);
-            reportMapper.update(existing);
+        if (record == null) {
+            record = new ArReport();
+            record.setEnterpriseId(enterpriseId);
+            record.setAuditYear(auditYear);
+            record.setReportType(1);
+            record.setStatus(1);
+            record.setCreateBy(username);
+            record.setUpdateBy(username);
+            reportMapper.insert(record);
+            record = reportMapper.selectById(record.getId());
+        } else {
+            record.setStatus(1);
+            record.setUpdateBy(username);
+            reportMapper.update(record);
         }
 
-        Map<String, Object> reportData = collectReportData(enterpriseId, auditYear);
-
-        String enterpriseName = (String) reportData.getOrDefault("enterpriseName", "企业");
-        String reportName = enterpriseName + " " + auditYear + "年度能源审计报告";
-
-        Path dirPath = Paths.get(uploadDir);
         try {
+            Map<String, Object> reportData = collectReportData(enterpriseId, auditYear);
+
+            String enterpriseName = (String) reportData.getOrDefault("enterpriseName", "企业");
+            String reportName = enterpriseName + " " + auditYear + "年度能源审计报告";
+
+            Path dirPath = Paths.get(uploadDir);
             Files.createDirectories(dirPath);
-        } catch (IOException e) {
-            throw new RuntimeException("无法创建报告目录", e);
-        }
 
-        String fileName = "report_" + enterpriseId + "_" + auditYear + "_" + System.currentTimeMillis() + ".docx";
-        Path filePath = dirPath.resolve(fileName);
+            String fileName = "report_" + enterpriseId + "_" + auditYear + "_" + System.currentTimeMillis() + ".docx";
+            Path filePath = dirPath.resolve(fileName);
 
-        try {
             WordReportBuilder.buildReport(filePath, reportName, auditYear, reportData);
+
+            record.setStatus(2);
+            record.setReportName(reportName);
+            record.setGeneratedFilePath(filePath.toString());
+            record.setGenerateTime(LocalDateTime.now());
+            record.setUpdateBy(username);
+            reportMapper.update(record);
+            return reportMapper.selectById(record.getId());
         } catch (Exception e) {
             log.error("Report generation failed for enterprise={} year={}", enterpriseId, auditYear, e);
+            record.setStatus(3);
+            record.setUpdateBy(username);
+            reportMapper.update(record);
             throw new RuntimeException("报告生成失败: " + e.getMessage(), e);
-        }
-
-        if (existing != null) {
-            existing.setStatus(2);
-            existing.setReportName(reportName);
-            existing.setGeneratedFilePath(filePath.toString());
-            existing.setGenerateTime(LocalDateTime.now());
-            existing.setUpdateBy(username);
-            reportMapper.update(existing);
-            return reportMapper.selectById(existing.getId());
-        } else {
-            ArReport report = new ArReport();
-            report.setEnterpriseId(enterpriseId);
-            report.setAuditYear(auditYear);
-            report.setReportName(reportName);
-            report.setReportType(1);
-            report.setStatus(2);
-            report.setGeneratedFilePath(filePath.toString());
-            report.setGenerateTime(LocalDateTime.now());
-            report.setCreateBy(username);
-            report.setUpdateBy(username);
-            reportMapper.insert(report);
-            return reportMapper.selectById(report.getId());
         }
     }
 
