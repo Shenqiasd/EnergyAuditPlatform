@@ -132,7 +132,7 @@ async function handleLogin() {
         </el-form>
 
         <div class="card-footer">
-          <a href="#">申请注册</a>
+          <router-link to="/register">申请注册</router-link>
           <span>·</span>
           <a href="#">忘记密码</a>
         </div>

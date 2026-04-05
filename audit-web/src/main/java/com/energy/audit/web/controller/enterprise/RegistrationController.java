@@ -51,13 +51,6 @@ public class RegistrationController {
         return R.ok(PageResult.of(pageInfo.getTotal(), pageInfo.getList()));
     }
 
-    @Operation(summary = "Submit registration application")
-    @PostMapping
-    public R<Void> submit(@RequestBody EntRegistration registration) {
-        registrationService.submit(registration);
-        return R.ok();
-    }
-
     @Operation(summary = "Approve registration")
     @PutMapping("/{id}/approve")
     public R<Void> approve(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {

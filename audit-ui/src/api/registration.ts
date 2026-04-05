@@ -38,7 +38,7 @@ export function getById(id: number): Promise<Registration> {
 }
 
 export function submit(data: Partial<Registration>): Promise<void> {
-  return request.post('/registration', data)
+  return request.post('/public/registration', data)
 }
 
 export function approve(id: number, auditRemark?: string): Promise<void> {
