@@ -39,6 +39,7 @@ export const enterpriseMenus: MenuSection[] = [
     section: '图表分析',
     items: [
       { key: 'standard-charts', icon: '📉', title: '规定图表',     path: '/enterprise/charts/standard' },
+      { key: 'energy-flow',     icon: '🔀', title: '能源流向图',   path: '/enterprise/charts/energy-flow' },
       { key: 'report-assist',   icon: '📊', title: '报告辅助图表', path: '/enterprise/charts/report-assist' },
     ],
   },

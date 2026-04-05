@@ -260,6 +260,7 @@ public class TemplateController {
     public R<Void> submit(@PathVariable Long submissionId,
                           @RequestParam Long templateVersionId) {
         requireEnterprise();
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         submissionService.submit(submissionId, templateVersionId);
         return R.ok();
     }

@@ -26,6 +26,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'data/overview', name: 'DataOverview', component: () => import('@/views/enterprise/data/overview/index.vue'), meta: { title: '抽取数据总览' } },
       // Charts 5.x
       { path: 'charts/standard', name: 'ChartsStandard', component: () => import('@/views/enterprise/charts/standard/index.vue'), meta: { title: '规定图表' } },
+      { path: 'charts/energy-flow', name: 'ChartsEnergyFlow', component: () => import('@/views/enterprise/charts/energy-flow/index.vue'), meta: { title: '能源流向图' } },
       { path: 'charts/report-assist', name: 'ChartsReportAssist', component: () => import('@/views/enterprise/charts/report-assist/index.vue'), meta: { title: '报告辅助图表' } },
       // Report 6.x
       { path: 'report/input', name: 'ReportInput', component: () => import('@/views/enterprise/report/input/index.vue'), meta: { title: '报告信息录入' } },
