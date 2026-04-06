@@ -40,6 +40,9 @@ public class TplTagMapping extends BaseEntity {
     /** Sheet index */
     private Integer sheetIndex;
 
+    /** Sheet name (stable identifier, preferred over sheetIndex) */
+    private String sheetName;
+
     /** Cell range (e.g. A1:B10) */
     private String cellRange;
 

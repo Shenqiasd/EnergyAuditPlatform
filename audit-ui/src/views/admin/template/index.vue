@@ -477,6 +477,9 @@ onMounted(loadData)
                     <el-tag size="small" :type="tag.mappingType === 'TABLE' ? 'primary' : 'info'" effect="plain">
                       {{ tag.mappingType === 'TABLE' ? '表格' : '标量' }}
                     </el-tag>
+                    <el-tag v-if="tag.sheetName" size="small" effect="plain">
+                      {{ tag.sheetName }}
+                    </el-tag>
                   </div>
                 </div>
                 <el-select

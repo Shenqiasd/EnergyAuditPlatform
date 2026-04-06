@@ -96,6 +96,12 @@ public class SpreadsheetDataExtractor {
             JsonNode root = objectMapper.readTree(templateJson);
             List<DiscoveredField> fields = new ArrayList<>();
 
+            List<String> sheetNameList = new ArrayList<>();
+            JsonNode sheets = root.get("sheets");
+            if (sheets != null && sheets.isObject()) {
+                sheets.fieldNames().forEachRemaining(sheetNameList::add);
+            }
+
             JsonNode names = root.get("names");
             if (names != null && names.isArray()) {
                 for (JsonNode nameNode : names) {
@@ -103,20 +109,21 @@ public class SpreadsheetDataExtractor {
                     if (name == null || name.isBlank()) continue;
 
                     int sheetIdx = nameNode.path("sheetIndex").asInt(0);
+                    String sName = sheetIdx >= 0 && sheetIdx < sheetNameList.size()
+                            ? sheetNameList.get(sheetIdx) : null;
                     int row = nameNode.path("row").asInt(0);
                     int col = nameNode.path("col").asInt(0);
                     int rowCount = nameNode.path("rowCount").asInt(1);
                     int colCount = nameNode.path("colCount").asInt(1);
 
                     if (rowCount > 1 || colCount > 1) {
-                        fields.add(DiscoveredField.namedRangeTable(name, sheetIdx, row, col, rowCount, colCount));
+                        fields.add(DiscoveredField.namedRangeTable(name, sheetIdx, sName, row, col, rowCount, colCount));
                     } else {
-                        fields.add(DiscoveredField.namedRangeScalar(name, sheetIdx, row, col));
+                        fields.add(DiscoveredField.namedRangeScalar(name, sheetIdx, sName, row, col));
                     }
                 }
             }
 
-            JsonNode sheets = root.get("sheets");
             if (sheets != null && sheets.isObject()) {
                 int sheetIdx = 0;
                 var it = sheets.fieldNames();
@@ -136,7 +143,7 @@ public class SpreadsheetDataExtractor {
                                 if (tagNode.isTextual()) {
                                     String tagValue = tagNode.asText();
                                     if (!tagValue.isBlank()) {
-                                        fields.add(DiscoveredField.cellTag(tagValue, sheetIdx));
+                                        fields.add(DiscoveredField.cellTag(tagValue, sheetIdx, sheetName));
                                     }
                                 }
                             }
@@ -164,6 +171,19 @@ public class SpreadsheetDataExtractor {
         return result;
     }
 
+    // ── Sheet resolution ────────────────────────────────────────────────────
+
+    private String resolveSheetName(JsonNode sheets, List<String> sheetNameList,
+                                     String preferredName, int fallbackIndex) {
+        if (preferredName != null && !preferredName.isBlank() && sheets.has(preferredName)) {
+            return preferredName;
+        }
+        if (fallbackIndex >= 0 && fallbackIndex < sheetNameList.size()) {
+            return sheetNameList.get(fallbackIndex);
+        }
+        return null;
+    }
+
     // ── TABLE extraction ────────────────────────────────────────────────────
 
     private List<Map<String, Object>> extractTableData(
@@ -175,6 +195,7 @@ public class SpreadsheetDataExtractor {
 
         int startRow, startCol, rowCount, colCount;
         int sheetIdx = mapping.getSheetIndex() != null ? mapping.getSheetIndex() : 0;
+        String mappingSheetName = mapping.getSheetName();
 
         JsonNode rangeNode = namedRanges.get(tagName);
         if (rangeNode != null) {
@@ -194,12 +215,12 @@ public class SpreadsheetDataExtractor {
             return rows;
         }
 
-        if (sheetIdx < 0 || sheetIdx >= sheetNameList.size()) {
-            log.warn("extractTableData: sheetIndex {} out of range for tag '{}'", sheetIdx, tagName);
+        String sheetName = resolveSheetName(sheets, sheetNameList, mappingSheetName, sheetIdx);
+        if (sheetName == null) {
+            log.warn("extractTableData: cannot resolve sheet for tag '{}' (sheetName={}, sheetIndex={})",
+                    tagName, mappingSheetName, sheetIdx);
             return rows;
         }
-
-        String sheetName = sheetNameList.get(sheetIdx);
         JsonNode dataTable = sheets.get(sheetName).path("data").path("dataTable");
 
         int headerRowAbs = mapping.getHeaderRow() != null ? (startRow + mapping.getHeaderRow()) : -1;
@@ -294,11 +315,11 @@ public class SpreadsheetDataExtractor {
         int row = rangeNode.path("row").asInt(0);
         int col = rangeNode.path("col").asInt(0);
 
-        if (sheetIdx < 0 || sheetIdx >= sheetNameList.size()) {
+        String sheetName = resolveSheetName(sheets, sheetNameList, null, sheetIdx);
+        if (sheetName == null) {
             log.warn("extractFromNamedRange: sheetIndex {} out of range (sheets={})", sheetIdx, sheetNameList.size());
             return null;
         }
-        String sheetName = sheetNameList.get(sheetIdx);
         JsonNode cellNode = sheets.get(sheetName)
                 .path("data").path("dataTable")
                 .path(String.valueOf(row)).path(String.valueOf(col));

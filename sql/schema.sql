@@ -468,6 +468,7 @@ CREATE TABLE `tpl_tag_mapping` (
     `dict_type`           VARCHAR(128) DEFAULT NULL            COMMENT '字典类型(data_type=DICT时使用)',
     `required`            TINYINT      DEFAULT 0               COMMENT '是否必填(0非必填 1必填)',
     `sheet_index`         INT          DEFAULT 0               COMMENT '所在Sheet序号',
+    `sheet_name`          VARCHAR(128) DEFAULT NULL            COMMENT '所在Sheet名称(稳定标识,优先于sheet_index)',
     `cell_range`          VARCHAR(32)  DEFAULT NULL            COMMENT '单元格范围(如A1:B10)',
     `remark`              VARCHAR(256) DEFAULT NULL            COMMENT '备注',
     `create_by`           VARCHAR(64)  DEFAULT NULL            COMMENT '创建人',
