@@ -34,6 +34,7 @@ export interface TplTagMapping {
   dictType?: string
   required?: number
   sheetIndex?: number
+  sheetName?: string
   cellRange?: string
   mappingType?: string
   sourceType?: string

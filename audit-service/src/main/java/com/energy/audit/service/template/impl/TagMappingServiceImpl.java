@@ -91,6 +91,7 @@ public class TagMappingServiceImpl implements TagMappingService {
                 m.setDataType("STRING");
                 m.setRequired(0);
                 m.setSheetIndex(df.getSheetIndex() != null ? df.getSheetIndex() : 0);
+                m.setSheetName(df.getSheetName());
                 m.setMappingType(df.getMappingType());
                 m.setSourceType(df.getSourceType());
                 if ("TABLE".equals(df.getMappingType()) && df.getCellRange() != null) {
@@ -108,6 +109,10 @@ public class TagMappingServiceImpl implements TagMappingService {
                 }
                 if (existing.getSheetIndex() == null || !existing.getSheetIndex().equals(df.getSheetIndex())) {
                     existing.setSheetIndex(df.getSheetIndex());
+                    needsUpdate = true;
+                }
+                if (df.getSheetName() != null && !df.getSheetName().equals(existing.getSheetName())) {
+                    existing.setSheetName(df.getSheetName());
                     needsUpdate = true;
                 }
                 if ("NAMED_RANGE".equals(df.getSourceType())) {

@@ -338,6 +338,7 @@ CREATE TABLE IF NOT EXISTS tpl_tag_mapping (
     dict_type           VARCHAR(128),
     required            TINYINT      DEFAULT 0,
     sheet_index         INT          DEFAULT 0,
+    sheet_name          VARCHAR(128),
     cell_range          VARCHAR(32),
     mapping_type        VARCHAR(16)  DEFAULT 'SCALAR',
     source_type         VARCHAR(16)  DEFAULT 'CELL_TAG',

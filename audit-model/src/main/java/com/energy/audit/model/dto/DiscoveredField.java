@@ -9,18 +9,20 @@ public class DiscoveredField {
     private String sourceType;
     private String mappingType;
     private Integer sheetIndex;
+    private String sheetName;
     private Integer row;
     private Integer col;
     private Integer rowCount;
     private Integer colCount;
     private String cellRange;
 
-    public static DiscoveredField namedRangeScalar(String name, int sheetIndex, int row, int col) {
+    public static DiscoveredField namedRangeScalar(String name, int sheetIndex, String sheetName, int row, int col) {
         DiscoveredField f = new DiscoveredField();
         f.tagName = name;
         f.sourceType = "NAMED_RANGE";
         f.mappingType = "SCALAR";
         f.sheetIndex = sheetIndex;
+        f.sheetName = sheetName;
         f.row = row;
         f.col = col;
         f.rowCount = 1;
@@ -28,13 +30,14 @@ public class DiscoveredField {
         return f;
     }
 
-    public static DiscoveredField namedRangeTable(String name, int sheetIndex, int row, int col,
+    public static DiscoveredField namedRangeTable(String name, int sheetIndex, String sheetName, int row, int col,
                                                    int rowCount, int colCount) {
         DiscoveredField f = new DiscoveredField();
         f.tagName = name;
         f.sourceType = "NAMED_RANGE";
         f.mappingType = "TABLE";
         f.sheetIndex = sheetIndex;
+        f.sheetName = sheetName;
         f.row = row;
         f.col = col;
         f.rowCount = rowCount;
@@ -43,12 +46,13 @@ public class DiscoveredField {
         return f;
     }
 
-    public static DiscoveredField cellTag(String name, int sheetIndex) {
+    public static DiscoveredField cellTag(String name, int sheetIndex, String sheetName) {
         DiscoveredField f = new DiscoveredField();
         f.tagName = name;
         f.sourceType = "CELL_TAG";
         f.mappingType = "SCALAR";
         f.sheetIndex = sheetIndex;
+        f.sheetName = sheetName;
         return f;
     }
 

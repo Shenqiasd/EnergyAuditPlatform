@@ -13,6 +13,7 @@
         <result column="dict_type"            property="dictType"/>
         <result column="required"             property="required"/>
         <result column="sheet_index"          property="sheetIndex"/>
+        <result column="sheet_name"           property="sheetName"/>
         <result column="cell_range"           property="cellRange"/>
         <result column="mapping_type"         property="mappingType"/>
         <result column="source_type"          property="sourceType"/>
@@ -29,7 +30,7 @@
 
     <sql id="Base_Column_List">
         id, template_version_id, tag_name, field_name, target_table, data_type,
-        dict_type, required, sheet_index, cell_range,
+        dict_type, required, sheet_index, sheet_name, cell_range,
         mapping_type, source_type, row_key_column, column_mappings, header_row,
         remark, create_by, create_time, update_by, update_time, deleted
     </sql>
@@ -50,14 +51,14 @@
     <insert id="batchInsert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO tpl_tag_mapping (
             template_version_id, tag_name, field_name, target_table, data_type,
-            dict_type, required, sheet_index, cell_range,
+            dict_type, required, sheet_index, sheet_name, cell_range,
             mapping_type, source_type, row_key_column, column_mappings, header_row,
             remark, create_by, create_time, update_by, update_time, deleted
         ) VALUES
         <foreach collection="list" item="m" separator=",">
         (
             #{m.templateVersionId}, #{m.tagName}, #{m.fieldName}, #{m.targetTable}, #{m.dataType},
-            #{m.dictType}, COALESCE(#{m.required}, 0), COALESCE(#{m.sheetIndex}, 0), #{m.cellRange},
+            #{m.dictType}, COALESCE(#{m.required}, 0), COALESCE(#{m.sheetIndex}, 0), #{m.sheetName}, #{m.cellRange},
             COALESCE(#{m.mappingType}, 'SCALAR'), COALESCE(#{m.sourceType}, 'CELL_TAG'),
             #{m.rowKeyColumn}, #{m.columnMappings}, #{m.headerRow},
             #{m.remark}, #{m.createBy}, NOW(), #{m.updateBy}, NOW(), 0
@@ -77,6 +78,7 @@
             <if test="dictType != null">dict_type = #{dictType},</if>
             <if test="required != null">required = #{required},</if>
             <if test="sheetIndex != null">sheet_index = #{sheetIndex},</if>
+            <if test="sheetName != null">sheet_name = #{sheetName},</if>
             <if test="cellRange != null">cell_range = #{cellRange},</if>
             <if test="mappingType != null">mapping_type = #{mappingType},</if>
             <if test="sourceType != null">source_type = #{sourceType},</if>
@@ -112,12 +114,12 @@
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO tpl_tag_mapping (
             template_version_id, tag_name, field_name, target_table, data_type,
-            dict_type, required, sheet_index, cell_range,
+            dict_type, required, sheet_index, sheet_name, cell_range,
             mapping_type, source_type, row_key_column, column_mappings, header_row,
             remark, create_by, create_time, update_by, update_time, deleted
         ) VALUES (
             #{templateVersionId}, #{tagName}, #{fieldName}, #{targetTable}, #{dataType},
-            #{dictType}, COALESCE(#{required}, 0), COALESCE(#{sheetIndex}, 0), #{cellRange},
+            #{dictType}, COALESCE(#{required}, 0), COALESCE(#{sheetIndex}, 0), #{sheetName}, #{cellRange},
             COALESCE(#{mappingType}, 'SCALAR'), COALESCE(#{sourceType}, 'CELL_TAG'),
             #{rowKeyColumn}, #{columnMappings}, #{headerRow},
             #{remark}, #{createBy}, NOW(), #{updateBy}, NOW(), 0
