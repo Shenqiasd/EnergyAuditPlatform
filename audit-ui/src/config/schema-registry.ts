@@ -308,42 +308,6 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
     },
   },
 
-  de_energy_flow_diagram: {
-    label: '能源流程图',
-    fields: {
-      diagram_type: { label: '图类型(1分层/2单元/3二维表)', type: 'NUMBER' },
-      diagram_data: { label: '图布局数据(JSON)', type: 'TEXT' },
-    },
-  },
-
-  de_energy_flow_node: {
-    label: '能流图节点',
-    fields: {
-      diagram_id: { label: '流程图ID', type: 'NUMBER' },
-      node_id:    { label: '节点标识', type: 'STRING' },
-      node_type:  { label: '节点类型', type: 'STRING' },
-      ref_type:   { label: '引用类型', type: 'STRING' },
-      ref_id:     { label: '引用ID', type: 'NUMBER' },
-      label:      { label: '显示标签', type: 'STRING' },
-      position_x: { label: 'X坐标', type: 'DECIMAL' },
-      position_y: { label: 'Y坐标', type: 'DECIMAL' },
-    },
-  },
-
-  de_energy_flow_edge: {
-    label: '能流图连线',
-    fields: {
-      diagram_id:      { label: '流程图ID', type: 'NUMBER' },
-      edge_id:         { label: '连线标识', type: 'STRING' },
-      source_node_id:  { label: '源节点ID', type: 'STRING' },
-      target_node_id:  { label: '目标节点ID', type: 'STRING' },
-      energy_id:       { label: '关联能源', type: 'NUMBER' },
-      product_id:      { label: '关联产品', type: 'NUMBER' },
-      physical_amount: { label: '实物量', type: 'DECIMAL' },
-      remark:          { label: '备注', type: 'STRING' },
-    },
-  },
-
   ent_enterprise: {
     label: '企业主表',
     fields: {
