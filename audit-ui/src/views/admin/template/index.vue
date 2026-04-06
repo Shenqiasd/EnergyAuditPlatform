@@ -39,6 +39,8 @@ const MODULE_OPTIONS = [
 const DATA_TYPE_OPTIONS = [
   { label: 'STRING', value: 'STRING' },
   { label: 'NUMBER', value: 'NUMBER' },
+  { label: 'DECIMAL', value: 'DECIMAL' },
+  { label: 'TEXT', value: 'TEXT' },
   { label: 'DATE', value: 'DATE' },
   { label: 'DICT', value: 'DICT' },
 ]
