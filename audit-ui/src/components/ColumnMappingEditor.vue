@@ -115,6 +115,7 @@ function removeRow(index: number) {
       <el-select
         :model-value="row.type"
         size="small"
+        filterable
         class="col-type"
         :disabled="disabled"
         @update:model-value="(v: string) => updateType(idx, v)"
