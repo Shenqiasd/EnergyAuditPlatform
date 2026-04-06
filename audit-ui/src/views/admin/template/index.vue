@@ -3,6 +3,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Upload, View } from '@element-plus/icons-vue'
 import SpreadDesigner from '@/components/SpreadDesigner/index.vue'
+import ColumnMappingEditor from '@/components/ColumnMappingEditor.vue'
+import { getTableOptions, getFieldOptions } from '@/config/schema-registry'
 import {
   getTemplateList,
   createTemplate,
@@ -37,6 +39,8 @@ const MODULE_OPTIONS = [
 const DATA_TYPE_OPTIONS = [
   { label: 'STRING', value: 'STRING' },
   { label: 'NUMBER', value: 'NUMBER' },
+  { label: 'DECIMAL', value: 'DECIMAL' },
+  { label: 'TEXT', value: 'TEXT' },
   { label: 'DATE', value: 'DATE' },
   { label: 'DICT', value: 'DICT' },
 ]
@@ -50,6 +54,8 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
   NAMED_RANGE: 'Named Range',
   CELL_TAG: 'Cell Tag',
 }
+
+const tableOptions = getTableOptions()
 
 // ── Template list ──────────────────────────────────────────────────────────────
 const loading = ref(false)
@@ -475,20 +481,39 @@ onMounted(loadData)
                     </el-tag>
                   </div>
                 </div>
-                <el-input
-                  v-model="tag.fieldName"
-                  placeholder="字段名 (fieldName)"
-                  size="small"
-                  :disabled="isReadonly(designerVersion)"
-                  style="margin-top:6px"
-                />
-                <el-input
+                <el-select
                   v-model="tag.targetTable"
-                  placeholder="目标表 (targetTable)"
+                  placeholder="选择目标表 (targetTable)"
                   size="small"
+                  filterable
+                  clearable
                   :disabled="isReadonly(designerVersion)"
-                  style="margin-top:4px"
-                />
+                  style="margin-top:6px;width:100%"
+                  @change="() => { tag.fieldName = '' }"
+                >
+                  <el-option
+                    v-for="opt in tableOptions"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+                <el-select
+                  v-model="tag.fieldName"
+                  :placeholder="tag.targetTable ? '选择字段 (fieldName)' : '请先选择目标表'"
+                  size="small"
+                  filterable
+                  clearable
+                  :disabled="isReadonly(designerVersion) || !tag.targetTable"
+                  style="margin-top:4px;width:100%"
+                >
+                  <el-option
+                    v-for="opt in getFieldOptions(tag.targetTable ?? '')"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
                 <div class="tag-row" style="margin-top:4px">
                   <el-select
                     v-model="tag.mappingType"
@@ -554,12 +579,9 @@ onMounted(loadData)
                       controls-position="right"
                     />
                   </div>
-                  <el-input
+                  <ColumnMappingEditor
                     v-model="tag.columnMappings"
-                    placeholder='列映射 JSON (如 [{"col":0,"field":"name","type":"STRING"}])'
-                    type="textarea"
-                    :autosize="{ minRows: 2, maxRows: 5 }"
-                    size="small"
+                    :target-table="tag.targetTable ?? ''"
                     :disabled="isReadonly(designerVersion)"
                     style="margin-top:4px"
                   />
