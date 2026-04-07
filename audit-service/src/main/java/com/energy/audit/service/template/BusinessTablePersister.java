@@ -89,7 +89,7 @@ public class BusinessTablePersister {
                     "WHERE submission_id = :submissionId AND deleted = 0";
             params.addValue("submissionId", submissionId);
         } else {
-            log.warn("Table '{}' missing submission_id — falling back to enterprise_id+audit_year delete", tableName);
+            log.warn("Table '{}' missing submission_id — skipping deleteBySubmissionId (use deleteForReExtraction instead)", tableName);
             return;
         }
         int deleted = jdbcTemplate.update(sql, params);
