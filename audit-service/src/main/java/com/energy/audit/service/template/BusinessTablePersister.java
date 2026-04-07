@@ -37,6 +37,15 @@ public class BusinessTablePersister {
             "create_by", "create_time", "update_by", "update_time", "deleted"
     );
 
+    /**
+     * Table-specific NOT NULL columns that should default to audit_year
+     * when not explicitly provided by the extraction data.
+     * Key = table name, Value = set of column names to auto-fill with auditYear.
+     */
+    private static final Map<String, Set<String>> YEAR_COLUMNS_BY_TABLE = Map.of(
+            "de_tech_indicator", Set.of("indicator_year")
+    );
+
     private static final java.util.regex.Pattern SAFE_COLUMN_PATTERN =
             java.util.regex.Pattern.compile("^[a-z][a-z0-9_]{0,63}$");
 
@@ -143,6 +152,7 @@ public class BusinessTablePersister {
         row.put("create_by", operator);
         row.put("update_by", operator);
         row.put("deleted", 0);
+        fillRequiredYearColumns(tableName, row, auditYear);
 
         insertOrMergeRow(tableName, submissionId, enterpriseId, auditYear, row);
     }
@@ -176,6 +186,9 @@ public class BusinessTablePersister {
                     dbRow.put(colName, convertValue(entry.getValue()));
                 }
             }
+            // Fill required year columns AFTER user data so putIfAbsent
+            // restores the default when extraction provides null
+            fillRequiredYearColumns(tableName, dbRow, auditYear);
             dbRows.add(dbRow);
         }
 
@@ -229,10 +242,16 @@ public class BusinessTablePersister {
             StringBuilder updateSql = new StringBuilder("UPDATE ").append(tableName).append(" SET ");
             List<String> setClauses = new ArrayList<>();
             MapSqlParameterSource updateParams = new MapSqlParameterSource();
+            Set<String> autoYearCols = YEAR_COLUMNS_BY_TABLE.getOrDefault(
+                    tableName.toLowerCase(), Collections.emptySet());
             for (Map.Entry<String, Object> entry : row.entrySet()) {
                 String col = entry.getKey();
                 if ("submission_id".equals(col) || "enterprise_id".equals(col) ||
                     "audit_year".equals(col) || "create_by".equals(col) || "deleted".equals(col)) {
+                    continue;
+                }
+                // Skip auto-filled year columns on UPDATE to avoid overwriting existing values
+                if (autoYearCols.contains(col)) {
                     continue;
                 }
                 setClauses.add(col + " = :" + col);
@@ -260,6 +279,18 @@ public class BusinessTablePersister {
                 insertParams.addValue(col, row.get(col));
             }
             jdbcTemplate.update(insertSql.toString(), insertParams);
+        }
+    }
+
+    /**
+     * Auto-populate table-specific NOT NULL year columns (e.g. indicator_year)
+     * from auditYear when they are not already present in the row.
+     */
+    private void fillRequiredYearColumns(String tableName, Map<String, Object> row, Integer auditYear) {
+        Set<String> yearCols = YEAR_COLUMNS_BY_TABLE.get(tableName.toLowerCase());
+        if (yearCols == null) return;
+        for (String col : yearCols) {
+            row.putIfAbsent(col, auditYear);
         }
     }
 
