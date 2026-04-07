@@ -14,5 +14,5 @@ FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 ENV NGINX_PORT=80
-ENV BACKEND_URL=http://EnergyAuditPlatform:8080
+ENV BACKEND_URL=http://energyauditplatform.railway.internal:8080
 EXPOSE 80
