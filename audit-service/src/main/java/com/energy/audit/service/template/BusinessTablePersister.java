@@ -240,10 +240,16 @@ public class BusinessTablePersister {
             StringBuilder updateSql = new StringBuilder("UPDATE ").append(tableName).append(" SET ");
             List<String> setClauses = new ArrayList<>();
             MapSqlParameterSource updateParams = new MapSqlParameterSource();
+            Set<String> autoYearCols = YEAR_COLUMNS_BY_TABLE.getOrDefault(
+                    tableName.toLowerCase(), Collections.emptySet());
             for (Map.Entry<String, Object> entry : row.entrySet()) {
                 String col = entry.getKey();
                 if ("submission_id".equals(col) || "enterprise_id".equals(col) ||
                     "audit_year".equals(col) || "create_by".equals(col) || "deleted".equals(col)) {
+                    continue;
+                }
+                // Skip auto-filled year columns on UPDATE to avoid overwriting existing values
+                if (autoYearCols.contains(col)) {
                     continue;
                 }
                 setClauses.add(col + " = :" + col);
