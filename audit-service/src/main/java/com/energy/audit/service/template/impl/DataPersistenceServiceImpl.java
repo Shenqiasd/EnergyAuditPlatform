@@ -57,7 +57,8 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
             if (targetTable != null && !targetTable.isBlank()
                     && businessTablePersister.isBusinessTable(targetTable)
                     && !clearedBusinessTables.contains(targetTable)) {
-                businessTablePersister.deleteBySubmissionId(targetTable, submissionId, operator);
+                businessTablePersister.deleteForReExtraction(
+                        targetTable, submissionId, enterpriseId, auditYear, operator);
                 clearedBusinessTables.add(targetTable);
             }
         }

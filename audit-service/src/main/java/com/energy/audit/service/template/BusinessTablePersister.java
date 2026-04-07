@@ -1,5 +1,6 @@
 package com.energy.audit.service.template;
 
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -8,7 +9,9 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,8 +42,35 @@ public class BusinessTablePersister {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
+    /** Tables confirmed to have the submission_id column in the live DB. */
+    private Set<String> tablesWithSubmissionId = Collections.emptySet();
+
     public BusinessTablePersister(NamedParameterJdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @PostConstruct
+    void probeSubmissionIdColumns() {
+        Set<String> confirmed = new HashSet<>();
+        for (String table : ALLOWED_TABLES) {
+            try {
+                jdbcTemplate.queryForList(
+                        "SELECT submission_id FROM " + table + " WHERE 1=0",
+                        new MapSqlParameterSource());
+                confirmed.add(table);
+            } catch (Exception e) {
+                log.warn("Table '{}' is missing 'submission_id' column — "
+                        + "run sql/04-fix-add-submission-id.sql to fix. "
+                        + "Falling back to enterprise_id+audit_year keying.", table);
+            }
+        }
+        this.tablesWithSubmissionId = Collections.unmodifiableSet(confirmed);
+        log.info("BusinessTablePersister: {}/{} tables have submission_id",
+                confirmed.size(), ALLOWED_TABLES.size());
+    }
+
+    private boolean hasSubmissionId(String tableName) {
+        return tablesWithSubmissionId.contains(tableName.toLowerCase());
     }
 
     public boolean isBusinessTable(String tableName) {
@@ -50,13 +80,48 @@ public class BusinessTablePersister {
     public void deleteBySubmissionId(String tableName, Long submissionId, String operator) {
         if (!isBusinessTable(tableName)) return;
 
-        String sql = "UPDATE " + tableName + " SET deleted = 1, update_by = :updateBy, update_time = NOW() " +
-                "WHERE submission_id = :submissionId AND deleted = 0";
+        String sql;
         MapSqlParameterSource params = new MapSqlParameterSource();
-        params.addValue("submissionId", submissionId);
         params.addValue("updateBy", operator);
+
+        if (hasSubmissionId(tableName)) {
+            sql = "UPDATE " + tableName + " SET deleted = 1, update_by = :updateBy, update_time = NOW() " +
+                    "WHERE submission_id = :submissionId AND deleted = 0";
+            params.addValue("submissionId", submissionId);
+        } else {
+            log.warn("Table '{}' missing submission_id — skipping deleteBySubmissionId (use deleteForReExtraction instead)", tableName);
+            return;
+        }
         int deleted = jdbcTemplate.update(sql, params);
         log.debug("Soft-deleted {} rows from {} for submission {}", deleted, tableName, submissionId);
+    }
+
+    /**
+     * Unified pre-extraction delete: uses submission_id when available,
+     * falls back to enterprise_id+audit_year otherwise.
+     */
+    public void deleteForReExtraction(String tableName, Long submissionId,
+                                       Long enterpriseId, Integer auditYear, String operator) {
+        if (!isBusinessTable(tableName)) return;
+
+        if (hasSubmissionId(tableName)) {
+            deleteBySubmissionId(tableName, submissionId, operator);
+        } else {
+            deleteByEnterpriseAndYear(tableName, enterpriseId, auditYear, operator);
+        }
+    }
+
+    public void deleteByEnterpriseAndYear(String tableName, Long enterpriseId, Integer auditYear, String operator) {
+        if (!isBusinessTable(tableName)) return;
+
+        String sql = "UPDATE " + tableName + " SET deleted = 1, update_by = :updateBy, update_time = NOW() " +
+                "WHERE enterprise_id = :enterpriseId AND audit_year = :auditYear AND deleted = 0";
+        MapSqlParameterSource params = new MapSqlParameterSource();
+        params.addValue("enterpriseId", enterpriseId);
+        params.addValue("auditYear", auditYear);
+        params.addValue("updateBy", operator);
+        int deleted = jdbcTemplate.update(sql, params);
+        log.debug("Soft-deleted {} rows from {} for enterprise {} year {}", deleted, tableName, enterpriseId, auditYear);
     }
 
     public void persistScalar(String tableName, Long submissionId, Long enterpriseId,
@@ -69,7 +134,9 @@ public class BusinessTablePersister {
             return;
         }
         Map<String, Object> row = new HashMap<>();
-        row.put("submission_id", submissionId);
+        if (hasSubmissionId(tableName)) {
+            row.put("submission_id", submissionId);
+        }
         row.put("enterprise_id", enterpriseId);
         row.put("audit_year", auditYear);
         row.put(columnName, convertValue(value));
@@ -84,10 +151,13 @@ public class BusinessTablePersister {
                                   Integer auditYear, List<Map<String, Object>> rows, String operator) {
         if (!isBusinessTable(tableName)) return;
 
+        boolean hasSid = hasSubmissionId(tableName);
         List<Map<String, Object>> dbRows = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> dbRow = new HashMap<>();
-            dbRow.put("submission_id", submissionId);
+            if (hasSid) {
+                dbRow.put("submission_id", submissionId);
+            }
             dbRow.put("enterprise_id", enterpriseId);
             dbRow.put("audit_year", auditYear);
             dbRow.put("create_by", operator);
@@ -140,10 +210,18 @@ public class BusinessTablePersister {
 
     private void insertOrMergeRow(String tableName, Long submissionId, Long enterpriseId,
                                    Integer auditYear, Map<String, Object> row) {
-        String checkSql = "SELECT id FROM " + tableName +
-                " WHERE submission_id = :submissionId AND deleted = 0 LIMIT 1";
+        String checkSql;
         MapSqlParameterSource checkParams = new MapSqlParameterSource();
-        checkParams.addValue("submissionId", submissionId);
+        if (hasSubmissionId(tableName)) {
+            checkSql = "SELECT id FROM " + tableName +
+                    " WHERE submission_id = :submissionId AND deleted = 0 LIMIT 1";
+            checkParams.addValue("submissionId", submissionId);
+        } else {
+            checkSql = "SELECT id FROM " + tableName +
+                    " WHERE enterprise_id = :enterpriseId AND audit_year = :auditYear AND deleted = 0 LIMIT 1";
+            checkParams.addValue("enterpriseId", enterpriseId);
+            checkParams.addValue("auditYear", auditYear);
+        }
         List<Map<String, Object>> existing = jdbcTemplate.queryForList(checkSql, checkParams);
 
         if (!existing.isEmpty()) {
