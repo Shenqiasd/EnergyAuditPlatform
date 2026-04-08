@@ -37,7 +37,7 @@ public class AdminDashboardController {
     private void requireAdmin() {
         Integer userType = SecurityUtils.getCurrentUserType();
         if (userType == null || userType != 1) {
-            throw new BusinessException("仅管理员可访问管理首页数据");
+            throw new BusinessException(403, "仅管理员可访问管理首页数据");
         }
     }
 
