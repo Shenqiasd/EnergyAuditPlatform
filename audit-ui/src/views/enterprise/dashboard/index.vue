@@ -1,66 +1,162 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import {
+  getDashboardStats,
+  getDashboardProgress,
+  type DashboardStats,
+  type ProgressItem,
+} from '@/api/dashboard'
 import {
   getMyRectificationList,
   updateRectificationProgress,
   type RectificationItem,
 } from '@/api/rectification'
 
-const stats = ref([
-  {
-    label: '综合能耗（当量值）',
-    value: '12,847',
-    unit: '吨标煤',
-    trend: '↓ 3.2%',
-    trendType: 'down',
-    trendText: '较上年同期',
-    highlight: true,
-  },
-  {
-    label: '碳排放总量',
-    value: '8,234',
-    unit: 'tCO₂',
-    trend: '↓ 5.1%',
-    trendType: 'down',
-    trendText: '较上年同期',
-    barWidth: 65,
-  },
-  {
-    label: '单位产值能耗',
-    value: '0.183',
-    unit: '吨标煤/万元',
-    trend: '↓ 7.8%',
-    trendType: 'down',
-    trendText: '较上年同期',
-    barWidth: 82,
-  },
-  {
-    label: '填报完整度',
-    value: '78',
-    unit: '%',
-    trend: '⚠ 还有 4 个模块未填报',
-    trendType: 'warning',
-    barWidth: 78,
-    barColor: 'linear-gradient(90deg,#ffa726,#ffca28)',
-  },
-])
+const router = useRouter()
+const userStore = useUserStore()
 
-const progressItems = ref([
-  { name: '基本设置（企业/能源/单元/产品）', pct: 100, color: '#43a047' },
-  { name: '企业概况 & 主要技术指标',         pct: 100, color: '#43a047' },
-  { name: '能源计量器具汇总',                pct: 80,  color: '#00897B' },
-  { name: '能源流程图',                      pct: 60,  color: '#00897B' },
-  { name: '温室气体排放表',                  pct: 0,   color: '#ef5350' },
-  { name: '审计报告生成与提交',               pct: 0,   color: '#ef5350' },
-])
+const currentYear = new Date().getFullYear()
+const selectedYear = ref<number>(userStore.userInfo?.auditYear ?? currentYear)
+const yearOptions = Array.from({ length: 6 }, (_, i) => currentYear - i)
 
+const enterpriseName = computed(() => userStore.userInfo?.enterpriseName ?? '—')
+
+// --- Stats ---
+const statsLoading = ref(false)
+const dashStats = ref<DashboardStats | null>(null)
+
+interface StatCard {
+  label: string
+  value: string
+  unit: string
+  trend: string
+  trendType: 'down' | 'up' | 'warning' | 'none'
+  trendText: string
+  highlight?: boolean
+  barWidth?: number
+  barColor?: string
+}
+
+function formatNumber(val: number | null | undefined, decimals = 0): string {
+  if (val == null) return '—'
+  const fixed = val.toFixed(decimals)
+  const [intPart, decPart] = fixed.split('.')
+  const formatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return decPart ? formatted + '.' + decPart : formatted
+}
+
+function calcTrend(curr: number | null | undefined, prev: number | null | undefined): { text: string; type: 'down' | 'up' | 'none' } {
+  if (curr == null || prev == null || prev === 0) {
+    return { text: '暂无同比数据', type: 'none' }
+  }
+  const pct = ((curr - prev) / Math.abs(prev)) * 100
+  if (pct < 0) {
+    return { text: `↓ ${Math.abs(pct).toFixed(1)}%`, type: 'down' }
+  } else if (pct > 0) {
+    return { text: `↑ ${pct.toFixed(1)}%`, type: 'up' }
+  }
+  return { text: '持平', type: 'none' }
+}
+
+const stats = computed<StatCard[]>(() => {
+  const d = dashStats.value
+  if (!d) return []
+
+  const energyTrend = calcTrend(d.totalEnergyEquiv, d.totalEnergyEquivPrev)
+  const carbonTrend = calcTrend(d.totalCarbonEmission, d.totalCarbonEmissionPrev)
+  const unitTrend = calcTrend(d.unitOutputEnergy, d.unitOutputEnergyPrev)
+
+  const completePct = d.totalTemplateCount > 0
+    ? Math.round((d.submittedCount / d.totalTemplateCount) * 100)
+    : 0
+  const remaining = d.totalTemplateCount - d.submittedCount
+
+  return [
+    {
+      label: '综合能耗（当量值）',
+      value: formatNumber(d.totalEnergyEquiv),
+      unit: '吨标煤',
+      trend: energyTrend.text,
+      trendType: energyTrend.type,
+      trendText: energyTrend.type !== 'none' ? '较上年同期' : '',
+      highlight: true,
+    },
+    {
+      label: '碳排放总量',
+      value: formatNumber(d.totalCarbonEmission),
+      unit: 'tCO₂',
+      trend: carbonTrend.text,
+      trendType: carbonTrend.type,
+      trendText: carbonTrend.type !== 'none' ? '较上年同期' : '',
+      barWidth: d.totalCarbonEmission != null ? 65 : 0,
+    },
+    {
+      label: '单位产值能耗',
+      value: d.unitOutputEnergy != null ? formatNumber(d.unitOutputEnergy, 3) : '—',
+      unit: '吨标煤/万元',
+      trend: unitTrend.text,
+      trendType: unitTrend.type,
+      trendText: unitTrend.type !== 'none' ? '较上年同期' : '',
+      barWidth: d.unitOutputEnergy != null ? 82 : 0,
+    },
+    {
+      label: '填报完整度',
+      value: d.totalTemplateCount > 0 ? String(completePct) : '—',
+      unit: d.totalTemplateCount > 0 ? '%' : '',
+      trend: remaining > 0
+        ? `⚠ 还有 ${remaining} 个模板未提交`
+        : (d.totalTemplateCount > 0 ? '全部提交完成' : '暂无已发布模板'),
+      trendType: remaining > 0 ? 'warning' : 'none',
+      trendText: '',
+      barWidth: d.totalTemplateCount > 0 ? completePct : 0,
+      barColor: remaining > 0 ? 'linear-gradient(90deg,#ffa726,#ffca28)' : undefined,
+    },
+  ]
+})
+
+// --- Progress ---
+const progressLoading = ref(false)
+const progressItems = ref<ProgressItem[]>([])
+
+function progressColor(pct: number): string {
+  if (pct >= 100) return '#43a047'
+  if (pct > 0) return '#00897B'
+  return '#ef5350'
+}
+
+// --- Rectification ---
 const rectItems = ref<RectificationItem[]>([])
 const rectLoading = ref(false)
 
 const progressDialogVisible = ref(false)
 const currentRectId = ref<number | null>(null)
 const progressForm = ref({ status: 1 as number, result: '' })
+
+async function loadAll() {
+  const year = selectedYear.value
+  statsLoading.value = true
+  progressLoading.value = true
+
+  try {
+    const [statsData, progressData] = await Promise.all([
+      getDashboardStats(year),
+      getDashboardProgress(year),
+    ])
+    dashStats.value = statsData
+    progressItems.value = progressData
+  } catch {
+    dashStats.value = null
+    progressItems.value = []
+  } finally {
+    statsLoading.value = false
+    progressLoading.value = false
+  }
+
+  loadRectItems()
+}
 
 async function loadRectItems() {
   rectLoading.value = true
@@ -134,17 +230,29 @@ async function submitProgress() {
   }
 }
 
-onMounted(loadRectItems)
+function goToProgress() {
+  router.push('/enterprise/report/generate')
+}
+
+watch(selectedYear, () => loadAll())
+onMounted(loadAll)
 </script>
 
 <template>
   <div class="page-container">
     <div class="page-header">
       <div class="page-title">工作台</div>
-      <div class="page-desc">上海XX制造有限公司 · 2024年度能碳审计数据汇总</div>
+      <div class="page-desc">
+        {{ enterpriseName }} · {{ selectedYear }}年度能碳审计数据汇总
+      </div>
+      <div class="year-select">
+        <el-select v-model="selectedYear" size="small" style="width: 110px">
+          <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
+        </el-select>
+      </div>
     </div>
 
-    <div class="stats-grid">
+    <div v-loading="statsLoading" class="stats-grid">
       <div
         v-for="s in stats"
         :key="s.label"
@@ -163,6 +271,7 @@ onMounted(loadRectItems)
           class="stat-trend"
           :class="{
             'trend-down': s.trendType === 'down',
+            'trend-up': s.trendType === 'up',
             'trend-warning': s.trendType === 'warning',
           }"
         >
@@ -175,15 +284,21 @@ onMounted(loadRectItems)
           ></div>
         </div>
       </div>
+      <div v-if="stats.length === 0 && !statsLoading" class="stat-card stat-card--empty">
+        <div class="stat-label">暂无数据</div>
+      </div>
     </div>
 
     <div class="bottom-grid">
       <div class="g-card">
         <div class="card-header">
           <div class="card-title">填报进度</div>
-          <div class="card-action">查看详情 →</div>
+          <div class="card-action" @click="goToProgress">查看详情 →</div>
         </div>
-        <div class="progress-list">
+        <div v-loading="progressLoading" class="progress-list">
+          <div v-if="progressItems.length === 0 && !progressLoading" style="color: #909399; text-align: center; padding: 20px; font-size: 13px">
+            暂无进度数据
+          </div>
           <div v-for="item in progressItems" :key="item.name" class="progress-item">
             <div class="progress-header">
               <span class="progress-name">{{ item.name }}</span>
@@ -192,9 +307,10 @@ onMounted(loadRectItems)
             <div class="progress-bar">
               <div
                 class="progress-fill"
-                :style="{ width: item.pct + '%', background: item.color }"
+                :style="{ width: item.pct + '%', background: progressColor(item.pct) }"
               ></div>
             </div>
+            <div v-if="item.detail" class="progress-detail">{{ item.detail }}</div>
           </div>
         </div>
       </div>
@@ -255,6 +371,16 @@ onMounted(loadRectItems)
 <style lang="scss" scoped>
 @use '@/styles/variables' as *;
 
+.page-header {
+  position: relative;
+  .year-select {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -274,6 +400,12 @@ onMounted(loadRectItems)
     .stat-label, .stat-unit, .stat-trend { color: rgba(255,255,255,0.7); }
     .stat-value { color: #fff; }
   }
+
+  &--empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 32px;
+  }
 }
 
 .stat-label {
@@ -290,6 +422,7 @@ onMounted(loadRectItems)
 .stat-trend {
   font-size: 12px; color: $text-tertiary; margin-top: 4px;
   &.trend-down    { color: $primary; }
+  &.trend-up      { color: #ef5350; }
   &.trend-warning { color: $warning; }
   .trend-text { font-size: 11px; color: $text-tertiary; }
 }
@@ -316,6 +449,9 @@ onMounted(loadRectItems)
 .progress-bar {
   height: 5px; background: $border; border-radius: 3px; overflow: hidden;
   .progress-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+}
+.progress-detail {
+  font-size: 11.5px; color: $text-tertiary; margin-top: 3px;
 }
 
 .todo-list { display: flex; flex-direction: column; gap: 8px; }
