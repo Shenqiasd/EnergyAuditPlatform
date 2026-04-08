@@ -135,7 +135,10 @@ const progressDialogVisible = ref(false)
 const currentRectId = ref<number | null>(null)
 const progressForm = ref({ status: 1 as number, result: '' })
 
+let loadSeq = 0
+
 async function loadAll() {
+  const seq = ++loadSeq
   const year = selectedYear.value
   statsLoading.value = true
   progressLoading.value = true
@@ -145,14 +148,18 @@ async function loadAll() {
       getDashboardStats(year),
       getDashboardProgress(year),
     ])
+    if (seq !== loadSeq) return // discard stale response
     dashStats.value = statsData
     progressItems.value = progressData
   } catch {
+    if (seq !== loadSeq) return
     dashStats.value = null
     progressItems.value = []
   } finally {
-    statsLoading.value = false
-    progressLoading.value = false
+    if (seq === loadSeq) {
+      statsLoading.value = false
+      progressLoading.value = false
+    }
   }
 
   loadRectItems()
