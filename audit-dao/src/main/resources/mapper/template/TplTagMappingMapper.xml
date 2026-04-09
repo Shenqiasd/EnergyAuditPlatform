@@ -21,6 +21,7 @@
         <result column="column_mappings"      property="columnMappings"/>
         <result column="header_row"           property="headerRow"/>
         <result column="remark"               property="remark"/>
+        <result column="deletion_source"      property="deletionSource"/>
         <result column="create_by"            property="createBy"/>
         <result column="create_time"          property="createTime"/>
         <result column="update_by"            property="updateBy"/>
@@ -32,7 +33,7 @@
         id, template_version_id, tag_name, field_name, target_table, data_type,
         dict_type, required, sheet_index, sheet_name, cell_range,
         mapping_type, source_type, row_key_column, column_mappings, header_row,
-        remark, create_by, create_time, update_by, update_time, deleted
+        remark, deletion_source, create_by, create_time, update_by, update_time, deleted
     </sql>
 
     <select id="selectById" resultMap="BaseResultMap">
@@ -92,7 +93,7 @@
 
     <update id="deleteByVersionId">
         UPDATE tpl_tag_mapping
-        SET deleted = 1, update_by = #{updateBy}, update_time = NOW()
+        SET deleted = 1, deletion_source = 'USER', update_by = #{updateBy}, update_time = NOW()
         WHERE template_version_id = #{templateVersionId} AND deleted = 0
     </update>
 
@@ -107,7 +108,7 @@
 
     <update id="softDeleteById">
         UPDATE tpl_tag_mapping
-        SET deleted = 1, update_by = #{updateBy}, update_time = NOW()
+        SET deleted = 1, deletion_source = 'SYNC', update_by = #{updateBy}, update_time = NOW()
         WHERE id = #{id} AND deleted = 0
     </update>
 
@@ -127,8 +128,10 @@
     </insert>
 
     <select id="selectDeletedTagNamesByVersionId" resultType="string">
-        SELECT tag_name FROM tpl_tag_mapping
-        WHERE template_version_id = #{templateVersionId} AND deleted = 1
+        SELECT DISTINCT tag_name FROM tpl_tag_mapping
+        WHERE template_version_id = #{templateVersionId}
+          AND deleted = 1
+          AND deletion_source = 'USER'
     </select>
 
 </mapper>

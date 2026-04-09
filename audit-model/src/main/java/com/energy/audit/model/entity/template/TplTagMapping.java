@@ -64,4 +64,7 @@ public class TplTagMapping extends BaseEntity {
 
     /** Remark */
     private String remark;
+
+    /** Deletion source: USER (deleted via mapping panel) or SYNC (auto-removed by syncTagsFromJson) */
+    private String deletionSource;
 }
