@@ -194,13 +194,13 @@ public class TemplateController {
     }
 
     // =========================================================================
-    // Tag Mapping Management (admin only)
+    // Tag Mapping Management (read: any authenticated; write: admin only)
     // =========================================================================
 
-    @Operation(summary = "查询版本的标签映射列表")
+    @Operation(summary = "查询版本的标签映射列表（读操作，企业用户也需要用于预填充）")
     @GetMapping("/versions/{versionId}/tags")
     public R<List<TplTagMapping>> listTags(@PathVariable Long versionId) {
-        requireAdmin();
+        // No requireAdmin() — enterprise users need tag mappings for SpreadJS pre-fill
         return R.ok(tagMappingService.listByVersionId(versionId));
     }
 
