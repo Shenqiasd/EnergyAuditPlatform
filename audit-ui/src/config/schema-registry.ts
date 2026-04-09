@@ -33,6 +33,7 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
       energyManagerName:      { label: '能源管理负责人', type: 'STRING' },
       energyManagerMobile:    { label: '负责人手机', type: 'STRING' },
       energyManagerCert:      { label: '能源管理师证号', type: 'STRING' },
+      energyDeptLeaderPhone:  { label: '能源部门负责人电话', type: 'STRING' },
       energyCert:             { label: '是否通过能源管理体系认证', type: 'NUMBER' },
       certPassDate:           { label: '认证通过日期', type: 'DATE' },
       certAuthority:          { label: '认证机构', type: 'STRING' },

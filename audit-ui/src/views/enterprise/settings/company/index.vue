@@ -173,6 +173,11 @@ onMounted(loadData)
             <el-input v-model="form.energyManagerCert" placeholder="请输入证号" />
           </el-form-item>
         </el-col>
+        <el-col :span="12">
+          <el-form-item label="能源部门负责人电话">
+            <el-input v-model="form.energyDeptLeaderPhone" placeholder="请输入联系电话" />
+          </el-form-item>
+        </el-col>
       </el-row>
 
       <!-- ── 能源认证 ── -->
