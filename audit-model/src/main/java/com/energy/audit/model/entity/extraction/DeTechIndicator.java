@@ -35,4 +35,11 @@ public class DeTechIndicator extends BaseEntity {
     private BigDecimal savingBenefit;
     private BigDecimal coalTarget;
     private BigDecimal coalActual;
+    private Integer employeeCount;
+    private Integer energyManagerCount;
+    private BigDecimal totalEnergyEquivExclGreen;
+    private BigDecimal totalEnergyEqualExclGreen;
+    private BigDecimal rawMaterialEnergy;
+    private BigDecimal electrificationRate;
+    private BigDecimal totalEnergyEqualExclMaterial;
 }
