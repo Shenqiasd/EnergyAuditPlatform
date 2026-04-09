@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Search, Refresh, Download } from '@element-plus/icons-vue'
+import { Edit, Delete, Search, Refresh, Download } from '@element-plus/icons-vue'
 import {
   getEnergyList,
-  createEnergy,
   updateEnergy,
   removeEnergy,
   importFromCatalog,
@@ -46,12 +45,6 @@ async function loadData() {
 function handleSearch() { query.value.pageNum = 1; loadData() }
 function handleReset() { query.value = { name: '', pageNum: 1, pageSize: 15 }; loadData() }
 
-function openCreate() {
-  form.value = { isActive: 1 }
-  dialogTitle.value = '新增能源品种'
-  dialogVisible.value = true
-}
-
 function openEdit(row: BsEnergy) {
   form.value = { ...row }
   dialogTitle.value = '编辑能源品种'
@@ -67,11 +60,7 @@ async function handleSubmit() {
   await formRef.value.validate()
   submitting.value = true
   try {
-    if (form.value.id) {
-      await updateEnergy(form.value.id, form.value)
-    } else {
-      await createEnergy(form.value)
-    }
+    await updateEnergy(form.value.id!, form.value)
     ElMessage.success('保存成功')
     handleClose()
     loadData()
@@ -131,8 +120,7 @@ onMounted(loadData)
         </el-form-item>
       </el-form>
       <div class="btn-group">
-        <el-button :icon="Download" @click="openImportDialog">从品类库导入</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreate">手动新增</el-button>
+        <el-button type="primary" :icon="Download" @click="openImportDialog">从品类库导入</el-button>
       </div>
     </div>
 
