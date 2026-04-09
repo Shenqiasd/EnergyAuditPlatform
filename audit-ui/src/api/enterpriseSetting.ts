@@ -3,29 +3,56 @@ import request from '@/utils/request'
 export interface EnterpriseSetting {
   id?: number
   enterpriseId?: number
+
+  // 地区 / 行业
+  region?: string
+  industryField?: string
+  industryName?: string
+  unitNature?: string
+
+  // 工商注册
+  registeredDate?: string
+  registeredCapital?: number
+
+  // 法人 / 联系人
+  legalRepresentative?: string
+  legalPhone?: string
+  isCentralEnterprise?: number
+  groupName?: string
+
+  // 地址 / 通讯
   enterpriseAddress?: string
   unitAddress?: string
   postalCode?: string
+  adminDivisionCode?: string
+  enterpriseEmail?: string
   fax?: string
-  legalRepresentative?: string
-  legalPhone?: string
+
+  // 能源管理
+  energyMgmtOrg?: string
+  energyLeaderName?: string
+  energyLeaderPhone?: string
+  energyManagerName?: string
+  energyManagerMobile?: string
+  energyManagerCert?: string
+  energyDeptLeaderPhone?: string
+
+  // 能源认证
+  energyCert?: number
+  certPassDate?: string
+  certAuthority?: string
+  hasEnergyCenter?: number
+
+  // 其他
   enterpriseContact?: string
   enterpriseMobile?: string
-  enterpriseEmail?: string
   compilerContact?: string
   compilerName?: string
   compilerMobile?: string
   compilerEmail?: string
-  energyCert?: number
-  certAuthority?: string
-  certPassDate?: string
-  registeredCapital?: number
-  registeredDate?: string
   industryCategory?: string
   industryCode?: string
-  industryName?: string
   superiorDepartment?: string
-  unitNature?: string
   energyEnterpriseType?: string
   remark?: string
 }
@@ -38,4 +65,9 @@ export function getEnterpriseSetting(): Promise<EnterpriseSetting | null> {
 /** Create or update enterprise setting (upsert) */
 export function upsertEnterpriseSetting(data: Partial<EnterpriseSetting>): Promise<void> {
   return request.put('/enterprise/setting', data)
+}
+
+/** Get enterprise setting as flat field map for SpreadJS pre-fill (bidirectional sync) */
+export function getEnterpriseSettingPrefill(): Promise<Record<string, unknown>> {
+  return request.get('/enterprise/setting/prefill')
 }

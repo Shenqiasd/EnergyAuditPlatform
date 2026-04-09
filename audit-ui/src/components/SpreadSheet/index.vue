@@ -6,9 +6,12 @@ import {
   saveDraft,
   renewLock,
   releaseLock,
+  listTags,
   type TplSubmission,
   type TplTemplateVersion,
+  type TplTagMapping,
 } from '@/api/template'
+import { getEnterpriseSettingPrefill } from '@/api/enterpriseSetting'
 import { initSpreadJSLicense } from '@/utils/spreadjs-license'
 
 const props = defineProps<{
@@ -90,6 +93,11 @@ async function initWorkbook() {
     const jsonStr = currentSubmission?.submissionJson ?? publishedVersion.templateJson
     workbook.fromJSON(JSON.parse(jsonStr))
 
+    // Pre-fill enterprise settings into tagged cells when loading a fresh template
+    if (!currentSubmission && publishedVersion.id) {
+      await prefillEnterpriseSettings(workbook, publishedVersion.id)
+    }
+
     const forceReadonly = props.readonly || currentSubmission?.status === 1
     if (forceReadonly) {
       applyReadonlyProtection()
@@ -103,6 +111,110 @@ async function initWorkbook() {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * Pre-fill enterprise settings into SpreadJS cells that have tag mappings
+ * targeting ent_enterprise_setting. This enables bidirectional sync:
+ * enterprise settings page → SpreadJS template.
+ */
+async function prefillEnterpriseSettings(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  versionId: number,
+) {
+  try {
+    const [tags, prefillData] = await Promise.all([
+      listTags(versionId),
+      getEnterpriseSettingPrefill(),
+    ])
+    if (!prefillData || Object.keys(prefillData).length === 0) return
+
+    // Filter to only ent_enterprise_setting SCALAR mappings
+    const entTags = tags.filter(
+      (t: TplTagMapping) =>
+        t.targetTable === 'ent_enterprise_setting' &&
+        (!t.mappingType || t.mappingType === 'SCALAR'),
+    )
+    if (entTags.length === 0) return
+
+    wb.suspendPaint()
+    try {
+      for (const tag of entTags) {
+        const fieldName = tag.fieldName
+        if (!fieldName || !(fieldName in prefillData)) continue
+        const value = prefillData[fieldName]
+        if (value == null || value === '') continue
+
+        const filled = fillTaggedCell(wb, tag, value)
+        if (!filled) {
+          console.debug(`[prefill] could not locate cell for tag "${tag.tagName}"`)
+        }
+      }
+    } finally {
+      wb.resumePaint()
+    }
+  } catch (e) {
+    // Pre-fill is best-effort; don't block template loading
+    console.warn('[prefill] failed to pre-fill enterprise settings:', e)
+  }
+}
+
+/**
+ * Find the cell for a tag mapping and set its value.
+ * Supports both cell-tag and named-range source types.
+ */
+function fillTaggedCell(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tag: TplTagMapping,
+  value: unknown,
+): boolean {
+  const sheetCount = wb.getSheetCount()
+
+  // Try named range first
+  if (tag.sourceType === 'NAMED_RANGE' && tag.tagName) {
+    for (let si = 0; si < sheetCount; si++) {
+      const sheet = wb.getSheet(si)
+      const nr = sheet.getCustomName(tag.tagName)
+      if (nr) {
+        const row = nr.getRow()
+        const col = nr.getColumn()
+        sheet.setValue(row, col, value)
+        return true
+      }
+    }
+    // Also try workbook-level custom name
+    const wbName = wb.getCustomName(tag.tagName)
+    if (wbName) {
+      const sheetIdx = tag.sheetIndex ?? 0
+      if (sheetIdx >= 0 && sheetIdx < sheetCount) {
+        const sheet = wb.getSheet(sheetIdx)
+        const row = wbName.getRow()
+        const col = wbName.getColumn()
+        sheet.setValue(row, col, value)
+        return true
+      }
+    }
+  }
+
+  // Fall back to cell tag scan: iterate cells on the target sheet (or all sheets)
+  const startSheet = tag.sheetIndex ?? 0
+  const endSheet = tag.sheetIndex != null ? tag.sheetIndex + 1 : sheetCount
+  for (let si = startSheet; si < endSheet && si < sheetCount; si++) {
+    const sheet = wb.getSheet(si)
+    const rowCount = sheet.getRowCount()
+    const colCount = sheet.getColumnCount()
+    for (let r = 0; r < rowCount; r++) {
+      for (let c = 0; c < colCount; c++) {
+        const cellTag = sheet.getTag(r, c)
+        if (cellTag === tag.tagName) {
+          sheet.setValue(r, c, value)
+          return true
+        }
+      }
+    }
+  }
+
+  return false
 }
 
 function releaseLockIfOwned() {

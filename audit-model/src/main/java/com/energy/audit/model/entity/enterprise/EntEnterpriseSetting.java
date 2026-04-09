@@ -11,6 +11,7 @@ import java.time.LocalDate;
 /**
  * Enterprise detailed setting entity — matches ent_enterprise_setting production schema.
  * One row per enterprise (unique on enterprise_id).
+ * Fields align with the "1.企业概况" spreadsheet template.
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -22,78 +23,131 @@ public class EntEnterpriseSetting extends BaseEntity {
     /** FK -> ent_enterprise.id (unique) */
     private Long enterpriseId;
 
-    /** Enterprise address */
-    private String enterpriseAddress;
+    // ── 地区 / 行业 ──
 
-    /** Unit address */
-    private String unitAddress;
+    /** 所属地区 */
+    private String region;
 
-    /** Postal code */
-    private String postalCode;
+    /** 所属领域 */
+    private String industryField;
 
-    /** Fax */
-    private String fax;
-
-    /** Legal representative name */
-    private String legalRepresentative;
-
-    /** Legal representative phone */
-    private String legalPhone;
-
-    /** Enterprise contact person */
-    private String enterpriseContact;
-
-    /** Enterprise contact mobile */
-    private String enterpriseMobile;
-
-    /** Enterprise contact email */
-    private String enterpriseEmail;
-
-    /** Report compiler contact person */
-    private String compilerContact;
-
-    /** Report compiler name */
-    private String compilerName;
-
-    /** Report compiler mobile */
-    private String compilerMobile;
-
-    /** Report compiler email */
-    private String compilerEmail;
-
-    /** Energy management certificate (0=no, 1=yes) */
-    private Integer energyCert;
-
-    /** Certificate authority */
-    private String certAuthority;
-
-    /** Certificate pass date */
-    private LocalDate certPassDate;
-
-    /** Registered capital (万元) */
-    private BigDecimal registeredCapital;
-
-    /** Registration date */
-    private LocalDate registeredDate;
-
-    /** Industry category */
-    private String industryCategory;
-
-    /** Industry code */
-    private String industryCode;
-
-    /** Industry name */
+    /** 行业分类名称 */
     private String industryName;
 
-    /** Superior department */
-    private String superiorDepartment;
-
-    /** Unit nature (国有/私营/合资/外资/…) */
+    /** 单位类型 */
     private String unitNature;
 
-    /** Energy enterprise type */
+    // ── 工商注册 ──
+
+    /** 单位注册日期 */
+    private LocalDate registeredDate;
+
+    /** 注册资本（万元） */
+    private BigDecimal registeredCapital;
+
+    // ── 法人 / 联系人 ──
+
+    /** 法定代表人姓名 */
+    private String legalRepresentative;
+
+    /** 法定代表人联系电话（区号） */
+    private String legalPhone;
+
+    /** 是否央企 (0=否, 1=是) */
+    private Integer isCentralEnterprise;
+
+    /** 所属集团名称 */
+    private String groupName;
+
+    // ── 地址 / 通讯 ──
+
+    /** 单位地址 */
+    private String enterpriseAddress;
+
+    /** 单位地址(备用) */
+    private String unitAddress;
+
+    /** 邮政编码 */
+    private String postalCode;
+
+    /** 行政区划代码 */
+    private String adminDivisionCode;
+
+    /** 电子邮箱 */
+    private String enterpriseEmail;
+
+    /** 传真（区号） */
+    private String fax;
+
+    // ── 能源管理 ──
+
+    /** 能源管理机构名称 */
+    private String energyMgmtOrg;
+
+    /** 单位主管节能领导姓名 */
+    private String energyLeaderName;
+
+    /** 节能领导联系电话 */
+    private String energyLeaderPhone;
+
+    /** 能源管理负责人姓名 */
+    private String energyManagerName;
+
+    /** 能源管理负责人手机 */
+    private String energyManagerMobile;
+
+    /** 能源管理师证号 */
+    private String energyManagerCert;
+
+    /** 能源部门负责人电话 */
+    private String energyDeptLeaderPhone;
+
+    // ── 能源认证 ──
+
+    /** 是否通过能源管理体系认证 (0=否, 1=是) */
+    private Integer energyCert;
+
+    /** 认证通过日期 */
+    private LocalDate certPassDate;
+
+    /** 认证机构 */
+    private String certAuthority;
+
+    /** 是否建设能源管理中心 (0=否, 1=是) */
+    private Integer hasEnergyCenter;
+
+    // ── 其他 ──
+
+    /** 企业联系人 */
+    private String enterpriseContact;
+
+    /** 企业联系手机 */
+    private String enterpriseMobile;
+
+    /** 编制人联系人 */
+    private String compilerContact;
+
+    /** 编制人姓名 */
+    private String compilerName;
+
+    /** 编制人手机 */
+    private String compilerMobile;
+
+    /** 编制人邮箱 */
+    private String compilerEmail;
+
+    /** 行业大类 */
+    private String industryCategory;
+
+    /** 行业代码 */
+    private String industryCode;
+
+    /** 上级主管部门 */
+    private String superiorDepartment;
+
+    /** 用能企业类型 */
     private String energyEnterpriseType;
 
-    /** Remark */
+    /** 备注 */
     private String remark;
 }

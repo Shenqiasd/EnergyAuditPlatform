@@ -14,10 +14,20 @@ export interface GCSpreadWorkbookOptions {
   allowUserEditFormula: boolean
 }
 
+export interface GCSpreadNameInfo {
+  getRow(): number
+  getColumn(): number
+}
+
 export interface GCSpreadSheet {
   options: {
     isProtected: boolean
   }
+  getRowCount(): number
+  getColumnCount(): number
+  getTag(row: number, col: number): unknown
+  setValue(row: number, col: number, value: unknown): void
+  getCustomName(name: string): GCSpreadNameInfo | null
 }
 
 export interface GCSpreadWorkbook {
@@ -25,7 +35,10 @@ export interface GCSpreadWorkbook {
   toJSON(): object
   getSheetCount(): number
   getSheet(index: number): GCSpreadSheet
+  getCustomName(name: string): GCSpreadNameInfo | null
   commandManager(): GCSpreadCommandManager
+  suspendPaint(): void
+  resumePaint(): void
   destroy(): void
   options: GCSpreadWorkbookOptions
 }
