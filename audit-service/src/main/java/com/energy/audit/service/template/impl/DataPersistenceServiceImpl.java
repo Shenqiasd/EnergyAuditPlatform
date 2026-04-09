@@ -199,6 +199,15 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
                     wrapper.setPropertyValue(property, LocalDate.parse((String) value));
                 } else if (propType != null && BigDecimal.class.isAssignableFrom(propType) && value instanceof Number) {
                     wrapper.setPropertyValue(property, new BigDecimal(value.toString()));
+                } else if (propType != null && Integer.class.isAssignableFrom(propType) && value instanceof String) {
+                    // Convert Chinese yes/no strings to Integer 1/0 for DICT-type fields
+                    Integer intVal = convertChineseBoolToInt((String) value);
+                    if (intVal != null) {
+                        wrapper.setPropertyValue(property, intVal);
+                    } else {
+                        // Try parsing as a plain integer string (e.g. "1", "0")
+                        wrapper.setPropertyValue(property, Integer.valueOf((String) value));
+                    }
                 } else {
                     wrapper.setPropertyValue(property, value);
                 }
@@ -214,5 +223,17 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
             log.info("Synced {} fields from SpreadJS to ent_enterprise_setting for enterprise {}",
                     updated, enterpriseId);
         }
+    }
+
+    /**
+     * Convert Chinese boolean strings (是/否) to Integer (1/0).
+     * Returns null if the string is not a recognized boolean value.
+     */
+    private static Integer convertChineseBoolToInt(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        if ("是".equals(trimmed)) return 1;
+        if ("否".equals(trimmed)) return 0;
+        return null;
     }
 }
