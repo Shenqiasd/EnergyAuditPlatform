@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.StringJoiner;
 
 @Tag(name = "ExtractedData", description = "抽取数据总览")
@@ -30,8 +31,11 @@ public class ExtractedDataController {
 
     private static final Map<String, String> TABLE_LABELS = new LinkedHashMap<>();
 
+    /** Tables that do NOT have the audit_year column (use enterprise_id + deleted only). */
+    private static final Set<String> TABLES_WITHOUT_AUDIT_YEAR = Set.of("ent_enterprise_setting");
+
     static {
-        TABLE_LABELS.put("de_company_overview",         "企业概况");
+        TABLE_LABELS.put("ent_enterprise_setting",      "企业概况");
         TABLE_LABELS.put("de_tech_indicator",           "技术经济指标");
         TABLE_LABELS.put("de_energy_consumption",       "能源消费量");
         TABLE_LABELS.put("de_energy_conversion",        "能源加工转换");
@@ -111,8 +115,9 @@ public class ExtractedDataController {
 
         StringJoiner unionJoiner = new StringJoiner(" UNION ALL ");
         for (String tableName : TABLE_LABELS.keySet()) {
+            String tableYearFilter = TABLES_WITHOUT_AUDIT_YEAR.contains(tableName) ? "" : yearFilter;
             unionJoiner.add("SELECT '" + tableName + "' AS table_name, COUNT(*) AS cnt FROM "
-                    + tableName + " WHERE enterprise_id = :enterpriseId AND deleted = 0" + yearFilter);
+                    + tableName + " WHERE enterprise_id = :enterpriseId AND deleted = 0" + tableYearFilter);
         }
 
         List<Map<String, Object>> countRows = jdbcTemplate.queryForList(unionJoiner.toString(), params);
@@ -143,7 +148,8 @@ public class ExtractedDataController {
             @RequestParam(defaultValue = "20") Integer pageSize) {
         Long resolvedId = resolveEnterpriseId(enterpriseId);
 
-        if (!BusinessTablePersister.ALLOWED_TABLES.contains(tableName)) {
+        if (!BusinessTablePersister.ALLOWED_TABLES.contains(tableName)
+                && !TABLE_LABELS.containsKey(tableName)) {
             throw new BusinessException(400, "不允许查询的表: " + tableName);
         }
         if (pageNum < 1) pageNum = 1;
@@ -154,7 +160,7 @@ public class ExtractedDataController {
         params.addValue("enterpriseId", resolvedId);
 
         StringBuilder where = new StringBuilder(" WHERE enterprise_id = :enterpriseId AND deleted = 0");
-        if (auditYear != null) {
+        if (auditYear != null && !TABLES_WITHOUT_AUDIT_YEAR.contains(tableName)) {
             where.append(" AND audit_year = :auditYear");
             params.addValue("auditYear", auditYear);
         }
