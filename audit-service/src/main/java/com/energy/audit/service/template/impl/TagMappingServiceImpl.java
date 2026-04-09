@@ -89,13 +89,14 @@ public class TagMappingServiceImpl implements TagMappingService {
             String tagName = entry.getKey();
             DiscoveredField df = entry.getValue();
 
-            // Skip tags that were explicitly deleted by the user via the mapping panel
-            if (deletedTagNames.contains(tagName)) {
-                log.debug("syncFromTemplateJson: skipping re-creation of user-deleted tag '{}' for versionId={}", tagName, versionId);
-                continue;
-            }
-
             if (!existingByTag.containsKey(tagName)) {
+                // Only skip re-creation when the tag was explicitly deleted by the user
+                // AND has no active row (avoids false-positive skips for tags that have
+                // both a stale deleted=1 row and a current deleted=0 row after replaceAll)
+                if (deletedTagNames.contains(tagName)) {
+                    log.debug("syncFromTemplateJson: skipping re-creation of user-deleted tag '{}' for versionId={}", tagName, versionId);
+                    continue;
+                }
                 TplTagMapping m = new TplTagMapping();
                 m.setTemplateVersionId(versionId);
                 m.setTagName(tagName);
