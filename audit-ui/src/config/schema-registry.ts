@@ -98,6 +98,23 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
     },
   },
 
+  de_tech_reform_history: {
+    label: '十四五已实施节能技改项目',
+    fields: {
+      seq_no:              { label: '序号', type: 'NUMBER' },
+      project_name:        { label: '项目名称', type: 'STRING' },
+      project_type:        { label: '项目类型', type: 'STRING' },
+      main_content:        { label: '主要内容', type: 'TEXT' },
+      investment:          { label: '投资(万元)', type: 'DECIMAL' },
+      designed_saving:     { label: '年节能量(吨标煤)', type: 'DECIMAL' },
+      payback_period:      { label: '投资回收期(年)', type: 'DECIMAL' },
+      completion_date:     { label: '完成时间', type: 'STRING' },
+      actual_saving:       { label: '实际节能量(吨标煤)', type: 'DECIMAL' },
+      is_contract_energy:  { label: '是否合同能源管理模式', type: 'STRING' },
+      remark:              { label: '备注', type: 'STRING' },
+    },
+  },
+
   de_meter_instrument: {
     label: '能源计量器具汇总',
     fields: {

@@ -774,6 +774,7 @@ CREATE TABLE IF NOT EXISTS de_tech_reform_history (
     audit_year             INT           NOT NULL,
     seq_no                 INT,
     project_name           VARCHAR(256),
+    project_type           VARCHAR(64),
     main_content           CLOB,
     investment             DECIMAL(18,4),
     designed_saving        DECIMAL(18,4),
