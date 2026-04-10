@@ -205,6 +205,7 @@ const COL_LABELS: Record<string, string> = {
   qualified_value: '合格值或限额',
   judgement: '判别',
   test_date: '测试日期',
+  area: '所属区域',
   source_unit: '来源单元',
   target_unit: '目标单元',
   energy_product: '能源产品',
