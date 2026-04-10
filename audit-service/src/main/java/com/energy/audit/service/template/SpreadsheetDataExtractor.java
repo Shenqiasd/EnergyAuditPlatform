@@ -363,20 +363,34 @@ public class SpreadsheetDataExtractor {
         }
 
         // 3. Scan rows, detect sections, extract data
+        // Section headers are identified by column A containing "序号" (all device-type
+        // header rows in the Audit06 template use "序号" in column A).
+        // Data rows have a numeric sequence number in column A.
+        // Template reference data rows (e.g. "数据源") are skipped by checking column A.
         String currentEquipmentType = null;
 
         for (int r = startRow; r < startRow + rowCount; r++) {
             JsonNode rowNode = dataTable.path(String.valueOf(r));
             if (rowNode.isMissingNode()) continue;
 
+            // Read column A value to distinguish header rows from data rows
+            Object colAVal = extractCellValue(rowNode.path(String.valueOf(startCol)));
+            String colAStr = colAVal != null ? colAVal.toString().trim() : "";
+
+            // Stop processing at template reference data marker
+            if (colAStr.contains("数据源") || colAStr.contains("以下为")) {
+                log.debug("Hit data-source marker at row {}: '{}', stopping extraction", r, colAStr);
+                break;
+            }
+
             // Read the section header column value
             int absHeaderCol = startCol + sectionHeaderCol;
             Object headerVal = extractCellValue(rowNode.path(String.valueOf(absHeaderCol)));
             String headerStr = headerVal != null ? headerVal.toString().trim() : "";
 
-            // Check if this row is a section header
+            // Section header rows are identified by "序号" in column A + keyword match in header col
             boolean isSectionHeader = false;
-            if (!headerStr.isEmpty()) {
+            if ("序号".equals(colAStr) && !headerStr.isEmpty()) {
                 for (Map.Entry<String, String> entry : sectionHeaders.entrySet()) {
                     if (headerStr.contains(entry.getKey())) {
                         currentEquipmentType = entry.getValue();
