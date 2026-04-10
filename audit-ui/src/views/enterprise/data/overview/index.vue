@@ -193,6 +193,12 @@ const COL_LABELS: Record<string, string> = {
   l3_required_count: '主要用能设备-需要配置数',
   l3_actual_count: '主要用能设备-实际配置数',
   l3_actual_rate: '主要用能设备-配备率%',
+  // de_equipment_summary (主要用能设备汇总)
+  device_name: '设备名称',
+  category: '分类',
+  device_overview: '设备概况',
+  obsolete_update_info: '淘汰更新情况',
+  energy_efficiency_level: '设备对标情况(能效级别)',
   source_unit: '来源单元',
   target_unit: '目标单元',
   energy_product: '能源产品',
