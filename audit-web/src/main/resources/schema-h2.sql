@@ -866,18 +866,26 @@ CREATE TABLE IF NOT EXISTS de_meter_instrument (
     PRIMARY KEY (id)
 );
 
--- 37. de_meter_config_rate (Sheet 10 — metering instrument configuration rate)
+-- 37. de_meter_config_rate (Sheet 10 — metering instrument configuration rate, wide-table design)
 CREATE TABLE IF NOT EXISTS de_meter_config_rate (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
     submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     energy_type            VARCHAR(64),
-    config_level           VARCHAR(32),
-    standard_rate          DECIMAL(8,4),
-    required_count         INT,
-    actual_count           INT,
-    actual_rate            DECIMAL(8,4),
+    energy_sub_type        VARCHAR(64),
+    l1_standard_rate       DECIMAL(8,4),
+    l1_required_count      INT,
+    l1_actual_count        INT,
+    l1_actual_rate         DECIMAL(8,4),
+    l2_standard_rate       DECIMAL(8,4),
+    l2_required_count      INT,
+    l2_actual_count        INT,
+    l2_actual_rate         DECIMAL(8,4),
+    l3_standard_rate       DECIMAL(8,4),
+    l3_required_count      INT,
+    l3_actual_count        INT,
+    l3_actual_rate         DECIMAL(8,4),
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by              VARCHAR(64),
