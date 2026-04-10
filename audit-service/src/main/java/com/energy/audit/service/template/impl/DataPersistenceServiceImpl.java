@@ -97,7 +97,8 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
             boolean hasBusinessTable = targetTable != null && !targetTable.isBlank()
                     && businessTablePersister.isBusinessTable(targetTable);
 
-            if ("TABLE".equalsIgnoreCase(mappingType) && value instanceof List) {
+            if (("TABLE".equalsIgnoreCase(mappingType) || "EQUIPMENT_BENCHMARK".equalsIgnoreCase(mappingType))
+                    && value instanceof List) {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> rows = (List<Map<String, Object>>) value;
 

@@ -194,7 +194,13 @@ public class BusinessTablePersister {
 
         if (dbRows.isEmpty()) return;
 
-        Set<String> allColumns = dbRows.get(0).keySet();
+        // Collect the UNION of all column keys across all rows so that
+        // heterogeneous rows (e.g. different device types in EQUIPMENT_BENCHMARK)
+        // produce a single INSERT statement with NULL for missing columns.
+        Set<String> allColumns = new java.util.LinkedHashSet<>();
+        for (Map<String, Object> dbRow : dbRows) {
+            allColumns.addAll(dbRow.keySet());
+        }
         StringBuilder sql = new StringBuilder("INSERT INTO ").append(tableName).append(" (");
         List<String> colList = new ArrayList<>(allColumns);
         sql.append(String.join(", ", colList));
