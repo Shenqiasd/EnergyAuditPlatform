@@ -257,7 +257,7 @@ async function applyDictValidators(
       }
 
       // Parse cellRange to get row bounds (e.g. "A4:AJ200")
-      const rangeMatch = tag.cellRange.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
+      const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
       if (!rangeMatch) continue
       const startRow = parseInt(rangeMatch[2]) - 1 // 0-based
       const endRow = parseInt(rangeMatch[4]) - 1
@@ -317,7 +317,8 @@ async function applyDictValidators(
         const items: DictData[] = dictMap[target.dictType] ?? []
         if (items.length === 0) continue
 
-        const listStr = items.map((d) => d.dictLabel).join(',')
+        // Sanitize labels: replace commas with fullwidth comma to avoid SpreadJS separator conflict
+        const listStr = items.map((d) => d.dictLabel.replace(/,/g, '\uff0c')).join(',')
         const dv = DataValidation.createListValidator(listStr)
         dv.inCellDropdown(true)
         dv.showInputMessage(true)
