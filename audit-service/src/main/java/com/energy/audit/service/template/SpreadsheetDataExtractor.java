@@ -336,6 +336,14 @@ public class SpreadsheetDataExtractor {
     private Object extractCellValue(JsonNode cellNode) {
         JsonNode val = cellNode.path("value");
         if (val.isMissingNode() || val.isNull()) return null;
+        // SpreadJS stores formula errors (e.g. #DIV/0!) as objects like {"_calcError":"#DIV/0!","_code":7}
+        if (val.isObject()) {
+            if (val.has("_calcError")) {
+                log.debug("Skipping calc error cell: {}", val.path("_calcError").asText());
+                return null;
+            }
+            return null;
+        }
         if (val.isNumber()) return val.numberValue();
         return val.asText(null);
     }
