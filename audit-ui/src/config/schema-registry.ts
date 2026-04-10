@@ -126,6 +126,7 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
       factory_no:       { label: '出厂编号', type: 'STRING' },
       multiplier:       { label: '倍率', type: 'DECIMAL' },
       grade:            { label: '级别', type: 'STRING' },
+      energy_attribute: { label: '能源属性', type: 'STRING' },
       measure_range:    { label: '测量范围', type: 'STRING' },
       department:       { label: '所属部门', type: 'STRING' },
       accuracy_grade:   { label: '准确度等级', type: 'STRING' },
