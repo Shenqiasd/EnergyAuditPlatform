@@ -353,6 +353,7 @@ CREATE TABLE IF NOT EXISTS tpl_tag_mapping (
     column_mappings     CLOB,
     header_row          INT,
     remark              VARCHAR(256),
+    deletion_source     VARCHAR(10),
     create_by           VARCHAR(64),
     create_time         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by           VARCHAR(64),
