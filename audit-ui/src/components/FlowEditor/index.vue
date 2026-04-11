@@ -272,15 +272,20 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
     })
   })
 
-  // 9. Fit to view
+  // 9. Fit to view — double nextTick to ensure X6 has rendered cells in DOM
   nextTick(() => {
-    graph?.zoomToFit({ padding: 40, maxScale: 1.2 })
-    graph?.centerContent()
+    nextTick(() => {
+      graph?.zoomToFit({ padding: 40, maxScale: 1.2 })
+      graph?.centerContent()
+    })
   })
 }
 
 onMounted(() => {
-  initGraph()
+  // Delay init to ensure container is fully laid out and has proper dimensions
+  nextTick(() => {
+    initGraph()
+  })
 })
 
 onBeforeUnmount(() => {
@@ -289,10 +294,10 @@ onBeforeUnmount(() => {
 
 function initGraph() {
   if (!graphRef.value) return
+  // Use autoResize so X6 tracks container dimension changes automatically
   graph = new Graph({
     container: graphRef.value,
-    width: graphRef.value.offsetWidth,
-    height: graphRef.value.offsetHeight || 600,
+    autoResize: true,
     background: { color: '#fafafa' },
     grid: { visible: true, type: 'dot', args: { color: '#ddd', thickness: 1 } },
     panning: { enabled: true },
