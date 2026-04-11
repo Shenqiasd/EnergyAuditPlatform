@@ -272,9 +272,10 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
     })
   })
 
-  // 9. Fit to view — double nextTick to ensure X6 has rendered cells in DOM
+  // 9. Fit to view — use requestAnimationFrame to ensure ResizeObserver has fired
+  //    and the graph has correct internal dimensions before fitting
   nextTick(() => {
-    nextTick(() => {
+    requestAnimationFrame(() => {
       graph?.zoomToFit({ padding: 40, maxScale: 1.2 })
       graph?.centerContent()
     })
@@ -294,9 +295,13 @@ onBeforeUnmount(() => {
 
 function initGraph() {
   if (!graphRef.value) return
-  // Use autoResize so X6 tracks container dimension changes automatically
+  // Provide explicit fallback dimensions so X6 has a non-zero viewport even if
+  // the container is transitioning from display:none. autoResize will take over
+  // once ResizeObserver fires.
   graph = new Graph({
     container: graphRef.value,
+    width: graphRef.value.offsetWidth || 800,
+    height: graphRef.value.offsetHeight || 600,
     autoResize: true,
     background: { color: '#fafafa' },
     grid: { visible: true, type: 'dot', args: { color: '#ddd', thickness: 1 } },
