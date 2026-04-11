@@ -55,8 +55,10 @@ public class SubmissionServiceImpl implements SubmissionService {
         TplSubmission existing = submissionMapper.selectByEnterpriseTemplateYear(
                 enterpriseId, templateId, auditYear);
         if (existing != null) {
+            // Allow overwriting even after submission — enterprise may need to correct data
             if (existing.getStatus() == 1) {
-                throw new BusinessException("该年度数据已提交，无法继续编辑草稿");
+                existing.setStatus(0);          // reset to draft so it can be re-submitted
+                existing.setSubmitTime(null);
             }
             existing.setSubmissionJson(submissionJson);
             existing.setTemplateVersion(templateVersion);
@@ -85,9 +87,7 @@ public class SubmissionServiceImpl implements SubmissionService {
         if (sub == null) {
             throw new BusinessException("填报记录不存在或无权操作: " + submissionId);
         }
-        if (sub.getStatus() == 1) {
-            throw new BusinessException("该填报已提交，请勿重复提交");
-        }
+        // Allow re-submission: re-extract with latest tag mappings and overwrite previous results
 
         // M-3: validate that the supplied templateVersionId belongs to the same template
         // as this submission — prevents data extraction with a mismatched mapping set
