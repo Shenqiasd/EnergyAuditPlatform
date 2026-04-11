@@ -82,4 +82,14 @@
         WHERE id = #{id} AND deleted = 0
     </update>
 
+    <update id="resetToDraft">
+        UPDATE tpl_submission
+        SET status = 0,
+            submit_time = NULL,
+            extracted_data = NULL,
+            update_by = #{updateBy},
+            update_time = NOW()
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
 </mapper>

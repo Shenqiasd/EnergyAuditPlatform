@@ -57,7 +57,10 @@ public class SubmissionServiceImpl implements SubmissionService {
         if (existing != null) {
             // Allow overwriting even after submission — enterprise may need to correct data
             if (existing.getStatus() == 1) {
-                existing.setStatus(0);          // reset to draft so it can be re-submitted
+                // Use dedicated SQL to NULL out submit_time & extracted_data
+                // (generic updateById skips null fields due to MyBatis <if> guards)
+                submissionMapper.resetToDraft(existing.getId(), operator);
+                existing.setStatus(0);
                 existing.setSubmitTime(null);
             }
             existing.setSubmissionJson(submissionJson);

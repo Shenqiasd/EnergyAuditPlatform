@@ -27,4 +27,7 @@ public interface TplSubmissionMapper {
     List<TplSubmission> selectListByEnterprise(@Param("enterpriseId") Long enterpriseId);
 
     int updateById(TplSubmission submission);
+
+    /** Reset a submitted record back to draft: status=0, submit_time=NULL, extracted_data=NULL */
+    int resetToDraft(@Param("id") Long id, @Param("updateBy") String updateBy);
 }
