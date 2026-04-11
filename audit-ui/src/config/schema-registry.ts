@@ -464,6 +464,20 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
     },
   },
 
+  de_energy_flow: {
+    label: '能源流程图二维表',
+    fields: {
+      flow_stage:        { label: '流程阶段', type: 'STRING' },
+      seq_no:            { label: '序号', type: 'NUMBER' },
+      source_unit:       { label: '源单元', type: 'STRING' },
+      target_unit:       { label: '目的单元', type: 'STRING' },
+      energy_product:    { label: '能源/产品', type: 'STRING' },
+      physical_quantity: { label: '实物量', type: 'DECIMAL' },
+      standard_quantity: { label: '折标量/价格（万元）', type: 'DECIMAL' },
+      remark:            { label: '备注', type: 'STRING' },
+    },
+  },
+
   de_energy_flow_diagram: {
     label: '能源流程图',
     fields: {
