@@ -36,9 +36,10 @@ public class ChartDataController {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-            "SELECT energy_name AS name, standard_coal_equiv AS value, energy_category AS category " +
-            "FROM de_energy_balance WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
-            "ORDER BY standard_coal_equiv DESC",
+            "SELECT energy_name AS name, standard_coal AS value " +
+            "FROM de_energy_consumption WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
+            "AND standard_coal IS NOT NULL AND standard_coal > 0 " +
+            "ORDER BY standard_coal DESC",
             enterpriseId, auditYear
         );
         return R.ok(rows);
@@ -70,10 +71,12 @@ public class ChartDataController {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-            "SELECT product_name AS productName, year_type AS yearType, " +
-            "output, energy_consumption AS energyConsumption, unit_consumption AS unitConsumption " +
-            "FROM de_product_unit_consumption WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
-            "ORDER BY product_name, year_type",
+            "SELECT p.name AS productName, d.year_type AS yearType, " +
+            "d.output, d.energy_consumption AS energyConsumption, d.unit_consumption AS unitConsumption " +
+            "FROM de_product_unit_consumption d " +
+            "JOIN bs_product p ON p.id = d.product_id " +
+            "WHERE d.enterprise_id = ? AND d.audit_year = ? AND d.deleted = 0 " +
+            "ORDER BY p.name, d.year_type",
             enterpriseId, auditYear
         );
         return R.ok(rows);
@@ -85,10 +88,11 @@ public class ChartDataController {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-            "SELECT emission_type AS emissionType, energy_name AS energyName, " +
-            "annual_emission AS annualEmission, main_equipment AS mainEquipment " +
-            "FROM de_ghg_emission WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
-            "ORDER BY emission_type, annual_emission DESC",
+            "SELECT d.emission_category AS emissionType, d.source_name AS energyName, " +
+            "d.co2_emission AS annualEmission " +
+            "FROM de_carbon_emission d " +
+            "WHERE d.enterprise_id = ? AND d.audit_year = ? AND d.deleted = 0 " +
+            "ORDER BY d.emission_category, d.co2_emission DESC",
             enterpriseId, auditYear
         );
         return R.ok(rows);
@@ -118,8 +122,8 @@ public class ChartDataController {
 
         try {
             Map<String, Object> ghgTotal = jdbcTemplate.queryForMap(
-                "SELECT SUM(annual_emission) AS totalEmission, COUNT(*) AS sourceCount " +
-                "FROM de_ghg_emission WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0",
+                "SELECT SUM(co2_emission) AS totalEmission, COUNT(*) AS sourceCount " +
+                "FROM de_carbon_emission WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0",
                 enterpriseId, auditYear
             );
             result.put("ghgTotal", ghgTotal);
