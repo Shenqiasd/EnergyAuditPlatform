@@ -312,14 +312,17 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
   },
 
   de_energy_balance: {
-    label: '能源平衡表',
+    label: '能源购入消费存储',
     fields: {
       energy_id:           { label: '关联能源', type: 'NUMBER' },
+      energy_name:         { label: '能源名称', type: 'STRING' },
+      measurement_unit:    { label: '计量单位', type: 'STRING' },
       opening_stock:       { label: '期初库存量', type: 'DECIMAL' },
       purchase_amount:     { label: '购入量', type: 'DECIMAL' },
-      consumption_amount:  { label: '消耗量', type: 'DECIMAL' },
+      consumption_amount:  { label: '消费量', type: 'DECIMAL' },
       transfer_out_amount: { label: '转出量', type: 'DECIMAL' },
       closing_stock:       { label: '期末库存量', type: 'DECIMAL' },
+      gain_loss:           { label: '盈亏量', type: 'DECIMAL' },
       energy_unit_price:   { label: '能源单价(元)', type: 'DECIMAL' },
     },
   },

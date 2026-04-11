@@ -206,6 +206,9 @@ const COL_LABELS: Record<string, string> = {
   judgement: '判别',
   test_date: '测试日期',
   area: '所属区域',
+  // de_energy_balance (能源购入消费存储)
+  gain_loss: '盈亏量',
+  energy_unit_price: '能源单价(元)',
   // de_obsolete_equipment (淘汰产品设备装置目录)
   start_use_date: '开始使用日期',
   plan_complete_date: '计划完成日期',
@@ -253,6 +256,7 @@ const NUMERIC_COLS = new Set([
   'l2_standard_rate', 'l2_required_count', 'l2_actual_count', 'l2_actual_rate',
   'l3_standard_rate', 'l3_required_count', 'l3_actual_count', 'l3_actual_rate',
   'qualified_value', 'decline_rate', 'indicator_value', 'actual_value',
+  'gain_loss', 'energy_unit_price',
   'energy_control_total', 'product_unit_consumption', 'saving_amount',
   'energy_equiv', 'energy_equal', 'unit_energy_equiv', 'unit_energy_equal',
 ])
