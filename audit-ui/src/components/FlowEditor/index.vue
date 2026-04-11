@@ -4,11 +4,12 @@ import { Graph } from '@antv/x6'
 import type { EnergyFlowItem } from '@/api/energyFlow'
 
 /**
- * FlowEditor — AntV X6 Energy Flow Diagram (Auto-generation, Read-only)
+ * FlowEditor — Engineering-report style energy flow diagram (Read-only)
  *
- * Renders a hierarchical node-edge diagram from de_energy_flow + de_energy_balance data.
- * Layout: left-to-right layers (Purchase -> Conversion -> Terminal).
- * Nodes are NOT draggable. Supports pan & zoom for large datasets.
+ * Three-section layout matching standard energy audit report format:
+ *   Section 1: 购入产出环节 — circle nodes for energy sources + data columns
+ *   Section 2: 加工转换环节 — conversion equipment boxes
+ *   Section 3: 分配/最终消费环节 — terminal consumption boxes with arrows
  */
 
 export interface EnergyBalanceItem {
@@ -24,6 +25,8 @@ export interface EnergyBalanceItem {
   closingStock?: number
   measurement_unit?: string
   measurementUnit?: string
+  standard_amount?: number
+  standardAmount?: number
 }
 
 const props = defineProps<{
@@ -34,7 +37,6 @@ const props = defineProps<{
 const graphRef = ref<HTMLDivElement>()
 let graph: Graph | null = null
 
-// Color palette for energy products
 const ENERGY_COLORS: Record<string, string> = {
   '电力': '#E74C3C',
   '天然气': '#3498DB',
@@ -48,6 +50,10 @@ const ENERGY_COLORS: Record<string, string> = {
   '热力': '#E91E63',
   '太阳能': '#FF9800',
   '综合能源': '#607D8B',
+  '外购热力': '#E91E63',
+  '压缩空气': '#1ABC9C',
+  '水': '#2980B9',
+  '外购水': '#2980B9',
 }
 const DEFAULT_COLORS = ['#1ABC9C', '#8E44AD', '#34495E', '#16A085', '#C0392B', '#2980B9', '#F1C40F']
 
@@ -79,12 +85,41 @@ interface FlowEdge {
   standardQuantity: number
 }
 
+// Layout constants matching reference engineering diagram
+const MARGIN_LEFT = 30
+const CIRCLE_CX = MARGIN_LEFT + 80
+const CIRCLE_R = 34
+const DATA_COL1_X = CIRCLE_CX + CIRCLE_R + 16
+const DATA_COL2_X = DATA_COL1_X + 72
+const DIVIDER_1_X = DATA_COL2_X + 72
+const EQUIP_X = DIVIDER_1_X + 30
+const EQUIP_W = 66
+const EQUIP_H = 28
+const DIVIDER_2_X = EQUIP_X + EQUIP_W + 50
+const TERMINAL_X = DIVIDER_2_X + 20
+const TERMINAL_W = 66
+const TERMINAL_H = 34
+const RESULT_X = TERMINAL_X + TERMINAL_W + 30
+const RESULT_ARROW_X = RESULT_X + 80
+const TOTAL_WIDTH = RESULT_ARROW_X + 90
+
+const HEADER_Y = 20
+const SUB_HEADER_Y = 38
+const CONTENT_TOP = 58
+const ROW_HEIGHT = 90
+
+function formatNum(n: number | undefined | null): string {
+  if (n === undefined || n === null || n === 0) return ''
+  if (Math.abs(n) >= 10000) return n.toFixed(0)
+  if (Math.abs(n) >= 100) return n.toFixed(1)
+  return n.toFixed(2)
+}
+
 function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]) {
   if (!graph) return
   graph.clearCells()
   if (!flowData.length) return
 
-  // 1. Collect unique node names
   const sourceNames = new Set<string>()
   const targetNames = new Set<string>()
   flowData.forEach(f => {
@@ -92,7 +127,6 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
     targetNames.add(f.targetUnit)
   })
 
-  // 2. Classify node layers
   const nodeMap = new Map<string, FlowNode>()
   for (const name of sourceNames) {
     if (!targetNames.has(name)) {
@@ -107,7 +141,6 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
     }
   }
 
-  // 3. Track energy products per node
   flowData.forEach(f => {
     const sn = nodeMap.get(f.sourceUnit)
     if (sn && !sn.energyProducts.includes(f.energyProduct)) {
@@ -115,7 +148,6 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
     }
   })
 
-  // 4. Attach balance info to purchase nodes
   const balanceMap = new Map<string, EnergyBalanceItem>()
   balanceData.forEach(b => {
     const name = b.energy_name || b.energyName || ''
@@ -136,7 +168,6 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
     }
   }
 
-  // 5. Build edges
   const edges: FlowEdge[] = flowData.map(f => ({
     source: f.sourceUnit,
     target: f.targetUnit,
@@ -145,145 +176,283 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
     standardQuantity: f.standardQuantity,
   }))
 
-  // 6. Layout calculation
   const layers: Record<NodeLayer, FlowNode[]> = { PURCHASE: [], CONVERSION: [], TERMINAL: [] }
   for (const node of nodeMap.values()) {
     layers[node.layer].push(node)
   }
 
-  const LAYER_X: Record<NodeLayer, number> = { PURCHASE: 80, CONVERSION: 420, TERMINAL: 760 }
-  const NODE_HEIGHT_PURCHASE = 80
-  const NODE_HEIGHT_RECT = 50
-  const NODE_VERTICAL_GAP = 40
-  const PADDING_TOP = 60
+  const maxRows = Math.max(layers.PURCHASE.length, layers.CONVERSION.length, layers.TERMINAL.length, 1)
+  const totalHeight = CONTENT_TOP + maxRows * ROW_HEIGHT + 30
 
-  const nodePositions = new Map<string, { x: number; y: number; width: number; height: number }>()
-  for (const layer of ['PURCHASE', 'CONVERSION', 'TERMINAL'] as NodeLayer[]) {
-    const nodes = layers[layer]
-    const x = LAYER_X[layer]
-    const nodeHeight = layer === 'PURCHASE' ? NODE_HEIGHT_PURCHASE : NODE_HEIGHT_RECT
-    const totalHeight = nodes.length * nodeHeight + (nodes.length - 1) * NODE_VERTICAL_GAP
-    let startY = PADDING_TOP + Math.max(0, (400 - totalHeight) / 2)
-    nodes.forEach((node, i) => {
-      const width = layer === 'PURCHASE' ? 160 : 140
-      const y = startY + i * (nodeHeight + NODE_VERTICAL_GAP)
-      nodePositions.set(node.id, { x, y, width, height: nodeHeight })
-    })
-  }
+  // Section headers
+  drawLine('top-line', MARGIN_LEFT, HEADER_Y - 6, TOTAL_WIDTH - 20, HEADER_Y - 6, '#999', 1, false)
 
-  // 7. Add nodes to graph
-  for (const node of nodeMap.values()) {
-    const pos = nodePositions.get(node.id)
-    if (!pos) continue
+  const sec1Mid = (MARGIN_LEFT + DIVIDER_1_X) / 2
+  const sec2Mid = (DIVIDER_1_X + DIVIDER_2_X) / 2
+  const sec3Mid = (DIVIDER_2_X + TOTAL_WIDTH - 20) / 2
+  addLabel('hdr-1', sec1Mid - 40, HEADER_Y - 4, '购入产出环节', 11, '#333', 'bold', 90)
+  addLabel('hdr-2', sec2Mid - 35, HEADER_Y - 4, '加工转换环节', 11, '#333', 'bold', 80)
+  addLabel('hdr-3', sec3Mid - 45, HEADER_Y - 4, '分配/最终消费环节', 11, '#333', 'bold', 110)
 
-    if (node.layer === 'PURCHASE') {
-      const color = node.energyProducts.length > 0 ? getEnergyColor(node.energyProducts[0]) : '#409EFF'
-      const balance = node.balanceInfo
-      const purchaseAmt = balance ? (balance.purchase_amount ?? balance.purchaseAmount ?? '') : ''
-      const unit = balance ? (balance.measurement_unit ?? balance.measurementUnit ?? '') : ''
-      const stockInfo = balance
-        ? `库存: ${balance.opening_stock ?? balance.openingStock ?? 0} -> ${balance.closing_stock ?? balance.closingStock ?? 0}`
-        : ''
-      let labelText = node.label
-      if (purchaseAmt) labelText += `\n购入: ${purchaseAmt}${unit ? ' ' + unit : ''}`
-      if (stockInfo) labelText += `\n${stockInfo}`
+  drawLine('hdr-arrow-1', MARGIN_LEFT, HEADER_Y, MARGIN_LEFT + 16, HEADER_Y, '#666', 1, true)
+  drawLine('hdr-arrow-2', DIVIDER_1_X - 2, HEADER_Y, DIVIDER_1_X + 14, HEADER_Y, '#666', 1, true)
+  drawLine('hdr-arrow-3', DIVIDER_2_X - 2, HEADER_Y, DIVIDER_2_X + 14, HEADER_Y, '#666', 1, true)
 
-      graph.addNode({
-        id: node.id,
-        x: pos.x,
-        y: pos.y,
-        width: pos.width,
-        height: pos.height,
-        shape: 'rect',
-        attrs: {
-          body: { fill: color, stroke: color, rx: 20, ry: 20, opacity: 0.9 },
-          label: {
-            text: labelText,
-            fill: '#fff',
-            fontSize: 11,
-            fontWeight: 'bold',
-            textWrap: { width: pos.width - 20, ellipsis: true },
-          },
-        },
-        ports: {
-          items: [{ id: `${node.id}-out`, group: 'right' }],
-          groups: { right: { position: 'right', attrs: { circle: { r: 0 } } } },
-        },
-      })
-    } else {
-      const borderColor = node.layer === 'CONVERSION' ? '#409EFF' : '#67C23A'
-      graph.addNode({
-        id: node.id,
-        x: pos.x,
-        y: pos.y,
-        width: pos.width,
-        height: pos.height,
-        shape: 'rect',
-        attrs: {
-          body: { fill: '#fff', stroke: borderColor, strokeWidth: 2, rx: 6, ry: 6 },
-          label: { text: node.label, fill: '#333', fontSize: 12, fontWeight: 'bold' },
-        },
-        ports: {
-          items: [
-            { id: `${node.id}-in`, group: 'left' },
-            { id: `${node.id}-out`, group: 'right' },
-          ],
-          groups: {
-            left: { position: 'left', attrs: { circle: { r: 0 } } },
-            right: { position: 'right', attrs: { circle: { r: 0 } } },
-          },
-        },
-      })
-    }
-  }
+  addLabel('sub-equiv', DATA_COL1_X, SUB_HEADER_Y, '等价值', 9, '#666', 'normal', 50)
+  addLabel('sub-calor', DATA_COL2_X, SUB_HEADER_Y, '当量值', 9, '#666', 'normal', 50)
 
-  // 8. Add edges
-  edges.forEach((edge, i) => {
-    const color = getEnergyColor(edge.energyProduct)
-    const physStr = edge.physicalQuantity ? `${edge.physicalQuantity}` : ''
-    const stdStr = edge.standardQuantity ? `${edge.standardQuantity}tce` : ''
-    let labelText = ''
-    if (physStr && stdStr) labelText = `${physStr} (${stdStr})`
-    else if (physStr) labelText = physStr
-    else if (stdStr) labelText = stdStr
+  drawLine('sep-line', MARGIN_LEFT, CONTENT_TOP - 4, TOTAL_WIDTH - 20, CONTENT_TOP - 4, '#CCC', 0.5, false)
 
-    graph!.addEdge({
-      id: `edge-${i}`,
-      source: { cell: edge.source, port: `${edge.source}-out` },
-      target: { cell: edge.target, port: `${edge.target}-in` },
+  drawLine('vdiv-1', DIVIDER_1_X, HEADER_Y - 6, DIVIDER_1_X, totalHeight, '#AAA', 1, false)
+  drawLine('vdiv-2', DIVIDER_2_X, HEADER_Y - 6, DIVIDER_2_X, totalHeight, '#AAA', 1, false)
+
+  // PURCHASE nodes: circles + data columns
+  layers.PURCHASE.forEach((node, idx) => {
+    const cy = CONTENT_TOP + idx * ROW_HEIGHT + ROW_HEIGHT / 2
+    const color = node.energyProducts.length > 0 ? getEnergyColor(node.energyProducts[0]) : '#409EFF'
+    const balance = node.balanceInfo
+    const unit = balance ? (balance.measurement_unit ?? balance.measurementUnit ?? '') : ''
+    const purchaseAmt = balance ? (balance.purchase_amount ?? balance.purchaseAmount ?? 0) : 0
+    const stdAmt = balance ? (balance.standard_amount ?? balance.standardAmount ?? 0) : 0
+    const consumeAmt = balance ? (balance.consumption_amount ?? balance.consumptionAmount ?? 0) : 0
+
+    graph!.addNode({
+      id: node.id,
+      x: CIRCLE_CX - CIRCLE_R,
+      y: cy - CIRCLE_R,
+      width: CIRCLE_R * 2,
+      height: CIRCLE_R * 2,
+      shape: 'ellipse',
       attrs: {
-        line: {
-          stroke: color,
-          strokeWidth: 2,
-          targetMarker: { name: 'block', width: 8, height: 6 },
+        body: { fill: '#FFFFFF', stroke: color, strokeWidth: 2 },
+        label: {
+          text: node.label + '\n' + (purchaseAmt ? formatNum(purchaseAmt) + unit : ''),
+          fill: color,
+          fontSize: 9,
+          fontWeight: 'bold',
+          lineHeight: 13,
         },
       },
-      labels: labelText
-        ? [{
-            attrs: {
-              label: { text: labelText, fill: color, fontSize: 10, fontWeight: 'bold' },
-              rect: { fill: '#fff', stroke: 'none', rx: 3, ry: 3 },
-            },
-            position: { distance: 0.5, offset: { x: 0, y: -10 } },
-          }]
-        : [],
-      router: { name: 'manhattan', args: { padding: 20 } },
-      connector: { name: 'rounded', args: { radius: 8 } },
+      ports: {
+        items: [{ id: node.id + '-out', group: 'right' }],
+        groups: {
+          right: {
+            position: { name: 'absolute', args: { x: CIRCLE_R * 2, y: CIRCLE_R } },
+            attrs: { circle: { r: 0 } },
+          },
+        },
+      },
+    })
+
+    const purchaseStr = formatNum(purchaseAmt)
+    const purchaseStdStr = stdAmt ? '(' + formatNum(stdAmt) + ')' : ''
+    if (purchaseStr) {
+      addLabel('d1v-' + node.id, DATA_COL1_X, cy - 8, purchaseStr, 9, '#333', 'normal', 60)
+      if (purchaseStdStr) {
+        addLabel('d1s-' + node.id, DATA_COL1_X, cy + 5, purchaseStdStr, 8, '#888', 'normal', 60)
+      }
+    }
+
+    const consumeStr = formatNum(consumeAmt || purchaseAmt)
+    const consumeStdStr = stdAmt ? '(' + formatNum(stdAmt) + ')' : ''
+    if (consumeStr) {
+      addLabel('d2v-' + node.id, DATA_COL2_X, cy - 8, consumeStr, 9, '#333', 'normal', 60)
+      if (consumeStdStr) {
+        addLabel('d2s-' + node.id, DATA_COL2_X, cy + 5, consumeStdStr, 8, '#888', 'normal', 60)
+      }
+    }
+
+    drawLine('hconn-' + node.id, CIRCLE_CX + CIRCLE_R, cy, DATA_COL1_X - 4, cy, color, 1, false)
+  })
+
+  // CONVERSION nodes: equipment boxes
+  const convOffsetY = layers.CONVERSION.length < layers.PURCHASE.length
+    ? ((layers.PURCHASE.length - layers.CONVERSION.length) * ROW_HEIGHT) / 2
+    : 0
+  layers.CONVERSION.forEach((node, idx) => {
+    const cy = CONTENT_TOP + idx * ROW_HEIGHT + ROW_HEIGHT / 2 + convOffsetY
+
+    graph!.addNode({
+      id: node.id,
+      x: EQUIP_X,
+      y: cy - EQUIP_H / 2,
+      width: EQUIP_W,
+      height: EQUIP_H,
+      shape: 'rect',
+      attrs: {
+        body: { fill: '#FFFFFF', stroke: '#333', strokeWidth: 1.5 },
+        label: { text: node.label, fill: '#333', fontSize: 9, fontWeight: 'bold' },
+      },
+      ports: {
+        items: [
+          { id: node.id + '-in', group: 'left' },
+          { id: node.id + '-out', group: 'right' },
+        ],
+        groups: {
+          left: { position: 'left', attrs: { circle: { r: 0 } } },
+          right: { position: 'right', attrs: { circle: { r: 0 } } },
+        },
+      },
     })
   })
 
-  // 9. Fit to view — use requestAnimationFrame to ensure ResizeObserver has fired
-  //    and the graph has correct internal dimensions before fitting
+  // TERMINAL nodes: consumption boxes + right arrows
+  const termOffsetY = layers.TERMINAL.length < layers.PURCHASE.length
+    ? ((layers.PURCHASE.length - layers.TERMINAL.length) * ROW_HEIGHT) / 2
+    : 0
+  layers.TERMINAL.forEach((node, idx) => {
+    const cy = CONTENT_TOP + idx * ROW_HEIGHT + ROW_HEIGHT / 2 + termOffsetY
+
+    graph!.addNode({
+      id: node.id,
+      x: TERMINAL_X,
+      y: cy - TERMINAL_H / 2,
+      width: TERMINAL_W,
+      height: TERMINAL_H,
+      shape: 'rect',
+      attrs: {
+        body: { fill: '#FFFFFF', stroke: '#333', strokeWidth: 1.5 },
+        label: { text: node.label, fill: '#333', fontSize: 9, fontWeight: 'bold' },
+      },
+      ports: {
+        items: [
+          { id: node.id + '-in', group: 'left' },
+        ],
+        groups: {
+          left: { position: 'left', attrs: { circle: { r: 0 } } },
+        },
+      },
+    })
+
+    const terminalEdges = edges.filter(e => e.target === node.id)
+    const totalTce = terminalEdges.reduce((sum, e) => sum + (e.standardQuantity || 0), 0)
+
+    if (totalTce > 0) {
+      drawLine('tarrow-' + node.id, TERMINAL_X + TERMINAL_W + 2, cy, RESULT_X - 4, cy, '#333', 1, true)
+      addLabel('res-name-' + node.id, RESULT_X, cy - 10, node.label, 9, '#333', 'bold', 70)
+      addLabel('res-tce-' + node.id, RESULT_X, cy + 3, formatNum(totalTce) + 'tce', 8, '#666', 'normal', 70)
+      drawLine('farrow-' + node.id, RESULT_X + 64, cy, RESULT_ARROW_X, cy, '#333', 1, true)
+    }
+  })
+
+  // Flow edges (color-coded)
+  let edgeIdx = 0
+  const edgesBySource = new Map<string, FlowEdge[]>()
+  edges.forEach(e => {
+    if (!edgesBySource.has(e.source)) edgesBySource.set(e.source, [])
+    edgesBySource.get(e.source)!.push(e)
+  })
+
+  edgesBySource.forEach((srcEdges) => {
+    srcEdges.forEach((edge, i) => {
+      const color = getEnergyColor(edge.energyProduct)
+      const sourceNode = nodeMap.get(edge.source)
+      const targetNode = nodeMap.get(edge.target)
+      if (!sourceNode || !targetNode) return
+
+      const sourceLayerIdx = layers[sourceNode.layer].indexOf(sourceNode)
+      const targetLayerIdx = layers[targetNode.layer].indexOf(targetNode)
+      const sOffY = sourceNode.layer !== 'PURCHASE' ? convOffsetY : 0
+      const tOffY = targetNode.layer === 'TERMINAL' ? termOffsetY
+        : targetNode.layer === 'CONVERSION' ? convOffsetY : 0
+
+      const sourceCy = CONTENT_TOP + sourceLayerIdx * ROW_HEIGHT + ROW_HEIGHT / 2 + sOffY
+      const targetCy = CONTENT_TOP + targetLayerIdx * ROW_HEIGHT + ROW_HEIGHT / 2 + tOffY
+
+      const physStr = edge.physicalQuantity ? formatNum(edge.physicalQuantity) : ''
+      const stdStr = edge.standardQuantity ? '(' + formatNum(edge.standardQuantity) + 'tce)' : ''
+      let labelText = ''
+      if (physStr && stdStr) labelText = physStr + ' ' + stdStr
+      else if (physStr) labelText = physStr
+      else if (stdStr) labelText = stdStr
+
+      const parallelOffset = (i - (srcEdges.length - 1) / 2) * 5
+
+      graph!.addEdge({
+        id: 'edge-' + (edgeIdx++),
+        source: { cell: edge.source, port: edge.source + '-out' },
+        target: { cell: edge.target, port: edge.target + '-in' },
+        attrs: {
+          line: {
+            stroke: color,
+            strokeWidth: 1.5,
+            targetMarker: { name: 'block', width: 6, height: 4 },
+          },
+        },
+        labels: labelText
+          ? [{
+              attrs: {
+                label: { text: labelText, fill: color, fontSize: 8, fontWeight: 'bold' },
+                rect: { fill: '#fff', stroke: 'none', rx: 2, ry: 2, opacity: 0.9 },
+              },
+              position: { distance: 0.45, offset: { x: 0, y: -10 + parallelOffset } },
+            }]
+          : [],
+        router: {
+          name: 'er',
+          args: {
+            offset: sourceCy !== targetCy ? 24 + i * 10 : 0,
+            direction: 'H',
+          },
+        },
+        connector: { name: 'rounded', args: { radius: 4 } },
+      })
+    })
+  })
+
   nextTick(() => {
     requestAnimationFrame(() => {
-      graph?.zoomToFit({ padding: 40, maxScale: 1.2 })
+      graph?.zoomToFit({ padding: 30, maxScale: 1.2 })
       graph?.centerContent()
     })
   })
 }
 
+function addLabel(id: string, x: number, y: number, text: string, fontSize: number, fill: string, fontWeight: string, width: number) {
+  if (!graph) return
+  graph.addNode({
+    id,
+    x,
+    y: y - fontSize / 2,
+    width,
+    height: fontSize + 4,
+    shape: 'rect',
+    zIndex: 5,
+    attrs: {
+      body: { fill: 'transparent', stroke: 'none' },
+      label: {
+        text,
+        fill,
+        fontSize,
+        fontWeight,
+        textAnchor: 'start',
+        refX: 0,
+        refY: 0.5,
+        textVerticalAnchor: 'middle',
+      },
+    },
+  })
+}
+
+function drawLine(id: string, x1: number, y1: number, x2: number, y2: number, stroke: string, strokeWidth: number, hasArrow: boolean) {
+  if (!graph) return
+  graph.addEdge({
+    id,
+    source: { x: x1, y: y1 },
+    target: { x: x2, y: y2 },
+    zIndex: 1,
+    attrs: {
+      line: {
+        stroke,
+        strokeWidth,
+        targetMarker: hasArrow ? { name: 'block', width: 6, height: 4 } : null,
+        sourceMarker: null,
+      },
+    },
+  })
+}
+
 onMounted(() => {
-  // Delay init to ensure container is fully laid out and has proper dimensions
   nextTick(() => {
     initGraph()
   })
@@ -295,16 +464,13 @@ onBeforeUnmount(() => {
 
 function initGraph() {
   if (!graphRef.value) return
-  // Provide explicit fallback dimensions so X6 has a non-zero viewport even if
-  // the container is transitioning from display:none. autoResize will take over
-  // once ResizeObserver fires.
   graph = new Graph({
     container: graphRef.value,
-    width: graphRef.value.offsetWidth || 800,
-    height: graphRef.value.offsetHeight || 600,
+    width: graphRef.value.offsetWidth || 900,
+    height: graphRef.value.offsetHeight || 650,
     autoResize: true,
-    background: { color: '#fafafa' },
-    grid: { visible: true, type: 'dot', args: { color: '#ddd', thickness: 1 } },
+    background: { color: '#FFFFFF' },
+    grid: false,
     panning: { enabled: true },
     mousewheel: {
       enabled: true,
@@ -327,7 +493,7 @@ function destroyGraph() {
 }
 
 function fitView() {
-  graph?.zoomToFit({ padding: 40, maxScale: 1.2 })
+  graph?.zoomToFit({ padding: 30, maxScale: 1.2 })
   graph?.centerContent()
 }
 
@@ -376,7 +542,7 @@ defineExpose({ fitView, exportPng })
 
 .x6-graph-host {
   width: 100%;
-  height: 600px;
+  height: 650px;
   border: 1px solid #e4e7ed;
   border-radius: 4px;
   &.hidden { display: none; }
@@ -386,7 +552,7 @@ defineExpose({ fitView, exportPng })
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 600px;
+  height: 650px;
   border: 1px dashed #dcdfe6;
   border-radius: 4px;
   background: #fafafa;
