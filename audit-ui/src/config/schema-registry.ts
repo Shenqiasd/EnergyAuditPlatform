@@ -441,7 +441,7 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
   },
 
   de_five_year_target: {
-    label: '十四五期间节能目标',
+    label: '十五五期间节能目标',
     fields: {
       year_type:                 { label: '年份类型', type: 'DICT' },
       product_id:                { label: '关联产品', type: 'NUMBER' },
@@ -529,6 +529,80 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
       contact_email:   { label: '邮箱', type: 'STRING' },
       contact_phone:   { label: '电话', type: 'STRING' },
       remark:          { label: '备注', type: 'STRING' },
+    },
+  },
+
+  de_energy_consumption: {
+    label: '能源消费平衡综合表',
+    fields: {
+      energy_code:            { label: '能源编码', type: 'STRING' },
+      energy_name:            { label: '能源名称', type: 'STRING' },
+      measurement_unit:       { label: '计量单位', type: 'STRING' },
+      opening_stock:          { label: '期初库存量', type: 'DECIMAL' },
+      purchase_total:         { label: '购入总量', type: 'DECIMAL' },
+      purchase_from_province: { label: '省内购入', type: 'DECIMAL' },
+      purchase_amount:        { label: '购入金额', type: 'DECIMAL' },
+      industrial_consumption: { label: '工业消费', type: 'DECIMAL' },
+      material_consumption:   { label: '原料消费', type: 'DECIMAL' },
+      transport_consumption:  { label: '运输消费', type: 'DECIMAL' },
+      closing_stock:          { label: '期末库存量', type: 'DECIMAL' },
+      external_supply:        { label: '外供', type: 'DECIMAL' },
+      equiv_factor:           { label: '当量系数', type: 'DECIMAL' },
+      equal_factor:           { label: '等价系数', type: 'DECIMAL' },
+      standard_coal:          { label: '标准煤', type: 'DECIMAL' },
+    },
+  },
+
+  de_energy_conversion: {
+    label: '能源加工转换',
+    fields: {
+      energy_name:            { label: '能源名称', type: 'STRING' },
+      measurement_unit:       { label: '计量单位', type: 'STRING' },
+      industrial_consumption: { label: '工业消费量', type: 'DECIMAL' },
+      conversion_input_total: { label: '加工转换投入合计', type: 'DECIMAL' },
+      conv_power_gen:         { label: '发电', type: 'DECIMAL' },
+      conv_heating:           { label: '供热', type: 'DECIMAL' },
+      conv_coal_washing:      { label: '洗煤', type: 'DECIMAL' },
+      conv_coking:            { label: '炼焦', type: 'DECIMAL' },
+      conv_refining:          { label: '炼油', type: 'DECIMAL' },
+      conv_gas_making:        { label: '制气', type: 'DECIMAL' },
+      conv_lng:               { label: '液化天然气', type: 'DECIMAL' },
+      conv_coal_product:      { label: '煤制品', type: 'DECIMAL' },
+      conversion_output:      { label: '产出量', type: 'DECIMAL' },
+      conversion_output_std:  { label: '产出标准煤', type: 'DECIMAL' },
+      recovery_utilization:   { label: '回收利用', type: 'DECIMAL' },
+      equiv_factor:           { label: '当量系数', type: 'DECIMAL' },
+      equal_factor:           { label: '等价系数', type: 'DECIMAL' },
+    },
+  },
+
+  de_saving_project: {
+    label: '节能项目',
+    fields: {
+      project_type:       { label: '项目类型', type: 'STRING' },
+      project_name:       { label: '项目名称', type: 'STRING' },
+      impl_status:        { label: '实施状态', type: 'STRING' },
+      impl_date:          { label: '实施日期', type: 'STRING' },
+      investment:         { label: '投资(万元)', type: 'DECIMAL' },
+      saving_amount:      { label: '节能量(吨标煤)', type: 'DECIMAL' },
+      carbon_reduction:   { label: '碳减排量(吨CO2)', type: 'DECIMAL' },
+      is_contract_energy: { label: '是否合同能源管理模式', type: 'STRING' },
+      approval_dept:      { label: '审批部门', type: 'STRING' },
+      main_content:       { label: '主要内容', type: 'TEXT' },
+      remark:             { label: '备注', type: 'STRING' },
+    },
+  },
+
+  de_product_output: {
+    label: '产品产量',
+    fields: {
+      product_name:      { label: '产品名称', type: 'STRING' },
+      annual_capacity:   { label: '年产能', type: 'DECIMAL' },
+      capacity_unit:     { label: '产能单位', type: 'STRING' },
+      annual_output:     { label: '年产量', type: 'DECIMAL' },
+      output_unit:       { label: '产量单位', type: 'STRING' },
+      unit_consumption:  { label: '单位能耗', type: 'DECIMAL' },
+      consumption_unit:  { label: '消耗单位', type: 'STRING' },
     },
   },
 
