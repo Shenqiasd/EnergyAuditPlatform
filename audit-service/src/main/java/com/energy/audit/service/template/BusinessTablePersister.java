@@ -357,7 +357,17 @@ public class BusinessTablePersister {
         if (value instanceof Number) {
             return new BigDecimal(value.toString());
         }
-        return value.toString();
+        String str = value.toString();
+        // Coerce blank strings to null — MySQL rejects '' for numeric/integer columns
+        if (str.isBlank()) return null;
+        // Attempt numeric coercion for strings that look like numbers
+        // (SpreadJS often returns numeric values as strings)
+        try {
+            return new BigDecimal(str);
+        } catch (NumberFormatException ignored) {
+            // Not a number — return as-is
+        }
+        return str;
     }
 
     static String camelToSnake(String camel) {
