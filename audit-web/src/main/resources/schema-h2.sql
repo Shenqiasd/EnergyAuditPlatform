@@ -633,6 +633,7 @@ CREATE TABLE IF NOT EXISTS de_carbon_emission (
 -- 27b. de_ghg_emission (GHG emission by energy source for chart C5)
 CREATE TABLE IF NOT EXISTS de_ghg_emission (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
     enterprise_id          BIGINT        NOT NULL,
     audit_year             INT           NOT NULL,
     emission_type          VARCHAR(64)   NOT NULL,
@@ -1036,6 +1037,48 @@ CREATE TABLE IF NOT EXISTS de_tech_reform_suggestion (
     investment             DECIMAL(18,4),
     annual_saving          DECIMAL(18,4),
     payback_period         DECIMAL(8,2),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 47a. de_carbon_peak_info (Sheet 21 — carbon peak information)
+CREATE TABLE IF NOT EXISTS de_carbon_peak_info (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    peak_year              INT,
+    peak_emission          DECIMAL(18,4),
+    current_emission       DECIMAL(18,4),
+    reduction_target       DECIMAL(8,4),
+    reduction_measures     CLOB,
+    peak_status            VARCHAR(32),
+    verification_method    VARCHAR(128),
+    remark                 VARCHAR(512),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- 47b. de_equipment_energy (Sheet 36 — equipment energy consumption and efficiency)
+CREATE TABLE IF NOT EXISTS de_equipment_energy (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    location               VARCHAR(256),
+    device_type            VARCHAR(128),
+    indicator_name         VARCHAR(128),
+    indicator_value        DECIMAL(18,6),
+    measurement_unit       VARCHAR(32),
     remark                 VARCHAR(512),
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
