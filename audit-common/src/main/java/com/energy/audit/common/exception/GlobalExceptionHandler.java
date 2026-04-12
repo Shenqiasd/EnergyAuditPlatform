@@ -34,6 +34,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public R<Void> handleException(Exception e) {
         log.error("Unexpected exception: {}", e.getMessage(), e);
-        return R.fail("Internal server error");
+        // Include root-cause chain for diagnostics (no secrets in stack traces)
+        StringBuilder detail = new StringBuilder(e.getClass().getSimpleName());
+        if (e.getMessage() != null) detail.append(": ").append(e.getMessage());
+        Throwable cause = e.getCause();
+        while (cause != null) {
+            detail.append(" → ").append(cause.getClass().getSimpleName());
+            if (cause.getMessage() != null) detail.append(": ").append(cause.getMessage());
+            cause = cause.getCause();
+        }
+        return R.fail(500, detail.toString());
     }
 }
