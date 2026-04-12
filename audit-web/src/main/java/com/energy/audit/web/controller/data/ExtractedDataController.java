@@ -34,6 +34,11 @@ public class ExtractedDataController {
     /** Tables that do NOT have the audit_year column (use enterprise_id + deleted only). */
     private static final Set<String> TABLES_WITHOUT_AUDIT_YEAR = Set.of("ent_enterprise_setting");
 
+    /** Tables that may not exist yet — skip gracefully if SELECT fails. */
+    private static final Set<String> OPTIONAL_TABLES = Set.of(
+            "de_carbon_peak_info", "de_equipment_energy"
+    );
+
     static {
         TABLE_LABELS.put("ent_enterprise_setting",      "企业概况");
         TABLE_LABELS.put("de_tech_indicator",           "技术经济指标");
@@ -42,6 +47,9 @@ public class ExtractedDataController {
         TABLE_LABELS.put("de_product_unit_consumption", "产品单耗");
         TABLE_LABELS.put("de_equipment_detail",         "设备明细");
         TABLE_LABELS.put("de_carbon_emission",          "碳排放");
+        TABLE_LABELS.put("de_ghg_emission",              "温室气体排放");
+        TABLE_LABELS.put("de_carbon_peak_info",           "碳达峰信息");
+        TABLE_LABELS.put("de_equipment_energy",           "重点设备能耗和效率");
         TABLE_LABELS.put("de_energy_balance",           "能源平衡");
         TABLE_LABELS.put("de_energy_flow",              "能源流向");
         TABLE_LABELS.put("de_five_year_target",         "十四五目标");
@@ -117,13 +125,26 @@ public class ExtractedDataController {
         }
 
         StringJoiner unionJoiner = new StringJoiner(" UNION ALL ");
+        Set<String> skippedTables = new java.util.HashSet<>();
         for (String tableName : TABLE_LABELS.keySet()) {
+            if (OPTIONAL_TABLES.contains(tableName)) {
+                // Probe whether the table exists before including in UNION
+                try {
+                    jdbcTemplate.queryForList("SELECT 1 FROM " + tableName + " WHERE 1=0",
+                            new MapSqlParameterSource());
+                } catch (Exception e) {
+                    skippedTables.add(tableName);
+                    continue;
+                }
+            }
             String tableYearFilter = TABLES_WITHOUT_AUDIT_YEAR.contains(tableName) ? "" : yearFilter;
             unionJoiner.add("SELECT '" + tableName + "' AS table_name, COUNT(*) AS cnt FROM "
                     + tableName + " WHERE enterprise_id = :enterpriseId AND deleted = 0" + tableYearFilter);
         }
 
-        List<Map<String, Object>> countRows = jdbcTemplate.queryForList(unionJoiner.toString(), params);
+        List<Map<String, Object>> countRows = unionJoiner.length() == 0
+                ? List.of()
+                : jdbcTemplate.queryForList(unionJoiner.toString(), params);
 
         Map<String, Long> countMap = new LinkedHashMap<>();
         for (Map<String, Object> row : countRows) {

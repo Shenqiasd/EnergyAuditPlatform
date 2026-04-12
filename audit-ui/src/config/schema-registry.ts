@@ -342,22 +342,28 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
   de_product_energy_cost: {
     label: '企业产品能源成本',
     fields: {
-      product_id:      { label: '关联产品', type: 'NUMBER' },
-      energy_cost:     { label: '能源成本(万元)', type: 'DECIMAL' },
-      production_cost: { label: '生产成本(万元)', type: 'DECIMAL' },
-      remark:          { label: '备注', type: 'STRING' },
+      product_id:         { label: '关联产品', type: 'NUMBER' },
+      energy_cost:        { label: '能源成本(万元)', type: 'DECIMAL' },
+      production_cost:    { label: '生产成本(万元)', type: 'DECIMAL' },
+      cost_ratio:         { label: '能源成本占比(%)', type: 'DECIMAL' },
+      energy_total_ratio: { label: '能源费用占总能源费用比(%)', type: 'DECIMAL' },
+      remark:             { label: '备注', type: 'STRING' },
     },
   },
 
-  de_energy_saving_calc: {
+  de_saving_calculation: {
     label: '节能量计算',
     fields: {
-      year_type:      { label: '年份', type: 'DICT' },
-      energy_equiv:   { label: '综合能耗等价值(吨标煤)', type: 'DECIMAL' },
-      energy_equil:   { label: '综合能耗当量值(吨标煤)', type: 'DECIMAL' },
-      gross_output:   { label: '工业总产值(万元)', type: 'DECIMAL' },
-      product_output: { label: '产品产量', type: 'DECIMAL' },
-      product_unit:   { label: '产品单位', type: 'STRING' },
+      energy_equal_current:   { label: '综合能耗等价值-本期(吨标煤)', type: 'DECIMAL' },
+      energy_equiv_current:   { label: '综合能耗当量值-本期(吨标煤)', type: 'DECIMAL' },
+      gross_output_current:   { label: '工业总产值-本期(万元)', type: 'DECIMAL' },
+      product_output_current: { label: '产品产量-本期', type: 'DECIMAL' },
+      product_unit_current:   { label: '产品单位-本期', type: 'STRING' },
+      energy_equal_base:      { label: '综合能耗等价值-基期(吨标煤)', type: 'DECIMAL' },
+      energy_equiv_base:      { label: '综合能耗当量值-基期(吨标煤)', type: 'DECIMAL' },
+      gross_output_base:      { label: '工业总产值-基期(万元)', type: 'DECIMAL' },
+      product_output_base:    { label: '产品产量-基期', type: 'DECIMAL' },
+      product_unit_base:      { label: '产品单位-基期', type: 'STRING' },
     },
   },
 
@@ -398,20 +404,22 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
     },
   },
 
-  de_improvement_suggestion: {
+  de_management_suggestion: {
     label: '能源管理改进建议',
     fields: {
       project_name:  { label: '项目名称', type: 'STRING' },
+      main_content:  { label: '主要内容', type: 'TEXT' },
       investment:    { label: '投资(万元)', type: 'DECIMAL' },
       annual_saving: { label: '年节能量(吨标煤)', type: 'DECIMAL' },
       remark:        { label: '备注', type: 'STRING' },
     },
   },
 
-  de_tech_reform: {
+  de_tech_reform_suggestion: {
     label: '节能技术改造建议汇总',
     fields: {
       project_name:   { label: '项目名称', type: 'STRING' },
+      main_content:   { label: '主要内容', type: 'TEXT' },
       investment:     { label: '投资(万元)', type: 'DECIMAL' },
       annual_saving:  { label: '年节能量(吨标煤)', type: 'DECIMAL' },
       payback_period: { label: '投资回收期(年)', type: 'DECIMAL' },
@@ -521,6 +529,36 @@ export const SCHEMA_REGISTRY: Record<string, TableSchema> = {
       contact_email:   { label: '邮箱', type: 'STRING' },
       contact_phone:   { label: '电话', type: 'STRING' },
       remark:          { label: '备注', type: 'STRING' },
+    },
+  },
+
+  de_carbon_emission: {
+    label: '碳排放明细',
+    fields: {
+      emission_category:       { label: '排放分类', type: 'STRING' },
+      source_name:             { label: '排放源名称', type: 'STRING' },
+      measurement_unit:        { label: '计量单位', type: 'STRING' },
+      emission_factor:         { label: '排放因子', type: 'DECIMAL' },
+      activity_data:           { label: '活动数据', type: 'DECIMAL' },
+      co2_emission:            { label: 'CO2排放量(tCO2)', type: 'DECIMAL' },
+      low_heat_value:          { label: '低位发热量', type: 'DECIMAL' },
+      carbon_content:          { label: '含碳量', type: 'DECIMAL' },
+      oxidation_rate:          { label: '碳氧化率', type: 'DECIMAL' },
+      remark:                  { label: '备注', type: 'STRING' },
+    },
+  },
+
+  de_carbon_peak_info: {
+    label: '碳达峰信息',
+    fields: {
+      peak_year:            { label: '达峰年份', type: 'NUMBER' },
+      peak_emission:        { label: '峰值排放量(tCO2)', type: 'DECIMAL' },
+      current_emission:     { label: '当前排放量(tCO2)', type: 'DECIMAL' },
+      reduction_target:     { label: '减排目标(%)', type: 'DECIMAL' },
+      reduction_measures:   { label: '减排措施', type: 'TEXT' },
+      peak_status:          { label: '达峰状态', type: 'STRING' },
+      verification_method:  { label: '核查方法', type: 'STRING' },
+      remark:               { label: '备注', type: 'STRING' },
     },
   },
 
