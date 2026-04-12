@@ -653,6 +653,26 @@ CREATE TABLE IF NOT EXISTS de_ghg_emission (
     PRIMARY KEY (id)
 );
 
+-- 27a. de_energy_ghg_source (Sheet 36 — energy data and GHG emission sources)
+CREATE TABLE IF NOT EXISTS de_energy_ghg_source (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    submission_id          BIGINT        NOT NULL DEFAULT 0,
+    enterprise_id          BIGINT        NOT NULL,
+    audit_year             INT           NOT NULL,
+    energy_id              BIGINT,
+    measurement_unit       VARCHAR(32),
+    start_time             VARCHAR(32),
+    end_time               VARCHAR(32),
+    period_consumption     DECIMAL(18,4),
+    closing_stock          DECIMAL(18,4),
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
 -- 28. de_energy_balance (Sheet 11/31 energy consumption balance matrix)
 CREATE TABLE IF NOT EXISTS de_energy_balance (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,

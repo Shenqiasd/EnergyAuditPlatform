@@ -36,7 +36,7 @@ public class ExtractedDataController {
 
     /** Tables that may not exist yet — skip gracefully if SELECT fails. */
     private static final Set<String> OPTIONAL_TABLES = Set.of(
-            "de_carbon_peak_info", "de_equipment_energy"
+            "de_carbon_peak_info", "de_equipment_energy", "de_energy_ghg_source"
     );
 
     static {
@@ -70,6 +70,7 @@ public class ExtractedDataController {
         TABLE_LABELS.put("de_tech_reform_suggestion",   "技改建议");
         TABLE_LABELS.put("de_rectification",            "整改措施");
         TABLE_LABELS.put("de_report_text",              "报告文本");
+        TABLE_LABELS.put("de_energy_ghg_source",        "能源数据与温室气体排放源");
     }
 
     private final NamedParameterJdbcTemplate jdbcTemplate;

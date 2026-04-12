@@ -244,6 +244,89 @@ const COL_LABELS: Record<string, string> = {
   output_unit: '产量单位',
   unit_consumption: '单位能耗',
   consumption_unit: '消耗单位',
+  // de_saving_calculation (节能量计算)
+  energy_equal_current: '综合能耗等价值-本期(吨标煤)',
+  energy_equiv_current: '综合能耗当量值-本期(吨标煤)',
+  gross_output_current: '工业总产值-本期(万元)',
+  product_output_current: '产品产量-本期',
+  product_unit_current: '产品单位-本期',
+  energy_equal_base: '综合能耗等价值-基期(吨标煤)',
+  energy_equiv_base: '综合能耗当量值-基期(吨标煤)',
+  gross_output_base: '工业总产值-基期(万元)',
+  product_output_base: '产品产量-基期',
+  product_unit_base: '产品单位-基期',
+  // de_ghg_emission (温室气体排放)
+  emission_type: '排放类型',
+  main_equipment: '主要用能设备/生产部门',
+  annual_emission: '年度排放量(tCO2)',
+  total_emission: '排放量(自动计算)',
+  // de_management_policy (管理制度)
+  policy_name: '制度名称',
+  supervise_dept: '主管部门',
+  publish_date: '颁布日期',
+  valid_period: '有效期',
+  // de_management_suggestion (管理建议)
+  annual_saving: '年节能量(吨标煤)',
+  // de_rectification (整改措施)
+  detail_content: '整改具体内容',
+  rectify_date: '整改日期',
+  responsible_person: '责任人',
+  estimated_cost: '整改预计费用(万元)',
+  economic_benefit: '经济效益(万元)',
+  // de_saving_potential (节能潜力)
+  saving_potential: '节能潜力(吨标煤/年)',
+  calculation_desc: '节能潜力计算说明',
+  calc_description: '节能潜力计算说明',
+  // de_five_year_target (十五五节能目标)
+  year_type: '年份类型',
+  energy_equiv: '综合能耗当量值(吨标煤)',
+  energy_equal: '综合能耗等价值(吨标煤)',
+  unit_energy_equiv: '产值综合能耗当量值',
+  unit_energy_equal: '产值综合能耗等价值',
+  target_indicator: '单耗指标值',
+  actual_indicator: '单耗实际值',
+  annual_target: '目标值(按年度)',
+  // de_energy_ghg_source (能源数据与温室气体排放源)
+  energy_id: '关联能源',
+  start_time: '起始时间',
+  end_time: '结束时间',
+  period_consumption: '期间消耗',
+  // de_carbon_emission (碳排放) — emission_category/source_name/co2_emission 已在上方定义
+  low_heat_value: '低位发热量',
+  carbon_content: '含碳量',
+  oxidation_rate: '碳氧化率',
+  // de_carbon_peak_info (碳达峰信息)
+  peak_year: '达峰年份',
+  peak_emission: '峰值排放量(tCO2)',
+  current_emission: '当前排放量(tCO2)',
+  reduction_target: '减排目标(%)',
+  reduction_measures: '减排措施',
+  peak_status: '达峰状态',
+  verification_method: '核查方法',
+  // de_report_text (报告文本)
+  section_code: '章节编号',
+  section_name: '章节名称',
+  content: '内容',
+  // de_product_unit_consumption (单位产品能耗)
+  product_id: '关联产品',
+  output: '产量',
+  energy_consumption: '能源消耗量(吨标煤)',
+  product_name: '产品名称',
+  // de_equipment_benchmark (重点用能设备能效对标 - 主要列)
+  device_purpose: '设备用途',
+  unit_count: '台数',
+  start_date: '启用日期',
+  is_obsolete: '是否为淘汰设备',
+  factory_mgmt_no: '工厂管理编号',
+  manufacture_date: '出厂日期',
+  energy_grade: '能效等级(设备侧)',
+  // de_equipment_energy (重点设备能耗和效率)
+  location: '位置',
+  device_type: '设备类型',
+  // 通用补充
+  status: '状态',
+  energy_category: '能源类别',
+  standard_coal_equiv: '折标煤(吨)',
 }
 
 const NUMERIC_COLS = new Set([
@@ -281,6 +364,18 @@ const NUMERIC_COLS = new Set([
   'cost_ratio', 'energy_total_ratio', 'energy_cost',
   'consumption_amount', 'transfer_out_amount',
   'carbon_reduction', 'annual_capacity', 'annual_output', 'unit_consumption',
+  // P2 新增 DECIMAL 列
+  'energy_equal_current', 'energy_equiv_current', 'gross_output_current',
+  'product_output_current', 'energy_equal_base', 'energy_equiv_base',
+  'gross_output_base', 'product_output_base',
+  'annual_emission', 'total_emission',
+  'estimated_cost', 'economic_benefit',
+  'saving_potential', 'period_consumption',
+  'target_indicator', 'actual_indicator', 'annual_target',
+  'low_heat_value', 'carbon_content', 'oxidation_rate',
+  'peak_emission', 'current_emission', 'reduction_target',
+  'output', 'energy_consumption',
+  'unit_count',
 ])
 
 function isNumericCol(col: string): boolean {

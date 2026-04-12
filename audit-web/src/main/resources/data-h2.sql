@@ -155,15 +155,15 @@ INSERT INTO de_product_unit_consumption (enterprise_id, audit_year, product_id, 
 VALUES (1, 2024, 2, '产品B', '上年度', '吨', 7500.0, 5100.0, 0.6800, 'system', 'system');
 
 INSERT INTO de_ghg_emission (enterprise_id, audit_year, emission_type, energy_name, main_equipment, activity_data, annual_emission, create_by, update_by)
-VALUES (1, 2024, '直接排放', '原煤', '锅炉', 9500.0, 18240.0, 'system', 'system');
+VALUES (1, 2024, 'DIRECT_COMBUSTION', '原煤', '锅炉', 9500.0, 18240.0, 'system', 'system');
 INSERT INTO de_ghg_emission (enterprise_id, audit_year, emission_type, energy_name, main_equipment, activity_data, annual_emission, create_by, update_by)
-VALUES (1, 2024, '直接排放', '天然气', '锅炉', 195.0, 4380.0, 'system', 'system');
+VALUES (1, 2024, 'DIRECT_COMBUSTION', '天然气', '锅炉', 195.0, 4380.0, 'system', 'system');
 INSERT INTO de_ghg_emission (enterprise_id, audit_year, emission_type, energy_name, main_equipment, activity_data, annual_emission, create_by, update_by)
-VALUES (1, 2024, '直接排放', '柴油', '运输车辆', 48.0, 151.0, 'system', 'system');
+VALUES (1, 2024, 'DIRECT_COMBUSTION', '柴油', '运输车辆', 48.0, 151.0, 'system', 'system');
 INSERT INTO de_ghg_emission (enterprise_id, audit_year, emission_type, energy_name, main_equipment, activity_data, annual_emission, create_by, update_by)
-VALUES (1, 2024, '间接排放', '电力', '全厂', 4800.0, 27360.0, 'system', 'system');
+VALUES (1, 2024, 'INDIRECT_ELECTRICITY', '电力', '全厂', 4800.0, 27360.0, 'system', 'system');
 INSERT INTO de_ghg_emission (enterprise_id, audit_year, emission_type, energy_name, main_equipment, activity_data, annual_emission, create_by, update_by)
-VALUES (1, 2024, '间接排放', '蒸汽', '全厂', 14200.0, 1207.0, 'system', 'system');
+VALUES (1, 2024, 'INDIRECT_HEAT', '蒸汽', '全厂', 14200.0, 1207.0, 'system', 'system');
 
 INSERT INTO de_energy_flow (enterprise_id, audit_year, flow_stage, seq_no, source_unit, target_unit, energy_product, physical_quantity, standard_quantity, create_by, update_by)
 VALUES (1, 2024, 'purchased', 1, '电力公司', '变电站', '电力', 50000.0000, 6145.0000, 'system', 'system');
