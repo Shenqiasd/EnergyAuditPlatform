@@ -174,6 +174,31 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
     const name = b.energy_name || b.energyName || ''
     if (name) balanceMap.set(name, b)
   })
+
+  // Fallback: derive balance data from purchase-stage flow records when
+  // de_energy_balance has no data (e.g. Audit11.1 not yet submitted).
+  // Aggregate physicalQuantity → purchase_amount, standardQuantity → standard_amount
+  const flowBalanceMap = new Map<string, EnergyBalanceItem>()
+  if (balanceMap.size === 0) {
+    flowData.forEach(f => {
+      if (f.flowStage !== 'purchased') return
+      const key = f.sourceUnit
+      const existing = flowBalanceMap.get(key)
+      if (existing) {
+        existing.purchase_amount = (existing.purchase_amount ?? 0) + (f.physicalQuantity ?? 0)
+        existing.standard_amount = (existing.standard_amount ?? 0) + (f.standardQuantity ?? 0)
+        existing.consumption_amount = existing.purchase_amount
+      } else {
+        flowBalanceMap.set(key, {
+          energy_name: key,
+          purchase_amount: f.physicalQuantity ?? 0,
+          standard_amount: f.standardQuantity ?? 0,
+          consumption_amount: f.physicalQuantity ?? 0,
+        })
+      }
+    })
+  }
+
   for (const node of nodeMap.values()) {
     if (node.layer === 'PURCHASE') {
       if (balanceMap.has(node.label)) {
@@ -185,6 +210,10 @@ function buildGraph(flowData: EnergyFlowItem[], balanceData: EnergyBalanceItem[]
             break
           }
         }
+      }
+      // Fallback to flow-derived balance when no balance record matched
+      if (!node.balanceInfo && flowBalanceMap.has(node.label)) {
+        node.balanceInfo = flowBalanceMap.get(node.label)
       }
     }
   }
