@@ -206,9 +206,15 @@ const COL_LABELS: Record<string, string> = {
   judgement: '判别',
   test_date: '测试日期',
   area: '所属区域',
+  // de_product_energy_cost (企业产品能源成本)
+  cost_ratio: '能源成本占比(%)',
+  energy_total_ratio: '能源费用占总能源费用比(%)',
+  energy_cost: '能源成本(万元)',
   // de_energy_balance (能源购入消费存储)
   gain_loss: '盈亏量',
   energy_unit_price: '能源单价(元)',
+  consumption_amount: '消费量',
+  transfer_out_amount: '转出量',
   // de_obsolete_equipment (淘汰产品设备装置目录)
   start_use_date: '开始使用日期',
   plan_complete_date: '计划完成日期',
@@ -226,6 +232,18 @@ const COL_LABELS: Record<string, string> = {
   energy_control_total: '能源管控总量',
   product_unit_consumption: '单耗',
   saving_amount: '节约量',
+  // de_saving_project (节能项目)
+  impl_status: '实施状态',
+  impl_date: '实施日期',
+  carbon_reduction: '碳减排量(吨CO2)',
+  approval_dept: '审批部门',
+  // de_product_output (产品产量)
+  annual_capacity: '年产能',
+  capacity_unit: '产能单位',
+  annual_output: '年产量',
+  output_unit: '产量单位',
+  unit_consumption: '单位能耗',
+  consumption_unit: '消耗单位',
 }
 
 const NUMERIC_COLS = new Set([
@@ -259,6 +277,10 @@ const NUMERIC_COLS = new Set([
   'gain_loss', 'energy_unit_price',
   'energy_control_total', 'product_unit_consumption', 'saving_amount',
   'energy_equiv', 'energy_equal', 'unit_energy_equiv', 'unit_energy_equal',
+  // P1 新增 DECIMAL 列
+  'cost_ratio', 'energy_total_ratio', 'energy_cost',
+  'consumption_amount', 'transfer_out_amount',
+  'carbon_reduction', 'annual_capacity', 'annual_output', 'unit_consumption',
 ])
 
 function isNumericCol(col: string): boolean {

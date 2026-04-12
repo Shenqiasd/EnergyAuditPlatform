@@ -52,7 +52,7 @@ public class ExtractedDataController {
         TABLE_LABELS.put("de_equipment_energy",           "重点设备能耗和效率");
         TABLE_LABELS.put("de_energy_balance",           "能源平衡");
         TABLE_LABELS.put("de_energy_flow",              "能源流向");
-        TABLE_LABELS.put("de_five_year_target",         "十四五目标");
+        TABLE_LABELS.put("de_five_year_target",         "十五五期间节能目标");
         TABLE_LABELS.put("de_tech_reform_history",      "节能改造历史");
         TABLE_LABELS.put("de_saving_project",           "节能项目");
         TABLE_LABELS.put("de_product_output",           "产品产量");
