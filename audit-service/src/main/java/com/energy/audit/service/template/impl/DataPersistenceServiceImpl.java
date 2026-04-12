@@ -102,10 +102,12 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> rows = (List<Map<String, Object>>) value;
 
+                boolean tablePersisted = false;
                 if (hasBusinessTable) {
-                    businessTablePersister.persistTableRows(
+                    tablePersisted = businessTablePersister.persistTableRows(
                             targetTable, submissionId, enterpriseId, auditYear, rows, operator);
-                } else {
+                }
+                if (!tablePersisted) {
                     for (int i = 0; i < rows.size(); i++) {
                         Map<String, Object> row = rows.get(i);
                         DeSubmissionTable tableRow = new DeSubmissionTable();
