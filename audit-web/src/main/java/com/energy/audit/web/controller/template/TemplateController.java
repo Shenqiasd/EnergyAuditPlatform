@@ -195,6 +195,15 @@ public class TemplateController {
         return R.ok();
     }
 
+    @Operation(summary = "删除指定版本（已发布版本不可删除）")
+    @DeleteMapping("/{templateId}/versions/{versionId}")
+    public R<Void> deleteVersion(@PathVariable Long templateId,
+                                 @PathVariable Long versionId) {
+        requireAdmin();
+        versionService.deleteVersion(templateId, versionId);
+        return R.ok();
+    }
+
     // =========================================================================
     // Tag Mapping Management (read: any authenticated; write: admin only)
     // =========================================================================

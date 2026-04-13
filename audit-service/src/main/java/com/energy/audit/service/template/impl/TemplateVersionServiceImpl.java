@@ -172,4 +172,22 @@ public class TemplateVersionServiceImpl implements TemplateVersionService {
         upd.setUpdateBy(operator);
         templateMapper.updateById(upd);
     }
+
+    @Override
+    @Transactional
+    @CacheEvict(cacheNames = "templateCache", allEntries = true)
+    public void deleteVersion(Long templateId, Long versionId) {
+        TplTemplateVersion v = getById(versionId);
+        if (!templateId.equals(v.getTemplateId())) {
+            throw new BusinessException("版本不属于该模板");
+        }
+        if (v.getPublished() != null && v.getPublished() == 1) {
+            throw new BusinessException("已发布的版本不可删除，请先发布其他版本替代");
+        }
+        String operator = SecurityUtils.getRequiredCurrentUsername();
+        // Soft-delete associated tag mappings first
+        tagMappingMapper.deleteByVersionId(versionId, operator);
+        // Soft-delete the version itself
+        versionMapper.deleteById(versionId, operator);
+    }
 }

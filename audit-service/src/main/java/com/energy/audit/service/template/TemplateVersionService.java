@@ -37,4 +37,11 @@ public interface TemplateVersionService {
      *  2. Updates tpl_template.current_version to this version number
      */
     void publish(Long templateId, Long versionId);
+
+    /**
+     * Delete a version (soft-delete).
+     * Published versions cannot be deleted.
+     * Also soft-deletes all associated tag mappings.
+     */
+    void deleteVersion(Long templateId, Long versionId);
 }

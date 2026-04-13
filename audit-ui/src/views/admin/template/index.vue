@@ -13,6 +13,7 @@ import {
   publishTemplate,
   listVersions,
   publishVersion,
+  deleteVersion,
   createDraftVersion,
   getVersionById,
   saveVersionJson,
@@ -196,6 +197,23 @@ async function handleCreateDraft() {
   await createDraftVersion(activeTemplate.value.id!)
   ElMessage.success('已创建新草稿版本')
   versions.value = await listVersions(activeTemplate.value.id!)
+}
+
+async function handleDeleteVersion(v: TplTemplateVersion) {
+  if (!activeTemplate.value) return
+  await ElMessageBox.confirm(
+    `确认删除版本 v${v.version}？删除后不可恢复。`,
+    '删除版本',
+    { type: 'warning' }
+  )
+  try {
+    await deleteVersion(activeTemplate.value.id!, v.id!)
+    ElMessage.success('版本已删除')
+    versions.value = await listVersions(activeTemplate.value.id!)
+    loadData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message ?? e?.message ?? '删除失败')
+  }
 }
 
 // ── Designer dialog methods ────────────────────────────────────────────────────
@@ -425,7 +443,7 @@ onMounted(loadData)
         </el-table-column>
         <el-table-column prop="changeLog" label="更新说明" min-width="160" show-overflow-tooltip />
         <el-table-column prop="publishTime" label="发布时间" width="150" />
-        <el-table-column label="操作" width="160">
+        <el-table-column label="操作" width="220">
           <template #default="{ row }">
             <el-button
               link type="success"
@@ -434,6 +452,12 @@ onMounted(loadData)
               :disabled="row.published === 1"
             >发布</el-button>
             <el-button link type="primary" @click="openDesigner(row)">设计</el-button>
+            <el-button
+              link type="danger"
+              :icon="Delete"
+              @click="handleDeleteVersion(row)"
+              :disabled="row.published === 1"
+            >删除</el-button>
           </template>
         </el-table-column>
       </el-table>

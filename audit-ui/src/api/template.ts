@@ -145,6 +145,10 @@ export function publishVersion(templateId: number, versionId: number): Promise<v
   return request.post(`/template/${templateId}/versions/${versionId}/publish`)
 }
 
+export function deleteVersion(templateId: number, versionId: number): Promise<void> {
+  return request.delete(`/template/${templateId}/versions/${versionId}`)
+}
+
 // ── Tag Mappings ──────────────────────────────────────────────────────────────
 
 export function listTags(versionId: number): Promise<TplTagMapping[]> {
