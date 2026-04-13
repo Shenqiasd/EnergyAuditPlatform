@@ -152,6 +152,15 @@ public class TagMappingServiceImpl implements TagMappingService {
 
         existingByTag.forEach((tagName, mapping) -> {
             if (!discoveredByTag.containsKey(tagName)) {
+                // Preserve manually-configured TABLE and EQUIPMENT_BENCHMARK tags —
+                // these are not discoverable from the SpreadJS JSON (no Named Range
+                // or Cell Tag), so syncFromTemplateJson must not remove them.
+                String mt = mapping.getMappingType();
+                if ("TABLE".equalsIgnoreCase(mt) || "EQUIPMENT_BENCHMARK".equalsIgnoreCase(mt)) {
+                    log.debug("syncFromTemplateJson: preserving manually-configured {} tag '{}' for versionId={}",
+                            mt, tagName, versionId);
+                    return; // skip soft-delete
+                }
                 tagMappingMapper.softDeleteById(mapping.getId(), operator);
             }
         });
