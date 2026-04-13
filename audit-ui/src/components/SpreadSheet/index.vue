@@ -101,26 +101,37 @@ async function initWorkbook() {
     workbook.fromJSON(JSON.parse(jsonStr))
 
     // ── Phase 2: fetch tags + prefill data in parallel (one listTags call) ─
+    // Wrapped in its own try-catch so that a failure in supplementary features
+    // (prefill / dropdowns / protection) does NOT prevent the core spreadsheet
+    // from rendering — matching the original best-effort error handling.
     if (publishedVersion.id) {
-      const [tags, prefillData] = await Promise.all([
-        listTags(publishedVersion.id),
-        !currentSubmission ? getEnterpriseSettingPrefill() : Promise.resolve(null),
-      ])
+      try {
+        const [tags, prefillData] = await Promise.all([
+          listTags(publishedVersion.id),
+          !currentSubmission
+            ? getEnterpriseSettingPrefill().catch(() => null)
+            : Promise.resolve(null),
+        ])
 
-      // Pre-fill enterprise settings (uses pre-fetched tags + prefillData)
-      if (!currentSubmission && prefillData) {
-        applyPrefill(workbook, tags, prefillData)
-      }
+        // Pre-fill enterprise settings (uses pre-fetched tags + prefillData)
+        if (!currentSubmission && prefillData) {
+          applyPrefill(workbook, tags, prefillData)
+        }
 
-      // Inject dictionary-based dropdown validators (uses pre-fetched tags)
-      await applyDictValidators(workbook, tags)
+        // Inject dictionary-based dropdown validators (uses pre-fetched tags)
+        await applyDictValidators(workbook, tags)
 
-      // Bind ValidationError event on every sheet
-      bindValidationErrorDialogs(workbook)
+        // Bind ValidationError event on every sheet
+        bindValidationErrorDialogs(workbook)
 
-      // Apply cell protection + required field markers (uses pre-fetched tags)
-      if (publishedVersion.protectionEnabled !== 0) {
-        applyDataEntryProtection(workbook, tags)
+        // Apply cell protection + required field markers (uses pre-fetched tags)
+        if (publishedVersion.protectionEnabled !== 0) {
+          applyDataEntryProtection(workbook, tags)
+        }
+      } catch (e) {
+        console.warn('[phase2] failed to load tags / apply features:', e)
+        // Still bind validation error dialogs as fallback
+        bindValidationErrorDialogs(workbook)
       }
     } else {
       bindValidationErrorDialogs(workbook)
