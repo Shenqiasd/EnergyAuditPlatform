@@ -84,10 +84,9 @@ async function handleSaveDraft() {
 
 async function handleSubmit() {
   if (!spreadRef.value) return
-  if (spreadRef.value.isSubmitted()) {
-    ElMessage.warning('该年度数据已提交')
-    return
-  }
+  // Note: previously-submitted templates can be re-submitted.  The save()
+  // call below resets the submission to draft (status=0) before submitting,
+  // so we no longer block re-submission here.
 
   // Validate required fields before submission
   const requiredErrors = spreadRef.value.validateRequiredFields()
