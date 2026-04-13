@@ -88,6 +88,18 @@ async function handleSubmit() {
     ElMessage.warning('该年度数据已提交')
     return
   }
+
+  // Validate required fields before submission
+  const requiredErrors = spreadRef.value.validateRequiredFields()
+  if (requiredErrors.length > 0) {
+    ElMessageBox.alert(
+      requiredErrors.map((e, i) => `${i + 1}. ${e}`).join('\n'),
+      '必填字段未填写',
+      { type: 'warning', confirmButtonText: '知道了' }
+    )
+    return
+  }
+
   try {
     await ElMessageBox.confirm(
       `确认提交 ${selectedYear.value} 年度数据？提交后将触发数据抽取并锁定编辑。`,

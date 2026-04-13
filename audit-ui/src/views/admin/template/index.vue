@@ -230,7 +230,12 @@ async function handleSaveDesign() {
   designerSaving.value = true
   try {
     const json = designerRef.value.getJson()
-    await saveVersionJson(designerVersion.value.id!, json)
+    await saveVersionJson(
+      designerVersion.value.id!,
+      json,
+      undefined,
+      designerVersion.value.protectionEnabled,
+    )
     ElMessage.success('草稿已保存，Tag 映射已自动同步')
     await refreshDesignerTags(designerVersion.value.id!)
   } finally {
@@ -457,6 +462,20 @@ onMounted(loadData)
 
         <!-- Right: Tag Config Panel -->
         <div class="designer-sidebar">
+          <div class="sidebar-protection">
+            <span class="protection-label">单元格保护</span>
+            <el-switch
+              v-if="designerVersion"
+              v-model="designerVersion.protectionEnabled"
+              :active-value="1"
+              :inactive-value="0"
+              :disabled="isReadonly(designerVersion)"
+              active-text="开启"
+              inactive-text="关闭"
+              inline-prompt
+              style="--el-switch-on-color: #67c23a"
+            />
+          </div>
           <div class="sidebar-header">
             <span class="sidebar-title">字段映射配置</span>
             <el-button
@@ -708,6 +727,21 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   background: #fafafa;
+}
+
+.sidebar-protection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e4e7ed;
+  background: #f0f9eb;
+}
+
+.protection-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #606266;
 }
 
 .sidebar-header {

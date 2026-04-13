@@ -11,6 +11,7 @@
         <result column="change_log"   property="changeLog"/>
         <result column="published"    property="published"/>
         <result column="publish_time" property="publishTime"/>
+        <result column="protection_enabled" property="protectionEnabled"/>
         <result column="create_by"    property="createBy"/>
         <result column="create_time"  property="createTime"/>
         <result column="update_by"    property="updateBy"/>
@@ -20,7 +21,7 @@
 
     <sql id="Base_Column_List">
         id, template_id, version, template_json, change_log, published, publish_time,
-        create_by, create_time, update_by, update_time, deleted
+        protection_enabled, create_by, create_time, update_by, update_time, deleted
     </sql>
 
     <select id="selectById" resultMap="BaseResultMap">
@@ -54,7 +55,7 @@
 
     <sql id="Meta_Column_List">
         id, template_id, version, change_log, published, publish_time,
-        create_by, create_time, update_by, update_time, deleted
+        protection_enabled, create_by, create_time, update_by, update_time, deleted
     </sql>
 
     <select id="selectListMetaByTemplateId" resultMap="BaseResultMap">
@@ -67,10 +68,11 @@
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO tpl_template_version (
             template_id, version, template_json, change_log, published, publish_time,
-            create_by, create_time, update_by, update_time, deleted
+            protection_enabled, create_by, create_time, update_by, update_time, deleted
         ) VALUES (
             #{templateId}, #{version}, #{templateJson}, #{changeLog},
             COALESCE(#{published}, 0), #{publishTime},
+            COALESCE(#{protectionEnabled}, 1),
             #{createBy}, NOW(), #{updateBy}, NOW(), 0
         )
     </insert>
@@ -84,6 +86,7 @@
             <if test="changeLog != null">change_log = #{changeLog},</if>
             <if test="published != null">published = #{published},</if>
             <if test="publishTime != null">publish_time = #{publishTime},</if>
+            <if test="protectionEnabled != null">protection_enabled = #{protectionEnabled},</if>
         </set>
         WHERE id = #{id} AND deleted = 0
     </update>

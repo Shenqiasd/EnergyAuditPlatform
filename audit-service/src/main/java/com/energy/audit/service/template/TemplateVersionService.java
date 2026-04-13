@@ -15,6 +15,11 @@ public interface TemplateVersionService {
     /** Update the SpreadJS JSON content of a draft version */
     void saveJson(Long versionId, String templateJson, String changeLog);
 
+    /** Update the SpreadJS JSON content + protection flag of a draft version */
+    default void saveJson(Long versionId, String templateJson, String changeLog, Integer protectionEnabled) {
+        saveJson(versionId, templateJson, changeLog);
+    }
+
     /** List all versions of a template ordered by version DESC (includes template_json) */
     List<TplTemplateVersion> listVersions(Long templateId);
 

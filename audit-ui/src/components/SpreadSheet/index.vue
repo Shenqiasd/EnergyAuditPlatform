@@ -104,6 +104,11 @@ async function initWorkbook() {
       await applyDictValidators(workbook, publishedVersion.id)
     }
 
+    // Apply cell protection + required field markers (if protection is enabled)
+    if (publishedVersion.id && publishedVersion.protectionEnabled !== 0) {
+      await applyDataEntryProtection(workbook, publishedVersion.id)
+    }
+
     const forceReadonly = props.readonly || currentSubmission?.status === 1
     if (forceReadonly) {
       applyReadonlyProtection()
@@ -342,6 +347,290 @@ async function applyDictValidators(
   }
 }
 
+/** Required‐field background colour (light orange) */
+const REQUIRED_BG = '#FFF3E0'
+
+/**
+ * Core cell‐protection logic:
+ *  1. Set every cell's default style to locked=true
+ *  2. Based on Tag Mapping, unlock the data‐entry cells (SCALAR → single cell; TABLE → data range)
+ *  3. Mark required fields with background colour + comment
+ *  4. Enable sheet protection with options that still allow selecting cells
+ */
+async function applyDataEntryProtection(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  versionId: number,
+) {
+  try {
+    const tags = await listTags(versionId)
+    if (!tags || tags.length === 0) return
+    cachedTags = tags
+
+    wb.suspendPaint()
+    try {
+      const sheetCount = wb.getSheetCount()
+
+      // Step 1: Lock all cells by default on every sheet
+      for (let si = 0; si < sheetCount; si++) {
+        const sheet = wb.getSheet(si)
+        const rows = sheet.getRowCount()
+        const cols = sheet.getColumnCount()
+        const allRange = sheet.getRange(0, 0, rows, cols)
+        allRange.locked(true)
+      }
+
+      // Step 2 & 3: Unlock mapped cells and mark required ones
+      for (const tag of tags) {
+        const mappingType = tag.mappingType ?? 'SCALAR'
+
+        if (mappingType === 'SCALAR') {
+          unlockScalarCell(wb, tag)
+        } else if (mappingType === 'TABLE' || mappingType === 'EQUIPMENT_BENCHMARK') {
+          unlockTableRange(wb, tag)
+        }
+      }
+
+      // Step 4: Enable sheet protection on every sheet
+      for (let si = 0; si < sheetCount; si++) {
+        const sheet = wb.getSheet(si)
+        sheet.options.protectionOptions = {
+          allowSelectLockedCells: true,
+          allowSelectUnlockedCells: true,
+          allowResizeRows: false,
+          allowResizeColumns: false,
+          allowEditObjects: false,
+          allowDragInsertRows: false,
+          allowDragInsertColumns: false,
+          allowInsertRows: false,
+          allowInsertColumns: false,
+          allowDeleteRows: false,
+          allowDeleteColumns: false,
+          allowSort: false,
+          allowFilter: true,
+        }
+        sheet.options.isProtected = true
+      }
+    } finally {
+      wb.resumePaint()
+    }
+  } catch (e) {
+    console.warn('[protection] failed to apply data entry protection:', e)
+  }
+}
+
+/**
+ * Unlock a single SCALAR cell and optionally mark it as required.
+ */
+function unlockScalarCell(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tag: TplTagMapping,
+) {
+  const sheetCount = wb.getSheetCount()
+
+  // Try cell tag scan first
+  const startSheet = tag.sheetIndex ?? 0
+  const endSheet = tag.sheetIndex != null ? tag.sheetIndex + 1 : sheetCount
+  for (let si = startSheet; si < endSheet && si < sheetCount; si++) {
+    const sheet = wb.getSheet(si)
+    const rowCount = sheet.getRowCount()
+    const colCount = sheet.getColumnCount()
+    for (let r = 0; r < rowCount; r++) {
+      for (let c = 0; c < colCount; c++) {
+        const cellTag = sheet.getTag(r, c)
+        if (cellTag === tag.tagName) {
+          const cell = sheet.getCell(r, c)
+          cell.locked(false)
+          if (tag.required === 1) {
+            markCellRequired(cell, tag.fieldName ?? tag.tagName ?? '此字段')
+          }
+          return
+        }
+      }
+    }
+  }
+
+  // Try named range
+  if (tag.sourceType === 'NAMED_RANGE' && tag.tagName) {
+    for (let si = 0; si < sheetCount; si++) {
+      const sheet = wb.getSheet(si)
+      const nr = sheet.getCustomName(tag.tagName)
+      if (nr) {
+        const cell = sheet.getCell(nr.getRow(), nr.getColumn())
+        cell.locked(false)
+        if (tag.required === 1) {
+          markCellRequired(cell, tag.fieldName ?? tag.tagName ?? '此字段')
+        }
+        return
+      }
+    }
+    const wbName = wb.getCustomName(tag.tagName)
+    if (wbName) {
+      const sheetIdx = tag.sheetIndex ?? 0
+      if (sheetIdx >= 0 && sheetIdx < sheetCount) {
+        const sheet = wb.getSheet(sheetIdx)
+        const cell = sheet.getCell(wbName.getRow(), wbName.getColumn())
+        cell.locked(false)
+        if (tag.required === 1) {
+          markCellRequired(cell, tag.fieldName ?? tag.tagName ?? '此字段')
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Unlock the data range for a TABLE / EQUIPMENT_BENCHMARK mapping.
+ * Also mark columns that are required.
+ */
+function unlockTableRange(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tag: TplTagMapping,
+) {
+  if (!tag.cellRange) return
+  const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
+  if (!rangeMatch) return
+
+  const startRow = parseInt(rangeMatch[2]) - 1
+  const endRow = parseInt(rangeMatch[4]) - 1
+  const startCol = letterToColIndex(rangeMatch[1])
+  const endCol = letterToColIndex(rangeMatch[3])
+
+  const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+  if (!sheet) return
+
+  // Unlock the entire data range
+  const rowCount = endRow - startRow + 1
+  const colCount = endCol - startCol + 1
+  if (rowCount > 0 && colCount > 0) {
+    sheet.getRange(startRow, startCol, rowCount, colCount).locked(false)
+  }
+
+  // If the whole table mapping is required, mark the first row's first cell
+  if (tag.required === 1) {
+    const cell = sheet.getCell(startRow, startCol)
+    markCellRequired(cell, `${tag.tagName ?? tag.targetTable ?? '此表格'} (至少填写1行)`)
+  }
+}
+
+/**
+ * Apply required field visual indicator: light orange background + comment tooltip.
+ */
+function markCellRequired(
+  cell: import('@/types/spreadjs').GCCellRange,
+  fieldHint: string,
+) {
+  cell.backColor(REQUIRED_BG)
+  try {
+    const Comments = window.GC?.Spread?.Sheets?.Comments
+    if (Comments?.Comment) {
+      const comment = new Comments.Comment()
+      comment.text(`必填字段: ${fieldHint}`)
+      cell.comment(comment)
+    }
+  } catch {
+    // Comment creation is best-effort
+  }
+}
+
+/**
+ * Validate that all required fields have been filled before submission.
+ * Returns an array of error messages (empty = all valid).
+ */
+function validateRequiredFields(): string[] {
+  if (!workbook || !publishedVersion) return []
+  if (publishedVersion.protectionEnabled === 0) return []
+
+  const errors: string[] = []
+  const tags = cachedTags // populated during applyDataEntryProtection
+
+  for (const tag of tags) {
+    if (tag.required !== 1) continue
+    const mappingType = tag.mappingType ?? 'SCALAR'
+
+    if (mappingType === 'SCALAR') {
+      const empty = isScalarCellEmpty(workbook, tag)
+      if (empty) {
+        errors.push(`"${tag.fieldName ?? tag.tagName}" 为必填字段，请填写`)
+      }
+    } else if (mappingType === 'TABLE' || mappingType === 'EQUIPMENT_BENCHMARK') {
+      const empty = isTableEmpty(workbook, tag)
+      if (empty) {
+        errors.push(`"${tag.tagName ?? tag.targetTable}" 至少需要填写1行数据`)
+      }
+    }
+  }
+  return errors
+}
+
+/** Cached tag mappings loaded during protection setup */
+let cachedTags: TplTagMapping[] = []
+
+function isScalarCellEmpty(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tag: TplTagMapping,
+): boolean {
+  const sheetCount = wb.getSheetCount()
+  const startSheet = tag.sheetIndex ?? 0
+  const endSheet = tag.sheetIndex != null ? tag.sheetIndex + 1 : sheetCount
+  for (let si = startSheet; si < endSheet && si < sheetCount; si++) {
+    const sheet = wb.getSheet(si)
+    const rowCount = sheet.getRowCount()
+    const colCount = sheet.getColumnCount()
+    for (let r = 0; r < rowCount; r++) {
+      for (let c = 0; c < colCount; c++) {
+        const cellTag = sheet.getTag(r, c)
+        if (cellTag === tag.tagName) {
+          const val = sheet.getValue(r, c)
+          return val == null || val === ''
+        }
+      }
+    }
+  }
+  // Named range fallback
+  if (tag.sourceType === 'NAMED_RANGE' && tag.tagName) {
+    for (let si = 0; si < sheetCount; si++) {
+      const sheet = wb.getSheet(si)
+      const nr = sheet.getCustomName(tag.tagName)
+      if (nr) {
+        const val = sheet.getValue(nr.getRow(), nr.getColumn())
+        return val == null || val === ''
+      }
+    }
+  }
+  return true // if we can't find the cell, treat as empty
+}
+
+function isTableEmpty(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tag: TplTagMapping,
+): boolean {
+  if (!tag.cellRange) return true
+  const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
+  if (!rangeMatch) return true
+
+  const startRow = parseInt(rangeMatch[2]) - 1
+  const endRow = parseInt(rangeMatch[4]) - 1
+  const startCol = letterToColIndex(rangeMatch[1])
+  const endCol = letterToColIndex(rangeMatch[3])
+
+  const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+  if (!sheet) return true
+
+  // Check if at least one row has any non-empty cell
+  for (let r = startRow; r <= endRow; r++) {
+    let rowHasData = false
+    for (let c = startCol; c <= endCol; c++) {
+      const val = sheet.getValue(r, c)
+      if (val != null && val !== '') {
+        rowHasData = true
+        break
+      }
+    }
+    if (rowHasData) return false
+  }
+  return true
+}
+
 function findSheet(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   sheetName?: string,
@@ -444,7 +733,7 @@ function isSubmitted(): boolean {
   return currentSubmission?.status === 1
 }
 
-defineExpose({ save, getSubmissionId, getVersionId, isSubmitted, saving, loading })
+defineExpose({ save, getSubmissionId, getVersionId, isSubmitted, validateRequiredFields, saving, loading })
 </script>
 
 <template>

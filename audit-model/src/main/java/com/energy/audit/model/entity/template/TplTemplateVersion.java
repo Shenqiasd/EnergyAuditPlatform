@@ -34,4 +34,7 @@ public class TplTemplateVersion extends BaseEntity {
 
     /** Publish timestamp */
     private LocalDateTime publishTime;
+
+    /** Protection enabled flag (0=disabled, 1=enabled). Default 1. */
+    private Integer protectionEnabled;
 }

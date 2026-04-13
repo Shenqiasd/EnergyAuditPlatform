@@ -325,6 +325,7 @@ CREATE TABLE IF NOT EXISTS tpl_template_version (
     change_log    VARCHAR(512),
     published     TINYINT      DEFAULT 0,
     publish_time  DATETIME,
+    protection_enabled TINYINT DEFAULT 1,
     create_by     VARCHAR(64),
     create_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by     VARCHAR(64),

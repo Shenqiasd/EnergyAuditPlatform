@@ -180,7 +180,9 @@ public class TemplateController {
         requireAdmin();
         String json = body.get("templateJson");
         String changeLog = body.get("changeLog");
-        versionService.saveJson(versionId, json, changeLog);
+        String protectionStr = body.get("protectionEnabled");
+        Integer protectionEnabled = protectionStr != null ? Integer.valueOf(protectionStr) : null;
+        versionService.saveJson(versionId, json, changeLog, protectionEnabled);
         return R.ok();
     }
 

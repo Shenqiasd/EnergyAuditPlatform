@@ -104,6 +104,12 @@ public class TemplateVersionServiceImpl implements TemplateVersionService {
     @Override
     @Transactional
     public void saveJson(Long versionId, String templateJson, String changeLog) {
+        saveJson(versionId, templateJson, changeLog, null);
+    }
+
+    @Override
+    @Transactional
+    public void saveJson(Long versionId, String templateJson, String changeLog, Integer protectionEnabled) {
         TplTemplateVersion existing = getById(versionId);
         if (existing.getPublished() == 1) {
             throw new BusinessException("已发布的版本不可修改，请先创建新版本");
@@ -112,6 +118,7 @@ public class TemplateVersionServiceImpl implements TemplateVersionService {
         upd.setId(versionId);
         upd.setTemplateJson(templateJson);
         upd.setChangeLog(changeLog);
+        upd.setProtectionEnabled(protectionEnabled);
         upd.setUpdateBy(SecurityUtils.getRequiredCurrentUsername());
         versionMapper.updateById(upd);
         tagMappingService.syncFromTemplateJson(versionId, templateJson);

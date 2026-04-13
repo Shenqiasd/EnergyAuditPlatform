@@ -445,6 +445,7 @@ CREATE TABLE `tpl_template_version` (
     `change_log`    VARCHAR(512) DEFAULT NULL            COMMENT '变更说明',
     `published`     TINYINT      DEFAULT 0               COMMENT '是否发布(0未发布 1已发布)',
     `publish_time`  DATETIME     DEFAULT NULL            COMMENT '发布时间',
+    `protection_enabled` TINYINT DEFAULT 1               COMMENT '是否启用单元格保护(0关闭 1开启)',
     `create_by`     VARCHAR(64)  DEFAULT NULL            COMMENT '创建人',
     `create_time`   DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_by`     VARCHAR(64)  DEFAULT NULL            COMMENT '更新人',

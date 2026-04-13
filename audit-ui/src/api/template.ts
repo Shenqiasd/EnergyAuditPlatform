@@ -21,6 +21,7 @@ export interface TplTemplateVersion {
   changeLog?: string
   published?: number
   publishTime?: string
+  protectionEnabled?: number
   createTime?: string
 }
 
@@ -127,8 +128,17 @@ export function createDraftVersion(templateId: number): Promise<TplTemplateVersi
   return request.post(`/template/${templateId}/versions`)
 }
 
-export function saveVersionJson(versionId: number, templateJson: string, changeLog?: string): Promise<void> {
-  return request.put(`/template/versions/${versionId}/json`, { templateJson, changeLog })
+export function saveVersionJson(
+  versionId: number,
+  templateJson: string,
+  changeLog?: string,
+  protectionEnabled?: number,
+): Promise<void> {
+  return request.put(`/template/versions/${versionId}/json`, {
+    templateJson,
+    changeLog,
+    ...(protectionEnabled != null ? { protectionEnabled: String(protectionEnabled) } : {}),
+  })
 }
 
 export function publishVersion(templateId: number, versionId: number): Promise<void> {
