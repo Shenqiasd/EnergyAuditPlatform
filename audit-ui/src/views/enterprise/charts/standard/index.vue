@@ -43,11 +43,16 @@ async function loadEnergyStructure() {
       structureOption.value = emptyOption('暂无能源消费数据')
       return
     }
-    const total = data.reduce((s: number, d: any) => s + (d.STANDARD_COAL_EQUIV || d.VALUE || d.value || 0), 0)
+    const total = data.reduce((s: number, d: any) => s + (d.VALUE || d.value || 0), 0)
+    // Detect unit: if backend returns 'tce' unit, use it; otherwise show generic label
+    const firstUnit = data[0]?.UNIT || data[0]?.unit || ''
+    const isTce = firstUnit === 'tce'
+    const unitLabel = isTce ? 'tce' : '消耗量'
+    const subtextLabel = isTce ? '总能耗 (折标煤)' : '总能源消耗'
     structureOption.value = {
       tooltip: {
         trigger: 'item',
-        formatter: (p: any) => `${p.name}: ${p.value.toFixed(1)} tce (${p.percent}%)`,
+        formatter: (p: any) => `${p.name}: ${p.value.toFixed(1)} ${unitLabel} (${p.percent}%)`,
       },
       legend: { orient: 'vertical', right: 20, top: 'center' },
       series: [
@@ -60,13 +65,13 @@ async function loadEnergyStructure() {
           label: { show: true, formatter: '{b}\n{d}%' },
           data: data.map((d: any) => ({
             name: d.NAME || d.name,
-            value: d.STANDARD_COAL_EQUIV || d.VALUE || d.value,
+            value: d.VALUE || d.value,
           })),
         },
       ],
       title: {
-        text: `${total.toFixed(0)} tce`,
-        subtext: '总能耗 (折标煤)',
+        text: `${total.toFixed(0)} ${unitLabel}`,
+        subtext: subtextLabel,
         left: '40%',
         top: '38%',
         textAlign: 'center',
@@ -148,26 +153,37 @@ async function loadProductConsumption() {
       productOption.value = emptyOption('暂无产品单耗数据')
       return
     }
-    const products = [...new Set(data.map((d: any) => d.PRODUCTNAME || d.productName))]
-    const yearTypes = [...new Set(data.map((d: any) => d.YEARTYPE || d.yearType))]
-    const colorMap: Record<string, string> = { '审计年': '#409EFF', '上年度': '#E6A23C' }
+    const products = data.map((d: any) => d.PRODUCTNAME || d.productName)
+    const currentValues = data.map((d: any) => d.UNITCONSUMPTION || d.unitConsumption || 0)
+    const baseValues = data.map((d: any) => d.BASECONSUMPTION || d.baseConsumption || 0)
+
+    const series: any[] = [
+      {
+        name: '审计年单耗',
+        type: 'bar',
+        barMaxWidth: 36,
+        itemStyle: { color: '#409EFF', borderRadius: [4, 4, 0, 0] },
+        data: currentValues,
+      },
+    ]
+    // Only show base year if any base values exist
+    if (baseValues.some((v: number) => v > 0)) {
+      series.push({
+        name: '基期单耗',
+        type: 'bar',
+        barMaxWidth: 36,
+        itemStyle: { color: '#E6A23C', borderRadius: [4, 4, 0, 0] },
+        data: baseValues,
+      })
+    }
 
     productOption.value = {
       tooltip: { trigger: 'axis' },
-      legend: { data: yearTypes },
+      legend: { data: series.map((s: any) => s.name) },
       grid: { left: 60, right: 20, bottom: 40 },
-      xAxis: { type: 'category', data: products },
-      yAxis: { type: 'value', name: '单耗 (tce/t)' },
-      series: yearTypes.map((yt: string) => ({
-        name: yt,
-        type: 'bar',
-        barMaxWidth: 36,
-        itemStyle: { color: colorMap[yt] || '#909399', borderRadius: [4, 4, 0, 0] },
-        data: products.map((p: string) => {
-          const row = data.find((d: any) => (d.PRODUCTNAME || d.productName) === p && (d.YEARTYPE || d.yearType) === yt)
-          return row ? (row.UNITCONSUMPTION || row.unitConsumption || 0) : 0
-        }),
-      })),
+      xAxis: { type: 'category', data: products, axisLabel: { rotate: products.length > 4 ? 30 : 0 } },
+      yAxis: { type: 'value', name: '单耗' },
+      series,
     }
   } catch (e) {
     productOption.value = emptyOption('加载失败')
