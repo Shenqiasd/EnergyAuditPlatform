@@ -35,15 +35,37 @@ public class ChartDataController {
     public R<List<Map<String, Object>>> energyStructure(@RequestParam Integer auditYear) {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        // Prefer standard_coal_equiv (tce) if populated; fallback to consumption_amount (raw units)
+        // Use a single consistent unit for all rows:
+        // If ALL rows have standard_coal_equiv → use tce (homogeneous unit, safe to sum)
+        // Otherwise → use consumption_amount for all rows (each row's native unit)
+        boolean useTce = false;
+        try {
+            Integer missingCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM de_energy_balance " +
+                "WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
+                "AND energy_name IS NOT NULL AND energy_name <> '' " +
+                "AND (standard_coal_equiv IS NULL OR standard_coal_equiv = 0)",
+                Integer.class, enterpriseId, auditYear
+            );
+            Integer totalCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM de_energy_balance " +
+                "WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
+                "AND energy_name IS NOT NULL AND energy_name <> ''",
+                Integer.class, enterpriseId, auditYear
+            );
+            useTce = totalCount != null && totalCount > 0 && (missingCount == null || missingCount == 0);
+        } catch (Exception ignored) {
+            // standard_coal_equiv column may not exist — use consumption_amount
+        }
+
+        String valueCol = useTce ? "standard_coal_equiv" : "consumption_amount";
+        String unitLabel = useTce ? "'tce'" : "measurement_unit";
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-            "SELECT energy_name AS name, " +
-            "COALESCE(standard_coal_equiv, consumption_amount) AS value, " +
-            "CASE WHEN standard_coal_equiv IS NOT NULL AND standard_coal_equiv > 0 THEN 'tce' ELSE measurement_unit END AS unit " +
+            "SELECT energy_name AS name, " + valueCol + " AS value, " + unitLabel + " AS unit " +
             "FROM de_energy_balance WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
             "AND energy_name IS NOT NULL AND energy_name <> '' " +
-            "AND (standard_coal_equiv > 0 OR consumption_amount > 0) " +
-            "ORDER BY COALESCE(standard_coal_equiv, consumption_amount) DESC",
+            "AND " + valueCol + " IS NOT NULL AND " + valueCol + " > 0 " +
+            "ORDER BY " + valueCol + " DESC",
             enterpriseId, auditYear
         );
         return R.ok(rows);
