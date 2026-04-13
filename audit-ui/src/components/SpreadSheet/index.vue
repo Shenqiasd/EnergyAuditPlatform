@@ -426,8 +426,35 @@ function unlockScalarCell(
   tag: TplTagMapping,
 ) {
   const sheetCount = wb.getSheetCount()
+  const hint = tag.fieldName ?? tag.tagName ?? '此字段'
 
-  // Try cell tag scan first
+  // For NAMED_RANGE source types, try named range first (consistent with fillTaggedCell)
+  if (tag.sourceType === 'NAMED_RANGE' && tag.tagName) {
+    for (let si = 0; si < sheetCount; si++) {
+      const sheet = wb.getSheet(si)
+      const nr = sheet.getCustomName(tag.tagName)
+      if (nr) {
+        const cell = sheet.getCell(nr.getRow(), nr.getColumn())
+        cell.locked(false)
+        if (tag.required === 1) markCellRequired(cell, hint)
+        return
+      }
+    }
+    // Also try workbook-level custom name
+    const wbName = wb.getCustomName(tag.tagName)
+    if (wbName) {
+      const sheetIdx = tag.sheetIndex ?? 0
+      if (sheetIdx >= 0 && sheetIdx < sheetCount) {
+        const sheet = wb.getSheet(sheetIdx)
+        const cell = sheet.getCell(wbName.getRow(), wbName.getColumn())
+        cell.locked(false)
+        if (tag.required === 1) markCellRequired(cell, hint)
+        return
+      }
+    }
+  }
+
+  // Fall back to cell tag scan (or primary path for non-NAMED_RANGE tags)
   const startSheet = tag.sheetIndex ?? 0
   const endSheet = tag.sheetIndex != null ? tag.sheetIndex + 1 : sheetCount
   for (let si = startSheet; si < endSheet && si < sheetCount; si++) {
@@ -440,38 +467,8 @@ function unlockScalarCell(
         if (cellTag === tag.tagName) {
           const cell = sheet.getCell(r, c)
           cell.locked(false)
-          if (tag.required === 1) {
-            markCellRequired(cell, tag.fieldName ?? tag.tagName ?? '此字段')
-          }
+          if (tag.required === 1) markCellRequired(cell, hint)
           return
-        }
-      }
-    }
-  }
-
-  // Try named range
-  if (tag.sourceType === 'NAMED_RANGE' && tag.tagName) {
-    for (let si = 0; si < sheetCount; si++) {
-      const sheet = wb.getSheet(si)
-      const nr = sheet.getCustomName(tag.tagName)
-      if (nr) {
-        const cell = sheet.getCell(nr.getRow(), nr.getColumn())
-        cell.locked(false)
-        if (tag.required === 1) {
-          markCellRequired(cell, tag.fieldName ?? tag.tagName ?? '此字段')
-        }
-        return
-      }
-    }
-    const wbName = wb.getCustomName(tag.tagName)
-    if (wbName) {
-      const sheetIdx = tag.sheetIndex ?? 0
-      if (sheetIdx >= 0 && sheetIdx < sheetCount) {
-        const sheet = wb.getSheet(sheetIdx)
-        const cell = sheet.getCell(wbName.getRow(), wbName.getColumn())
-        cell.locked(false)
-        if (tag.required === 1) {
-          markCellRequired(cell, tag.fieldName ?? tag.tagName ?? '此字段')
         }
       }
     }
@@ -570,6 +567,30 @@ function isScalarCellEmpty(
   tag: TplTagMapping,
 ): boolean {
   const sheetCount = wb.getSheetCount()
+
+  // For NAMED_RANGE source types, try named range first (consistent with fillTaggedCell)
+  if (tag.sourceType === 'NAMED_RANGE' && tag.tagName) {
+    for (let si = 0; si < sheetCount; si++) {
+      const sheet = wb.getSheet(si)
+      const nr = sheet.getCustomName(tag.tagName)
+      if (nr) {
+        const val = sheet.getValue(nr.getRow(), nr.getColumn())
+        return val == null || val === ''
+      }
+    }
+    // Also try workbook-level custom name
+    const wbName = wb.getCustomName(tag.tagName)
+    if (wbName) {
+      const sheetIdx = tag.sheetIndex ?? 0
+      if (sheetIdx >= 0 && sheetIdx < sheetCount) {
+        const sheet = wb.getSheet(sheetIdx)
+        const val = sheet.getValue(wbName.getRow(), wbName.getColumn())
+        return val == null || val === ''
+      }
+    }
+  }
+
+  // Fall back to cell tag scan
   const startSheet = tag.sheetIndex ?? 0
   const endSheet = tag.sheetIndex != null ? tag.sheetIndex + 1 : sheetCount
   for (let si = startSheet; si < endSheet && si < sheetCount; si++) {
@@ -583,17 +604,6 @@ function isScalarCellEmpty(
           const val = sheet.getValue(r, c)
           return val == null || val === ''
         }
-      }
-    }
-  }
-  // Named range fallback
-  if (tag.sourceType === 'NAMED_RANGE' && tag.tagName) {
-    for (let si = 0; si < sheetCount; si++) {
-      const sheet = wb.getSheet(si)
-      const nr = sheet.getCustomName(tag.tagName)
-      if (nr) {
-        const val = sheet.getValue(nr.getRow(), nr.getColumn())
-        return val == null || val === ''
       }
     }
   }
