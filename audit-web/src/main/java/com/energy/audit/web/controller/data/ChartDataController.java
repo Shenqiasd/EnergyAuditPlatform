@@ -35,11 +35,14 @@ public class ChartDataController {
     public R<List<Map<String, Object>>> energyStructure(@RequestParam Integer auditYear) {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        // Use a single consistent unit for all rows:
-        // If ALL rows have standard_coal_equiv → use tce (homogeneous unit, safe to sum)
-        // Otherwise → use consumption_amount for all rows (each row's native unit)
-        boolean useTce = false;
+        // Three possible schema variants for de_energy_balance:
+        //   1. 00-schema.sql: has standard_coal_equiv + consumption_amount + measurement_unit
+        //   2. schema.sql:    has consumption_amount + measurement_unit (no standard_coal_equiv)
+        //   3. wave4:         has energy_value only (no consumption_amount, no standard_coal_equiv)
+        // Try each in order of preference.
+        List<Map<String, Object>> rows;
         try {
+            // Attempt 1: Check if standard_coal_equiv exists and is fully populated (tce)
             Integer missingCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM de_energy_balance " +
                 "WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
@@ -53,21 +56,32 @@ public class ChartDataController {
                 "AND energy_name IS NOT NULL AND energy_name <> ''",
                 Integer.class, enterpriseId, auditYear
             );
-            useTce = totalCount != null && totalCount > 0 && (missingCount == null || missingCount == 0);
-        } catch (Exception ignored) {
-            // standard_coal_equiv column may not exist — use consumption_amount
+            boolean useTce = totalCount != null && totalCount > 0 && (missingCount == null || missingCount == 0);
+            String valueCol = useTce ? "standard_coal_equiv" : "consumption_amount";
+            String unitLabel = useTce ? "'tce'" : "measurement_unit";
+            rows = jdbcTemplate.queryForList(
+                "SELECT energy_name AS name, " + valueCol + " AS value, " + unitLabel + " AS unit " +
+                "FROM de_energy_balance WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
+                "AND energy_name IS NOT NULL AND energy_name <> '' " +
+                "AND " + valueCol + " IS NOT NULL AND " + valueCol + " > 0 " +
+                "ORDER BY " + valueCol + " DESC",
+                enterpriseId, auditYear
+            );
+        } catch (Exception e1) {
+            // Attempt 2: wave4 schema — energy_value column
+            try {
+                rows = jdbcTemplate.queryForList(
+                    "SELECT energy_name AS name, energy_value AS value, '' AS unit " +
+                    "FROM de_energy_balance WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
+                    "AND energy_name IS NOT NULL AND energy_name <> '' " +
+                    "AND energy_value IS NOT NULL AND energy_value > 0 " +
+                    "ORDER BY energy_value DESC",
+                    enterpriseId, auditYear
+                );
+            } catch (Exception e2) {
+                rows = java.util.Collections.emptyList();
+            }
         }
-
-        String valueCol = useTce ? "standard_coal_equiv" : "consumption_amount";
-        String unitLabel = useTce ? "'tce'" : "measurement_unit";
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-            "SELECT energy_name AS name, " + valueCol + " AS value, " + unitLabel + " AS unit " +
-            "FROM de_energy_balance WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
-            "AND energy_name IS NOT NULL AND energy_name <> '' " +
-            "AND " + valueCol + " IS NOT NULL AND " + valueCol + " > 0 " +
-            "ORDER BY " + valueCol + " DESC",
-            enterpriseId, auditYear
-        );
         return R.ok(rows);
     }
 
@@ -96,10 +110,13 @@ public class ChartDataController {
     public R<List<Map<String, Object>>> productConsumption(@RequestParam Integer auditYear) {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        // Try wave4 schema first (indicator_name, current_indicator, ...)
-        // Fallback to canonical schema (product_name, year_type, unit_consumption, ...)
+        // Three possible schema variants for de_product_unit_consumption:
+        //   1. wave4: indicator_name, current_indicator, previous_indicator, ...
+        //   2. 00-schema.sql: product_name, year_type, unit_consumption, ...
+        //   3. schema.sql: product_id (no product_name), year_type, unit_consumption, ...
         List<Map<String, Object>> rows;
         try {
+            // Attempt 1: wave4 columns
             rows = jdbcTemplate.queryForList(
                 "SELECT indicator_name AS productName, " +
                 "current_indicator AS unitConsumption, previous_indicator AS baseConsumption, " +
@@ -111,17 +128,34 @@ public class ChartDataController {
                 "ORDER BY indicator_name",
                 enterpriseId, auditYear
             );
-        } catch (Exception e) {
-            // Canonical schema fallback: product_name, year_type, unit_consumption
-            rows = jdbcTemplate.queryForList(
-                "SELECT COALESCE(product_name, CAST(product_id AS CHAR)) AS productName, " +
-                "unit_consumption AS unitConsumption, energy_consumption AS energyConsumption, " +
-                "output, measurement_unit AS energyUnit, year_type AS yearType " +
-                "FROM de_product_unit_consumption " +
-                "WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
-                "ORDER BY product_name, year_type",
-                enterpriseId, auditYear
-            );
+        } catch (Exception e1) {
+            try {
+                // Attempt 2: 00-schema.sql columns (has product_name)
+                rows = jdbcTemplate.queryForList(
+                    "SELECT product_name AS productName, " +
+                    "unit_consumption AS unitConsumption, energy_consumption AS energyConsumption, " +
+                    "output, measurement_unit AS energyUnit, year_type AS yearType " +
+                    "FROM de_product_unit_consumption " +
+                    "WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
+                    "ORDER BY product_name, year_type",
+                    enterpriseId, auditYear
+                );
+            } catch (Exception e2) {
+                // Attempt 3: schema.sql columns (no product_name, use product_id)
+                try {
+                    rows = jdbcTemplate.queryForList(
+                        "SELECT CAST(product_id AS CHAR) AS productName, " +
+                        "unit_consumption AS unitConsumption, energy_consumption AS energyConsumption, " +
+                        "output, measurement_unit AS energyUnit, year_type AS yearType " +
+                        "FROM de_product_unit_consumption " +
+                        "WHERE enterprise_id = ? AND audit_year = ? AND deleted = 0 " +
+                        "ORDER BY product_id, year_type",
+                        enterpriseId, auditYear
+                    );
+                } catch (Exception e3) {
+                    rows = java.util.Collections.emptyList();
+                }
+            }
         }
         return R.ok(rows);
     }
