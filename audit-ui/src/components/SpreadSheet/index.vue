@@ -244,8 +244,7 @@ function applyOneConfigPrefill(
   if (!tag.targetTable || !tag.cellRange || !tag.columnMappings) return
 
   // 1. Get data source records
-  const allRecords = configData[tag.targetTable]
-  if (!allRecords?.length) return
+  const allRecords = configData[tag.targetTable] ?? []
 
   // 2. Parse columnMappings JSON
   // mode: "prefill" (default) = write values + dropdowns + hide empty rows
@@ -253,7 +252,7 @@ function applyOneConfigPrefill(
   let config: {
     filter?: Record<string, unknown>
     mode?: 'prefill' | 'dropdown_only'
-    columns: Array<{ col: string | number; field: string; format?: string; dropdown?: boolean; prefill?: boolean }>
+    columns: Array<{ col: string | number; field: string; format?: string; dropdown?: boolean; prefill?: boolean; extraSources?: Array<{ table: string; field: string; filter?: Record<string, unknown> }> }>
   }
   try {
     config = JSON.parse(tag.columnMappings)
@@ -272,7 +271,8 @@ function applyOneConfigPrefill(
       filterEntries.every(([k, v]) => r[k] === v),
     )
   }
-  if (!records.length) return
+  // For dropdown_only mode with extraSources, we can proceed even if primary records are empty
+  // For prefill mode, we need records to fill values
 
   // 4. Parse cellRange → startRow, startCol, maxRows
   const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
@@ -312,8 +312,10 @@ function applyOneConfigPrefill(
     }
   }
 
-  // 7. Fill rows (truncate if records exceed available rows)
-  const rowsToFill = Math.min(records.length, maxRows)
+  // 7. Determine rows to process
+  // In dropdown_only mode, apply dropdowns to ALL rows in the range
+  // In prefill mode, only fill rows matching records count
+  const rowsToFill = isDropdownOnly ? maxRows : Math.min(records.length, maxRows)
   if (records.length > maxRows) {
     console.warn(
       `[config-prefill] "${tag.tagName}": ${records.length} records exceed ${maxRows} available rows, truncated`,
@@ -328,6 +330,7 @@ function applyOneConfigPrefill(
     const colIndex = resolveColIndex(colDef)
     const values: string[] = []
     const seen = new Set<string>()
+    // Collect values from the primary data source
     for (const rec of records) {
       let val: string
       if (colDef.format) {
@@ -337,6 +340,20 @@ function applyOneConfigPrefill(
       }
       if (val !== '' && !seen.has(val)) { seen.add(val); values.push(val) }
     }
+    // Merge values from extraSources (e.g. C column needs both energy + product names)
+    if (colDef.extraSources?.length) {
+      for (const src of colDef.extraSources) {
+        let extraRecords = configData[src.table] ?? []
+        if (src.filter) {
+          const fe = Object.entries(src.filter)
+          extraRecords = extraRecords.filter(r => fe.every(([k, v]) => r[k] === v))
+        }
+        for (const rec of extraRecords) {
+          const val = rec[src.field] != null ? String(rec[src.field]) : ''
+          if (val !== '' && !seen.has(val)) { seen.add(val); values.push(val) }
+        }
+      }
+    }
     if (values.length > 0) {
       colDropdownValues.set(colIndex, values)
     }
@@ -345,12 +362,12 @@ function applyOneConfigPrefill(
   // 9. Fill rows with values AND set dropdown validators
   const DataValidation = window.GC?.Spread?.Sheets?.DataValidation
   for (let i = 0; i < rowsToFill; i++) {
-    const record = records[i]
+    const record = i < records.length ? records[i] : null
     for (const colDef of columns) {
       const colIndex = resolveColIndex(colDef)
 
-      // Write cell value (skip in dropdown_only mode or if prefill: false)
-      if (!isDropdownOnly && colDef.prefill !== false) {
+      // Write cell value (skip in dropdown_only mode or if prefill: false or no record)
+      if (!isDropdownOnly && colDef.prefill !== false && record) {
         let value: unknown
         if (colDef.format) {
           value = colDef.format.replace(/\{(\w+)\}/g, (_, key: string) => String(record[key] ?? ''))

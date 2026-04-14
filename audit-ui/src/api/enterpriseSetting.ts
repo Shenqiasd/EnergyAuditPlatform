@@ -76,6 +76,7 @@ export function getEnterpriseSettingPrefill(): Promise<Record<string, unknown>> 
 export interface ConfigPrefillData {
   bs_energy: Array<Record<string, unknown>>
   bs_product: Array<Record<string, unknown>>
+  bs_unit: Array<Record<string, unknown>>
   [key: string]: Array<Record<string, unknown>>
 }
 

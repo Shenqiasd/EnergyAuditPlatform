@@ -5,9 +5,11 @@ import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.model.entity.enterprise.EntEnterpriseSetting;
 import com.energy.audit.model.entity.setting.BsEnergy;
 import com.energy.audit.model.entity.setting.BsProduct;
+import com.energy.audit.model.entity.setting.BsUnit;
 import com.energy.audit.service.enterprise.EnterpriseSettingService;
 import com.energy.audit.service.setting.EnergySettingService;
 import com.energy.audit.service.setting.ProductSettingService;
+import com.energy.audit.service.setting.UnitSettingService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,15 +35,18 @@ public class EnterpriseSettingController {
     private final EnterpriseSettingService settingService;
     private final EnergySettingService energySettingService;
     private final ProductSettingService productSettingService;
+    private final UnitSettingService unitSettingService;
     private final ObjectMapper objectMapper;
 
     public EnterpriseSettingController(EnterpriseSettingService settingService,
                                        EnergySettingService energySettingService,
                                        ProductSettingService productSettingService,
+                                       UnitSettingService unitSettingService,
                                        ObjectMapper objectMapper) {
         this.settingService = settingService;
         this.energySettingService = energySettingService;
         this.productSettingService = productSettingService;
+        this.unitSettingService = unitSettingService;
         this.objectMapper = objectMapper;
     }
 
@@ -93,7 +98,7 @@ public class EnterpriseSettingController {
      * Returns all config data (energy types + products) for CONFIG_PREFILL tag mappings.
      * No pagination — config data is small (typically < 50 records per table).
      */
-    @Operation(summary = "Get config data for CONFIG_PREFILL (energy types + products)")
+    @Operation(summary = "Get config data for CONFIG_PREFILL (energy types + products + units)")
     @GetMapping("/config-prefill-data")
     public R<Map<String, Object>> getConfigPrefillData() {
         BsEnergy energyQuery = new BsEnergy();
@@ -102,9 +107,13 @@ public class EnterpriseSettingController {
         BsProduct productQuery = new BsProduct();
         List<BsProduct> products = productSettingService.list(productQuery);
 
+        BsUnit unitQuery = new BsUnit();
+        List<BsUnit> units = unitSettingService.list(unitQuery);
+
         Map<String, Object> result = new HashMap<>();
         result.put("bs_energy", energies);
         result.put("bs_product", products);
+        result.put("bs_unit", units);
         return R.ok(result);
     }
 }
