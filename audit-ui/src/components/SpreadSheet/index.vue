@@ -111,9 +111,8 @@ async function initWorkbook() {
           !currentSubmission
             ? getEnterpriseSettingPrefill().catch(() => null)
             : Promise.resolve(null),
-          !currentSubmission
-            ? getConfigPrefillData().catch(() => null)
-            : Promise.resolve(null),
+          // Always fetch config data — dropdowns need it even for existing submissions
+          getConfigPrefillData().catch(() => null),
         ])
 
         // Pre-fill enterprise settings (uses pre-fetched tags + prefillData)
@@ -121,9 +120,10 @@ async function initWorkbook() {
           applyPrefill(workbook, tags, prefillData)
         }
 
-        // Config-driven prefill: fill rows from bs_energy / bs_product config
-        if (!currentSubmission && configPrefillData) {
-          applyConfigPrefill(workbook, tags, configPrefillData)
+        // Config-driven prefill + dropdown validators
+        // Values are only written for new submissions; dropdowns are ALWAYS set
+        if (configPrefillData) {
+          applyConfigPrefill(workbook, tags, configPrefillData, !!currentSubmission)
         }
 
         // Inject dictionary-based dropdown validators (uses pre-fetched tags)
@@ -214,6 +214,7 @@ function applyConfigPrefill(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tags: TplTagMapping[],
   configData: ConfigPrefillData,
+  dropdownOnly = false,
 ) {
   try {
     const prefillTags = tags.filter(t => t.mappingType === 'CONFIG_PREFILL')
@@ -224,7 +225,7 @@ function applyConfigPrefill(
     try {
       for (const tag of prefillTags) {
         try {
-          applyOneConfigPrefill(wb, tag, configData)
+          applyOneConfigPrefill(wb, tag, configData, dropdownOnly)
         } catch (e) {
           console.warn(`[config-prefill] failed for tag "${tag.tagName}":`, e)
         }
@@ -241,6 +242,7 @@ function applyOneConfigPrefill(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tag: TplTagMapping,
   configData: ConfigPrefillData,
+  dropdownOnly = false,
 ) {
   if (!tag.targetTable || !tag.cellRange || !tag.columnMappings) return
 
@@ -333,18 +335,21 @@ function applyOneConfigPrefill(
     for (const colDef of columns) {
       const colIndex = resolveColIndex(colDef)
 
-      let value: unknown
-      if (colDef.format) {
-        // Template string: "{name}（{measurementUnit}）"
-        value = colDef.format.replace(/\{(\w+)\}/g, (_, key: string) => String(record[key] ?? ''))
-      } else {
-        value = record[colDef.field]
-      }
-      if (value != null && value !== '') {
-        sheet.setValue(startRow + i, colIndex, value)
+      // Only write cell values when not in dropdownOnly mode (i.e. new submissions)
+      if (!dropdownOnly) {
+        let value: unknown
+        if (colDef.format) {
+          // Template string: "{name}（{measurementUnit}）"
+          value = colDef.format.replace(/\{(\w+)\}/g, (_, key: string) => String(record[key] ?? ''))
+        } else {
+          value = record[colDef.field]
+        }
+        if (value != null && value !== '') {
+          sheet.setValue(startRow + i, colIndex, value)
+        }
       }
 
-      // Set dropdown validator on this cell
+      // Set dropdown validator on this cell (ALWAYS, regardless of dropdownOnly)
       if (DataValidation) {
         const dropdownVals = colDropdownValues.get(colIndex)
         if (dropdownVals?.length) {
