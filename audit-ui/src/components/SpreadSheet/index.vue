@@ -120,10 +120,9 @@ async function initWorkbook() {
           applyPrefill(workbook, tags, prefillData)
         }
 
-        // Config-driven prefill + dropdown validators
-        // Values are only written for new submissions; dropdowns are ALWAYS set
+        // Config-driven prefill: always write values + dropdowns + hide empty rows
         if (configPrefillData) {
-          applyConfigPrefill(workbook, tags, configPrefillData, !!currentSubmission)
+          applyConfigPrefill(workbook, tags, configPrefillData)
         }
 
         // Inject dictionary-based dropdown validators (uses pre-fetched tags)
@@ -214,7 +213,6 @@ function applyConfigPrefill(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tags: TplTagMapping[],
   configData: ConfigPrefillData,
-  dropdownOnly = false,
 ) {
   try {
     const prefillTags = tags.filter(t => t.mappingType === 'CONFIG_PREFILL')
@@ -225,7 +223,7 @@ function applyConfigPrefill(
     try {
       for (const tag of prefillTags) {
         try {
-          applyOneConfigPrefill(wb, tag, configData, dropdownOnly)
+          applyOneConfigPrefill(wb, tag, configData)
         } catch (e) {
           console.warn(`[config-prefill] failed for tag "${tag.tagName}":`, e)
         }
@@ -242,7 +240,6 @@ function applyOneConfigPrefill(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tag: TplTagMapping,
   configData: ConfigPrefillData,
-  dropdownOnly = false,
 ) {
   if (!tag.targetTable || !tag.cellRange || !tag.columnMappings) return
 
@@ -251,9 +248,12 @@ function applyOneConfigPrefill(
   if (!allRecords?.length) return
 
   // 2. Parse columnMappings JSON
+  // mode: "prefill" (default) = write values + dropdowns + hide empty rows
+  //       "dropdown_only" = only inject dropdowns, no value writing, no row hiding
   let config: {
     filter?: Record<string, unknown>
-    columns: Array<{ col: string | number; field: string; format?: string }>
+    mode?: 'prefill' | 'dropdown_only'
+    columns: Array<{ col: string | number; field: string; format?: string; dropdown?: boolean; prefill?: boolean }>
   }
   try {
     config = JSON.parse(tag.columnMappings)
@@ -292,15 +292,8 @@ function applyOneConfigPrefill(
     return
   }
 
-  // 6. Fill rows (truncate if records exceed available rows)
-  const rowsToFill = Math.min(records.length, maxRows)
-  if (records.length > maxRows) {
-    console.warn(
-      `[config-prefill] "${tag.tagName}": ${records.length} records exceed ${maxRows} available rows, truncated`,
-    )
-  }
-
-  // Helper: resolve column index from colDef (letter "A" → absolute, number → relative offset)
+  // 6. Resolve column indices helper
+  const isDropdownOnly = config.mode === 'dropdown_only'
   const resolveColIndex = (colDef: { col: string | number }) => {
     if (typeof colDef.col === 'string' && /^[A-Za-z]+$/.test(colDef.col)) {
       return letterToColIndex(colDef.col.toUpperCase())
@@ -308,9 +301,30 @@ function applyOneConfigPrefill(
     return startCol + Number(colDef.col)
   }
 
-  // 7. Build per-column deduplicated dropdown value lists from ALL filtered records
+  // Clear old data before writing (skip in dropdown_only mode)
+  if (!isDropdownOnly) {
+    for (let i = 0; i < maxRows; i++) {
+      for (const colDef of columns) {
+        if (colDef.prefill === false) continue // don't clear dropdown-only columns
+        const colIndex = resolveColIndex(colDef)
+        sheet.setValue(startRow + i, colIndex, null)
+      }
+    }
+  }
+
+  // 7. Fill rows (truncate if records exceed available rows)
+  const rowsToFill = Math.min(records.length, maxRows)
+  if (records.length > maxRows) {
+    console.warn(
+      `[config-prefill] "${tag.tagName}": ${records.length} records exceed ${maxRows} available rows, truncated`,
+    )
+  }
+
+  // 8. Build per-column deduplicated dropdown value lists from ALL filtered records
   const colDropdownValues = new Map<number, string[]>()
   for (const colDef of columns) {
+    // Skip dropdown for columns explicitly marked dropdown: false
+    if (colDef.dropdown === false) continue
     const colIndex = resolveColIndex(colDef)
     const values: string[] = []
     const seen = new Set<string>()
@@ -328,18 +342,17 @@ function applyOneConfigPrefill(
     }
   }
 
-  // 8. Fill rows AND set dropdown validators
+  // 9. Fill rows with values AND set dropdown validators
   const DataValidation = window.GC?.Spread?.Sheets?.DataValidation
   for (let i = 0; i < rowsToFill; i++) {
     const record = records[i]
     for (const colDef of columns) {
       const colIndex = resolveColIndex(colDef)
 
-      // Only write cell values when not in dropdownOnly mode (i.e. new submissions)
-      if (!dropdownOnly) {
+      // Write cell value (skip in dropdown_only mode or if prefill: false)
+      if (!isDropdownOnly && colDef.prefill !== false) {
         let value: unknown
         if (colDef.format) {
-          // Template string: "{name}（{measurementUnit}）"
           value = colDef.format.replace(/\{(\w+)\}/g, (_, key: string) => String(record[key] ?? ''))
         } else {
           value = record[colDef.field]
@@ -349,12 +362,11 @@ function applyOneConfigPrefill(
         }
       }
 
-      // Set dropdown validator on this cell (ALWAYS, regardless of dropdownOnly)
-      if (DataValidation) {
+      // Set dropdown validator (skip if dropdown: false)
+      if (DataValidation && colDef.dropdown !== false) {
         const dropdownVals = colDropdownValues.get(colIndex)
         if (dropdownVals?.length) {
           try {
-            // Sanitize: replace commas with fullwidth comma to avoid separator conflict
             const listStr = dropdownVals.map(v => v.replace(/,/g, '\uff0c')).join(',')
             const dv = DataValidation.createListValidator(listStr)
             dv.inCellDropdown(true)
@@ -370,29 +382,20 @@ function applyOneConfigPrefill(
     }
   }
 
-  // 9. Also set dropdowns on remaining empty rows in the range (for user to add more)
-  if (DataValidation) {
-    const extraRows = Math.min(maxRows, records.length + 20) // extend a few rows beyond data
-    for (let i = rowsToFill; i < extraRows; i++) {
-      for (const colDef of columns) {
-        const colIndex = resolveColIndex(colDef)
-        const dropdownVals = colDropdownValues.get(colIndex)
-        if (dropdownVals?.length) {
-          try {
-            const listStr = dropdownVals.map(v => v.replace(/,/g, '\uff0c')).join(',')
-            const dv = DataValidation.createListValidator(listStr)
-            dv.inCellDropdown(true)
-            dv.showInputMessage(true)
-            dv.inputTitle('请选择')
-            dv.inputMessage('点击下拉箭头选择')
-            sheet.setDataValidator(startRow + i, colIndex, dv)
-          } catch {
-            // best-effort
-          }
-        }
-      }
+  // 10. Hide empty rows beyond the filled data (skip in dropdown_only mode)
+  if (!isDropdownOnly) {
+    for (let i = 0; i < rowsToFill; i++) {
+      sheet.setRowVisible(startRow + i, true)
+    }
+    for (let i = rowsToFill; i < maxRows; i++) {
+      sheet.setRowVisible(startRow + i, false)
     }
   }
+
+  console.log(
+    `[config-prefill] "${tag.tagName}" [${isDropdownOnly ? 'dropdown_only' : 'prefill'}]: ` +
+    `${rowsToFill} rows processed` + (isDropdownOnly ? '' : `, ${maxRows - rowsToFill} empty rows hidden`),
+  )
 }
 
 /**
