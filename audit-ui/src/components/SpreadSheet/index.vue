@@ -1157,6 +1157,10 @@ function computeAllSheetStatuses() {
   const count = workbook.getSheetCount()
   const result: SheetFillStatus[] = []
   for (let si = 0; si < count; si++) {
+    // Skip hidden sheets — they should not appear in navigation
+    try {
+      if (!workbook.getSheet(si).visible()) continue
+    } catch { /* visible() not available, include sheet */ }
     result.push(computeOneSheetStatus(si))
   }
   sheetStatuses.value = result

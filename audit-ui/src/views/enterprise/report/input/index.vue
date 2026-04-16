@@ -205,6 +205,22 @@ onMounted(async () => {
         >
           打开填报
         </el-button>
+        <div v-if="isActive && !isReadonly" class="action-buttons">
+          <el-button
+            type="primary"
+            :loading="spreadRef?.saving"
+            @click="handleSaveDraft"
+          >
+            保存草稿
+          </el-button>
+          <el-button
+            type="success"
+            :loading="submitting"
+            @click="handleSubmit"
+          >
+            提交数据
+          </el-button>
+        </div>
       </div>
     </el-card>
 
@@ -240,22 +256,6 @@ onMounted(async () => {
         />
       </div>
 
-      <div class="action-bar" v-if="!isReadonly">
-        <el-button
-          type="primary"
-          :loading="spreadRef?.saving"
-          @click="handleSaveDraft"
-        >
-          保存草稿
-        </el-button>
-        <el-button
-          type="success"
-          :loading="submitting"
-          @click="handleSubmit"
-        >
-          提交数据
-        </el-button>
-      </div>
     </template>
   </div>
 </template>
@@ -280,6 +280,12 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.action-buttons {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+}
+
 .empty-area {
   flex: 1;
   display: flex;
@@ -294,12 +300,4 @@ onMounted(async () => {
   flex-direction: column;
 }
 
-.action-bar {
-  flex-shrink: 0;
-  display: flex;
-  gap: 12px;
-  padding: 12px 0;
-  border-top: 1px solid #ebeef5;
-  background: #fff;
-}
 </style>
