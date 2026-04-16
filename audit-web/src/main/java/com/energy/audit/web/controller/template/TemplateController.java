@@ -20,6 +20,8 @@ import com.github.pagehelper.PageInfo;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -46,6 +48,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/template")
 public class TemplateController {
+
+    private static final Logger log = LoggerFactory.getLogger(TemplateController.class);
 
     private final TemplateService templateService;
     private final TemplateVersionService versionService;
@@ -261,9 +265,20 @@ public class TemplateController {
     public R<TplSubmission> saveDraft(@RequestBody @Valid SaveDraftRequest req) {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        return R.ok(submissionService.saveDraft(
+        TplSubmission saved = submissionService.saveDraft(
                 enterpriseId, req.getTemplateId(), req.getAuditYear(),
-                req.getSubmissionJson(), req.getTemplateVersion()));
+                req.getSubmissionJson(), req.getTemplateVersion(),
+                req.getTemplateVersionId());
+
+        // Best-effort extraction in a separate transaction — failures never roll back the save
+        try {
+            submissionService.extractForDraft(saved.getId(), req.getTemplateVersionId());
+        } catch (Exception e) {
+            log.warn("Draft extraction failed (non-blocking) for submission {}: {}",
+                    saved.getId(), e.getMessage());
+        }
+
+        return R.ok(saved);
     }
 
     @Operation(summary = "提交填报（抽取 Tag 数据存入 extracted_data，status→1）")

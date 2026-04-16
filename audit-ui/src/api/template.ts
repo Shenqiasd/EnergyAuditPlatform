@@ -178,6 +178,7 @@ export function saveDraft(params: {
   auditYear: number
   submissionJson: string
   templateVersion: number
+  templateVersionId?: number
 }): Promise<TplSubmission> {
   return request.post('/template/submission/draft', params)
 }

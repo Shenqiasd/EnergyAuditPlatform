@@ -1106,6 +1106,7 @@ async function save(): Promise<void> {
       auditYear: props.auditYear,
       submissionJson: json,
       templateVersion: publishedVersion.version ?? 1,
+      templateVersionId: publishedVersion.id,
     })
     currentSubmission = saved
     emit('drafted', saved)
