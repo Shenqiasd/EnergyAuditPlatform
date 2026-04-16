@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import SheetNav, { type SheetFillStatus } from './SheetNav.vue'
 import {
   getPublishedVersion,
   getSubmission,
@@ -35,6 +36,13 @@ const loading = ref(false)
 const saving = ref(false)
 const errorMsg = ref('')
 
+// ── Sheet navigation state ─────────────────────────────────────────────
+const sheetStatuses = ref<SheetFillStatus[]>([])
+const activeSheetIndex = ref(0)
+const navCollapsed = ref(false)
+/** Set of sheet indices where user manually zoomed — skip auto-fit */
+const userZoomOverride = new Set<number>()
+
 let workbook: import('@/types/spreadjs').GCSpreadWorkbook | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let publishedVersion: TplTemplateVersion | null = null
@@ -64,6 +72,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopHeartbeat()
   releaseLockIfOwned()
+  window.removeEventListener('resize', onWindowResize)
+  if (statusUpdateTimer) clearTimeout(statusUpdateTimer)
+  if (resizeTimer) clearTimeout(resizeTimer)
   workbook?.destroy()
   workbook = null
 })
@@ -155,6 +166,15 @@ async function initWorkbook() {
     } else {
       startHeartbeat()
     }
+
+    // ── Sheet navigation setup ──────────────────────────────────────────
+    bindSheetNavEvents(workbook)
+    activeSheetIndex.value = workbook.getActiveSheetIndex()
+    computeAllSheetStatuses()
+    // Auto-fit the initial sheet after a tick to allow layout to settle
+    await nextTick()
+    autoFitCurrentSheet()
+    window.addEventListener('resize', onWindowResize)
   } catch (e: any) {
     errorMsg.value = '加载模板失败：' + (e?.message ?? '未知错误')
     releaseLockIfOwned()
@@ -1127,7 +1147,282 @@ function isSubmitted(): boolean {
   return currentSubmission?.status === 1
 }
 
-defineExpose({ save, getSubmissionId, getVersionId, isSubmitted, validateRequiredFields, saving, loading })
+// ── Sheet navigation helpers ───────────────────────────────────────────
+
+/**
+ * Compute fill status for every sheet based on cached tag mappings.
+ */
+function computeAllSheetStatuses() {
+  if (!workbook) return
+  const count = workbook.getSheetCount()
+  const result: SheetFillStatus[] = []
+  for (let si = 0; si < count; si++) {
+    result.push(computeOneSheetStatus(si))
+  }
+  sheetStatuses.value = result
+}
+
+function computeOneSheetStatus(sheetIndex: number): SheetFillStatus {
+  const wb = workbook!
+  const sheet = wb.getSheet(sheetIndex)
+  const name = sheet.name()
+
+  // Filter tags belonging to this sheet
+  const sheetTags = cachedTags.filter(t => {
+    if (t.sheetName) {
+      return t.sheetName.trim().toLowerCase() === name.trim().toLowerCase()
+    }
+    return (t.sheetIndex ?? 0) === sheetIndex
+  })
+  const requiredTags = sheetTags.filter(t => t.required === 1)
+  const totalRequired = requiredTags.length
+
+  if (totalRequired === 0) {
+    return { sheetIndex, sheetName: name, totalRequired: 0, filledRequired: 0, status: 'no_required' }
+  }
+
+  let filledRequired = 0
+  for (const tag of requiredTags) {
+    const mappingType = tag.mappingType ?? 'SCALAR'
+    if (mappingType === 'SCALAR') {
+      if (!isScalarCellEmpty(wb, tag)) filledRequired++
+    } else if (mappingType === 'TABLE' || mappingType === 'EQUIPMENT_BENCHMARK') {
+      if (!isTableEmpty(wb, tag)) filledRequired++
+    }
+  }
+
+  let status: SheetFillStatus['status']
+  if (filledRequired === totalRequired) {
+    status = 'completed'
+  } else if (filledRequired > 0) {
+    status = 'in_progress'
+  } else {
+    status = 'not_started'
+  }
+  return { sheetIndex, sheetName: name, totalRequired, filledRequired, status }
+}
+
+/**
+ * Debounced status update — only recalculates the active sheet.
+ */
+let statusUpdateTimer: ReturnType<typeof setTimeout> | null = null
+function debouncedUpdateFillStatus() {
+  if (statusUpdateTimer) clearTimeout(statusUpdateTimer)
+  statusUpdateTimer = setTimeout(() => {
+    if (!workbook) return
+    const idx = activeSheetIndex.value
+    const updated = computeOneSheetStatus(idx)
+    const arr = [...sheetStatuses.value]
+    if (arr[idx]) {
+      arr[idx] = updated
+      sheetStatuses.value = arr
+    }
+  }, 300)
+}
+
+/**
+ * Handle sheet selection from the nav panel.
+ */
+function onSheetSelect(index: number) {
+  if (!workbook) return
+  workbook.setActiveSheet(index)
+  activeSheetIndex.value = index
+  autoFitCurrentSheet()
+}
+
+/**
+ * Bind SpreadJS events for sheet navigation and fill status tracking.
+ */
+function bindSheetNavEvents(wb: import('@/types/spreadjs').GCSpreadWorkbook) {
+  const Events = window.GC?.Spread?.Sheets?.Events
+  if (!Events) return
+
+  // Hide native tab bar
+  if (wb.options && 'tabStripVisible' in wb.options) {
+    wb.options.tabStripVisible = false
+  }
+
+  // Track active sheet changes (from any source)
+  if (Events.ActiveSheetChanged) {
+    wb.bind(Events.ActiveSheetChanged, (_e: unknown, args: { newIndex?: number }) => {
+      if (args.newIndex != null) {
+        activeSheetIndex.value = args.newIndex
+      }
+    })
+  }
+
+  // Track cell changes for fill status updates
+  if (Events.CellChanged) {
+    const count = wb.getSheetCount()
+    for (let i = 0; i < count; i++) {
+      wb.getSheet(i).bind(Events.CellChanged, () => {
+        debouncedUpdateFillStatus()
+      })
+    }
+  }
+
+  // Track user zoom overrides
+  if (Events.ViewZoomed) {
+    const count = wb.getSheetCount()
+    for (let i = 0; i < count; i++) {
+      const si = i
+      wb.getSheet(i).bind(Events.ViewZoomed, () => {
+        userZoomOverride.add(si)
+      })
+    }
+  }
+}
+
+// ── Auto-fit zoom logic ────────────────────────────────────────────────
+
+/**
+ * Auto-fit the currently active sheet's zoom to show all content columns
+ * within the visible container width.
+ */
+function autoFitCurrentSheet() {
+  if (!workbook || !spreadRef.value) return
+  const idx = activeSheetIndex.value
+  if (userZoomOverride.has(idx)) return // user manually zoomed, respect it
+
+  const sheet = workbook.getSheet(idx)
+  if (!sheet) return
+
+  // Determine the last used column from tag mappings + content scan
+  let lastCol = -1
+
+  // 1. From tag mappings (fast, O(tags))
+  for (const tag of cachedTags) {
+    // Only consider tags on this sheet
+    const tagSheet = tag.sheetName?.trim().toLowerCase()
+    const sheetName = sheet.name().trim().toLowerCase()
+    const tagIdx = tag.sheetIndex ?? 0
+    if (tagSheet ? tagSheet !== sheetName : tagIdx !== idx) continue
+
+    if (tag.cellRange) {
+      const match = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)\d+:([A-Z]+)\d+/)
+      if (match) {
+        lastCol = Math.max(lastCol, letterToColIndex(match[2]))
+      }
+    }
+  }
+
+  // 2. If no tag mappings, do a limited scan (first 50 rows)
+  if (lastCol < 0) {
+    const scanRows = Math.min(sheet.getRowCount(), 50)
+    const scanCols = sheet.getColumnCount()
+    for (let r = 0; r < scanRows; r++) {
+      for (let c = scanCols - 1; c >= 0; c--) {
+        const val = sheet.getValue(r, c)
+        if (val != null && val !== '') {
+          lastCol = Math.max(lastCol, c)
+          break
+        }
+      }
+    }
+  }
+
+  if (lastCol < 0) return // empty sheet
+
+  // Calculate total content width at 100% zoom
+  let contentWidth = 0
+  for (let c = 0; c <= lastCol; c++) {
+    try {
+      contentWidth += sheet.getColumnWidth(c)
+    } catch {
+      contentWidth += 64 // default fallback
+    }
+  }
+
+  // Available width = container width minus nav panel and row header (~40px)
+  const navWidth = navCollapsed.value ? 44 : 200
+  const rowHeaderWidth = 40
+  const containerWidth = spreadRef.value.parentElement?.clientWidth ?? spreadRef.value.clientWidth
+  const availableWidth = containerWidth - navWidth - rowHeaderWidth
+
+  if (contentWidth <= availableWidth || availableWidth <= 0) {
+    // Content fits, reset to 100% if it was previously shrunk
+    sheet.zoom(1)
+    return
+  }
+
+  let zoomFactor = availableWidth / contentWidth
+  zoomFactor = Math.max(zoomFactor, 0.5)  // min 50%
+  zoomFactor = Math.min(zoomFactor, 1.0)  // max 100%
+
+  workbook.suspendPaint()
+  try {
+    sheet.zoom(zoomFactor)
+  } finally {
+    workbook.resumePaint()
+  }
+}
+
+let resizeTimer: ReturnType<typeof setTimeout> | null = null
+function onWindowResize() {
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(() => autoFitCurrentSheet(), 300)
+}
+
+// ── Enhanced validation (per-sheet grouped) ────────────────────────────
+
+export interface SheetValidationError {
+  sheetIndex: number
+  sheetName: string
+  errors: string[]
+}
+
+function validateRequiredFieldsBySheet(): SheetValidationError[] {
+  if (!workbook || !publishedVersion) return []
+  if (publishedVersion.protectionEnabled === 0) return []
+
+  const result: SheetValidationError[] = []
+  const count = workbook.getSheetCount()
+
+  for (let si = 0; si < count; si++) {
+    const sheet = workbook.getSheet(si)
+    const name = sheet.name()
+    const errors: string[] = []
+
+    const sheetTags = cachedTags.filter(t => {
+      if (t.sheetName) {
+        return t.sheetName.trim().toLowerCase() === name.trim().toLowerCase()
+      }
+      return (t.sheetIndex ?? 0) === si
+    })
+
+    for (const tag of sheetTags) {
+      if (tag.required !== 1) continue
+      const mappingType = tag.mappingType ?? 'SCALAR'
+      if (mappingType === 'SCALAR') {
+        if (isScalarCellEmpty(workbook, tag)) {
+          errors.push(`"${tag.fieldName ?? tag.tagName}" 为必填字段，请填写`)
+        }
+      } else if (mappingType === 'TABLE' || mappingType === 'EQUIPMENT_BENCHMARK') {
+        if (isTableEmpty(workbook, tag)) {
+          errors.push(`"${tag.tagName ?? tag.targetTable}" 至少需要填写1行数据`)
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      result.push({ sheetIndex: si, sheetName: name, errors })
+    }
+  }
+  return result
+}
+
+defineExpose({
+  save,
+  getSubmissionId,
+  getVersionId,
+  isSubmitted,
+  validateRequiredFields,
+  validateRequiredFieldsBySheet,
+  navigateToSheet: onSheetSelect,
+  saving,
+  loading,
+  sheetStatuses,
+})
 </script>
 
 <template>
@@ -1139,7 +1434,17 @@ defineExpose({ save, getSubmissionId, getVersionId, isSubmitted, validateRequire
       :closable="false"
       style="margin-bottom: 12px"
     />
-    <div v-show="!errorMsg" ref="spreadRef" class="spreadjs-host"></div>
+    <div v-show="!errorMsg" class="spreadsheet-body">
+      <SheetNav
+        v-if="sheetStatuses.length > 1"
+        :sheets="sheetStatuses"
+        :activeIndex="activeSheetIndex"
+        :collapsed="navCollapsed"
+        @select="onSheetSelect"
+        @update:collapsed="navCollapsed = $event"
+      />
+      <div ref="spreadRef" class="spreadjs-host"></div>
+    </div>
   </div>
 </template>
 
@@ -1151,11 +1456,17 @@ defineExpose({ save, getSubmissionId, getVersionId, isSubmitted, validateRequire
   flex-direction: column;
 }
 
+.spreadsheet-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
 .spreadjs-host {
   flex: 1;
-  width: 100%;
   min-height: 500px;
+  min-width: 0;
   border: 1px solid #e4e7ed;
-  border-radius: 4px;
+  border-radius: 0 4px 4px 0;
 }
 </style>

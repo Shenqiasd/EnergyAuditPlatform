@@ -88,14 +88,29 @@ async function handleSubmit() {
   // call below resets the submission to draft (status=0) before submitting,
   // so we no longer block re-submission here.
 
-  // Validate required fields before submission
-  const requiredErrors = spreadRef.value.validateRequiredFields()
-  if (requiredErrors.length > 0) {
-    ElMessageBox.alert(
-      requiredErrors.map((e, i) => `${i + 1}. ${e}`).join('\n'),
+  // Validate required fields before submission (grouped by sheet)
+  const sheetErrors = spreadRef.value.validateRequiredFieldsBySheet()
+  if (sheetErrors.length > 0) {
+    const lines: string[] = []
+    for (const se of sheetErrors) {
+      lines.push(`【${se.sheetName}】`)
+      for (const err of se.errors) {
+        lines.push(`  • ${err}`)
+      }
+    }
+    await ElMessageBox.alert(
+      lines.join('\n'),
       '必填字段未填写',
-      { type: 'warning', confirmButtonText: '知道了' }
+      {
+        type: 'warning',
+        confirmButtonText: '去填写',
+        dangerouslyUseHTMLString: false,
+      }
     )
+    // Navigate to the first sheet with errors
+    if (sheetErrors[0]) {
+      spreadRef.value.navigateToSheet(sheetErrors[0].sheetIndex)
+    }
     return
   }
 

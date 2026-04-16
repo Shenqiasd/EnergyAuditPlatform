@@ -17,6 +17,8 @@ export interface GCSpreadWorkbookOptions {
 export interface GCSpreadNameInfo {
   getRow(): number
   getColumn(): number
+  getRowCount(): number
+  getColumnCount(): number
 }
 
 export interface GCDataValidator {
@@ -81,14 +83,18 @@ export interface GCSpreadSheet {
   }
   getRowCount(): number
   getColumnCount(): number
+  getColumnWidth(col: number): number
   getTag(row: number, col: number): unknown
   getValue(row: number, col: number): unknown
   setValue(row: number, col: number, value: unknown): void
   getCell(row: number, col: number): GCCellRange
   getRange(row: number, col: number, rowCount: number, colCount: number): GCRange
   setDataValidator(row: number, col: number, validator: GCDataValidator): void
+  setRowVisible(row: number, visible: boolean): void
   getCustomName(name: string): GCSpreadNameInfo | null
   name(): string
+  visible(): boolean
+  zoom(factor: number): void
   getDefaultStyle(): GCDefaultStyle | null
   setDefaultStyle(style: GCDefaultStyle): void
   bind(eventType: string, handler: (...args: unknown[]) => void): void
@@ -103,12 +109,16 @@ export interface GCSpreadWorkbook {
   toJSON(): object
   getSheetCount(): number
   getSheet(index: number): GCSpreadSheet
+  getActiveSheetIndex(): number
+  setActiveSheet(index: number): void
   getCustomName(name: string): GCSpreadNameInfo | null
   commandManager(): GCSpreadCommandManager
   suspendPaint(): void
   resumePaint(): void
+  repaint(): void
   destroy(): void
-  options: GCSpreadWorkbookOptions
+  options: GCSpreadWorkbookOptions & { tabStripVisible?: boolean }
+  bind(eventType: string, handler: (...args: unknown[]) => void): void
 }
 
 export interface GCSpreadDesigner {
@@ -131,6 +141,9 @@ export interface GCSpreadSheetsWorkbookConstructor {
 
 export interface GCSpreadSheetsEvents {
   ValidationError: string
+  ActiveSheetChanged: string
+  CellChanged: string
+  ViewZoomed: string
 }
 
 export interface GCSpreadSheets {
