@@ -1217,8 +1217,10 @@ function debouncedUpdateFillStatus() {
     const idx = activeSheetIndex.value
     const updated = computeOneSheetStatus(idx)
     const arr = [...sheetStatuses.value]
-    if (arr[idx]) {
-      arr[idx] = updated
+    // Find by sheetIndex (not array position) since hidden sheets are filtered out
+    const pos = arr.findIndex(s => s.sheetIndex === idx)
+    if (pos >= 0) {
+      arr[pos] = updated
       sheetStatuses.value = arr
     }
   }, 300)
