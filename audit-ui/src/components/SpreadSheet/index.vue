@@ -1225,7 +1225,7 @@ function debouncedUpdateFillStatus() {
  */
 function onSheetSelect(index: number) {
   if (!workbook) return
-  workbook.setActiveSheet(index)
+  workbook.setActiveSheetIndex(index)
   activeSheetIndex.value = index
   autoFitCurrentSheet()
 }

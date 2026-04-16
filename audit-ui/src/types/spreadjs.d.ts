@@ -110,7 +110,8 @@ export interface GCSpreadWorkbook {
   getSheetCount(): number
   getSheet(index: number): GCSpreadSheet
   getActiveSheetIndex(): number
-  setActiveSheet(index: number): void
+  setActiveSheet(name: string): void
+  setActiveSheetIndex(index: number): void
   getCustomName(name: string): GCSpreadNameInfo | null
   commandManager(): GCSpreadCommandManager
   suspendPaint(): void
