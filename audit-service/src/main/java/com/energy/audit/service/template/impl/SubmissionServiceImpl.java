@@ -75,6 +75,7 @@ public class SubmissionServiceImpl implements SubmissionService {
                 existing.setStatus(0);
                 existing.setSubmitTime(null);
                 existing.setReviewComment(null);
+                existing.setExtractedData(null);
             }
             existing.setSubmissionJson(submissionJson);
             existing.setTemplateVersion(templateVersion);
