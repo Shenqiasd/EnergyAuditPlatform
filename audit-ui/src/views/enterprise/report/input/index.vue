@@ -28,6 +28,27 @@ const lockAcquired = ref(false)
 
 const spreadRef = ref<InstanceType<typeof SpreadSheet>>()
 
+const LAST_TEMPLATE_KEY = 'audit_last_template'
+
+function saveLastTemplate() {
+  if (selectedTemplateId.value && selectedYear.value) {
+    localStorage.setItem(LAST_TEMPLATE_KEY, JSON.stringify({
+      templateId: selectedTemplateId.value,
+      auditYear: selectedYear.value,
+    }))
+  }
+}
+
+function loadLastTemplate(): { templateId: number; auditYear: number } | null {
+  try {
+    const raw = localStorage.getItem(LAST_TEMPLATE_KEY)
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    if (obj?.templateId && obj?.auditYear) return obj
+  } catch { /* ignore corrupt data */ }
+  return null
+}
+
 async function loadTemplates() {
   const res = await getTemplateList({ status: 1, pageSize: 200 })
   templates.value = res.rows ?? []
@@ -64,6 +85,7 @@ async function openTemplate() {
     lockLoading.value = false
   }
   isActive.value = true
+  saveLastTemplate()
 }
 
 function onTemplateChange() {
@@ -160,6 +182,18 @@ onMounted(async () => {
   }
   if (qYear) {
     selectedYear.value = Number(qYear)
+  }
+  // Fallback: restore from localStorage if no URL params provided
+  if (!selectedTemplateId.value) {
+    const last = loadLastTemplate()
+    if (last) {
+      // Only restore if the template still exists in the published list
+      const exists = templates.value.some(t => t.id === last.templateId)
+      if (exists) {
+        selectedTemplateId.value = last.templateId
+        selectedYear.value = last.auditYear
+      }
+    }
   }
   if (selectedTemplateId.value) {
     openTemplate()
