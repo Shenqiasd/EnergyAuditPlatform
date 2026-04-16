@@ -103,6 +103,10 @@ public class SubmissionServiceImpl implements SubmissionService {
         if (sub == null) {
             throw new BusinessException("填报记录不存在或无权操作: " + submissionId);
         }
+        // Block re-submission of approved submissions — data integrity after audit approval
+        if (sub.getStatus() == 2) {
+            throw new BusinessException("该模板已审核通过，不允许重新提交");
+        }
         // Allow re-submission: re-extract with latest tag mappings and overwrite previous results
 
         // M-3: validate that the supplied templateVersionId belongs to the same template
