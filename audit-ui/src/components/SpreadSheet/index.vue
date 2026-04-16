@@ -40,6 +40,7 @@ const errorMsg = ref('')
 const sheetStatuses = ref<SheetFillStatus[]>([])
 const activeSheetIndex = ref(0)
 const navCollapsed = ref(false)
+const currentZoom = ref(100) // percentage display for zoom bar
 /** Set of sheet indices where user manually zoomed — skip auto-fit */
 const userZoomOverride = new Set<number>()
 
@@ -1234,6 +1235,7 @@ function onSheetSelect(index: number) {
   workbook.setActiveSheetIndex(index)
   activeSheetIndex.value = index
   autoFitCurrentSheet()
+  syncZoomDisplay()
 }
 
 /**
@@ -1274,6 +1276,7 @@ function bindSheetNavEvents(wb: import('@/types/spreadjs').GCSpreadWorkbook) {
       const si = i
       wb.getSheet(i).bind(Events.ViewZoomed, () => {
         userZoomOverride.add(si)
+        syncZoomDisplay()
       })
     }
   }
@@ -1369,6 +1372,56 @@ function onWindowResize() {
   resizeTimer = setTimeout(() => autoFitCurrentSheet(), 300)
 }
 
+/**
+ * Sync the currentZoom display from the active sheet's actual zoom level.
+ */
+function syncZoomDisplay() {
+  if (!workbook) return
+  try {
+    const sheet = workbook.getSheet(activeSheetIndex.value)
+    if (sheet) {
+      // SpreadJS zoom() with no args returns current zoom factor (0.0-x.x)
+      const factor = (sheet as any).zoom()
+      if (typeof factor === 'number' && factor > 0) {
+        currentZoom.value = Math.round(factor * 100)
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * Manual zoom: set zoom to a specific percentage.
+ */
+function setZoom(percent: number) {
+  if (!workbook) return
+  const clamped = Math.max(25, Math.min(400, percent))
+  const factor = clamped / 100
+  const sheet = workbook.getSheet(activeSheetIndex.value)
+  if (!sheet) return
+  userZoomOverride.add(activeSheetIndex.value)
+  workbook.suspendPaint()
+  try {
+    sheet.zoom(factor)
+  } finally {
+    workbook.resumePaint()
+  }
+  currentZoom.value = clamped
+}
+
+function zoomIn() {
+  setZoom(currentZoom.value + 10)
+}
+
+function zoomOut() {
+  setZoom(currentZoom.value - 10)
+}
+
+function resetZoom() {
+  userZoomOverride.delete(activeSheetIndex.value)
+  autoFitCurrentSheet()
+  syncZoomDisplay()
+}
+
 // ── Enhanced validation (per-sheet grouped) ────────────────────────────
 
 export interface SheetValidationError {
@@ -1449,7 +1502,16 @@ defineExpose({
         @select="onSheetSelect"
         @update:collapsed="navCollapsed = $event"
       />
-      <div ref="spreadRef" class="spreadjs-host"></div>
+      <div class="spreadjs-column">
+        <div ref="spreadRef" class="spreadjs-host"></div>
+        <div class="zoom-bar">
+          <button class="zoom-btn" title="缩小" @click="zoomOut">−</button>
+          <span class="zoom-value" :title="'点击重置为自适应'" @click="resetZoom">
+            {{ currentZoom }}%
+          </span>
+          <button class="zoom-btn" title="放大" @click="zoomIn">+</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -1468,11 +1530,67 @@ defineExpose({
   min-height: 0;
 }
 
+.spreadjs-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .spreadjs-host {
   flex: 1;
   min-height: 500px;
   min-width: 0;
   border: 1px solid #e4e7ed;
   border-radius: 0 4px 4px 0;
+}
+
+.zoom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 4px 12px;
+  background: #fafbfc;
+  border: 1px solid #e4e7ed;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+}
+
+.zoom-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #dcdfe6;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  color: #606266;
+  transition: color 0.2s, border-color 0.2s;
+
+  &:hover {
+    color: #409eff;
+    border-color: #409eff;
+  }
+
+  &:active {
+    background: #ecf5ff;
+  }
+}
+
+.zoom-value {
+  min-width: 48px;
+  text-align: center;
+  font-size: 12px;
+  color: #606266;
+  cursor: pointer;
+  user-select: none;
+
+  &:hover {
+    color: #409eff;
+  }
 }
 </style>
