@@ -261,10 +261,19 @@ public class TemplateController {
     public R<TplSubmission> saveDraft(@RequestBody @Valid SaveDraftRequest req) {
         requireEnterprise();
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        return R.ok(submissionService.saveDraft(
+        TplSubmission saved = submissionService.saveDraft(
                 enterpriseId, req.getTemplateId(), req.getAuditYear(),
                 req.getSubmissionJson(), req.getTemplateVersion(),
-                req.getTemplateVersionId()));
+                req.getTemplateVersionId());
+
+        // Best-effort extraction in a separate transaction — failures never roll back the save
+        try {
+            submissionService.extractForDraft(saved.getId(), req.getTemplateVersionId());
+        } catch (Exception ignored) {
+            // extractForDraft already logs internally; swallow here to guarantee 200 OK
+        }
+
+        return R.ok(saved);
     }
 
     @Operation(summary = "提交填报（抽取 Tag 数据存入 extracted_data，status→1）")

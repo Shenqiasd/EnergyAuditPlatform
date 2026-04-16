@@ -32,6 +32,12 @@ public interface SubmissionService {
      */
     void submit(Long submissionId, Long templateVersionId);
 
+    /**
+     * Best-effort data extraction for a draft submission.
+     * Runs in its own transaction so failures never roll back the save.
+     */
+    void extractForDraft(Long submissionId, Long templateVersionId);
+
     /** Find existing submission by unique business key */
     TplSubmission getByKey(Long enterpriseId, Long templateId, Integer auditYear);
 

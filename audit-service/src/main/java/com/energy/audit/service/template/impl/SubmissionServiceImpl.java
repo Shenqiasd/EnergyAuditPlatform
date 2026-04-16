@@ -53,6 +53,9 @@ public class SubmissionServiceImpl implements SubmissionService {
     public TplSubmission saveDraft(Long enterpriseId, Long templateId, Integer auditYear,
                                    String submissionJson, Integer templateVersion,
                                    Long templateVersionId) {
+        // NOTE: templateVersionId is accepted but NOT used inside this transaction.
+        // Extraction runs in a separate transaction via extractForDraft() called by the controller,
+        // so that extraction failures never cause the save to roll back.
         // M-4: validate JSON format before persisting
         validateJson(submissionJson);
 
@@ -72,10 +75,6 @@ public class SubmissionServiceImpl implements SubmissionService {
             existing.setTemplateVersion(templateVersion);
             existing.setUpdateBy(operator);
             submissionMapper.updateById(existing);
-
-            // Best-effort data extraction on draft save
-            extractOnDraft(existing, enterpriseId, auditYear, submissionJson, templateVersionId);
-
             return existing;
         }
         TplSubmission sub = new TplSubmission();
@@ -88,10 +87,6 @@ public class SubmissionServiceImpl implements SubmissionService {
         sub.setCreateBy(operator);
         sub.setUpdateBy(operator);
         submissionMapper.insert(sub);
-
-        // Best-effort data extraction on draft save
-        extractOnDraft(sub, enterpriseId, auditYear, submissionJson, templateVersionId);
-
         return sub;
     }
 
@@ -154,33 +149,38 @@ public class SubmissionServiceImpl implements SubmissionService {
     }
 
     /**
-     * Best-effort data extraction during draft save.
-     * Failures are logged but never block the save operation.
+     * Best-effort data extraction for a draft submission.
+     * Runs in its OWN transaction (REQUIRES_NEW) so that failures never cause
+     * the preceding saveDraft transaction to roll back.
+     * Called from the controller layer AFTER saveDraft() has committed.
      */
-    private void extractOnDraft(TplSubmission sub, Long enterpriseId, Integer auditYear,
-                                String submissionJson, Long templateVersionId) {
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void extractForDraft(Long submissionId, Long templateVersionId) {
         if (templateVersionId == null) return;
         try {
+            TplSubmission sub = submissionMapper.selectById(submissionId);
+            if (sub == null) return;
+
             List<TplTagMapping> mappings = tagMappingService.listByVersionId(templateVersionId);
             if (mappings.isEmpty()) return;
 
-            Map<String, Object> extracted = dataExtractor.extractData(submissionJson, mappings);
+            Map<String, Object> extracted = dataExtractor.extractData(sub.getSubmissionJson(), mappings);
             String extractedJson = objectMapper.writeValueAsString(extracted);
 
             dataPersistenceService.persistExtractedData(
-                    sub.getId(), enterpriseId, auditYear, extracted, mappings);
+                    submissionId, sub.getEnterpriseId(), sub.getAuditYear(), extracted, mappings);
 
             TplSubmission upd = new TplSubmission();
-            upd.setId(sub.getId());
+            upd.setId(submissionId);
             upd.setExtractedData(extractedJson);
             upd.setUpdateBy(SecurityUtils.getRequiredCurrentUsername());
             submissionMapper.updateById(upd);
 
             log.info("Draft extraction succeeded for submission {} (versionId={})",
-                    sub.getId(), templateVersionId);
+                    submissionId, templateVersionId);
         } catch (Exception e) {
             log.warn("Draft extraction failed (non-blocking) for submission {}: {}",
-                    sub.getId(), e.getMessage());
+                    submissionId, e.getMessage());
         }
     }
 
