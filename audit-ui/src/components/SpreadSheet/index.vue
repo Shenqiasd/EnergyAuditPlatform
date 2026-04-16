@@ -175,6 +175,7 @@ async function initWorkbook() {
     // Auto-fit the initial sheet after a tick to allow layout to settle
     await nextTick()
     autoFitCurrentSheet()
+    syncZoomDisplay()
     window.addEventListener('resize', onWindowResize)
   } catch (e: any) {
     errorMsg.value = '加载模板失败：' + (e?.message ?? '未知错误')
@@ -1342,11 +1343,10 @@ function autoFitCurrentSheet() {
     }
   }
 
-  // Available width = container width minus nav panel and row header (~40px)
-  const navWidth = navCollapsed.value ? 44 : 200
+  // Available width = spreadjs-column width (already excludes nav panel) minus row header (~40px)
   const rowHeaderWidth = 40
   const containerWidth = spreadRef.value.parentElement?.clientWidth ?? spreadRef.value.clientWidth
-  const availableWidth = containerWidth - navWidth - rowHeaderWidth
+  const availableWidth = containerWidth - rowHeaderWidth
 
   if (contentWidth <= availableWidth || availableWidth <= 0) {
     // Content fits, reset to 100% if it was previously shrunk
@@ -1369,7 +1369,7 @@ function autoFitCurrentSheet() {
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
 function onWindowResize() {
   if (resizeTimer) clearTimeout(resizeTimer)
-  resizeTimer = setTimeout(() => autoFitCurrentSheet(), 300)
+  resizeTimer = setTimeout(() => { autoFitCurrentSheet(); syncZoomDisplay() }, 300)
 }
 
 /**
