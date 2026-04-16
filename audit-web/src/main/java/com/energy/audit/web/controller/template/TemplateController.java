@@ -263,7 +263,8 @@ public class TemplateController {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         return R.ok(submissionService.saveDraft(
                 enterpriseId, req.getTemplateId(), req.getAuditYear(),
-                req.getSubmissionJson(), req.getTemplateVersion()));
+                req.getSubmissionJson(), req.getTemplateVersion(),
+                req.getTemplateVersionId()));
     }
 
     @Operation(summary = "提交填报（抽取 Tag 数据存入 extracted_data，status→1）")

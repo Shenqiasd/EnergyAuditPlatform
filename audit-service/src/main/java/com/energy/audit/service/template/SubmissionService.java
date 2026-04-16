@@ -17,7 +17,8 @@ public interface SubmissionService {
      * @return saved/updated submission
      */
     TplSubmission saveDraft(Long enterpriseId, Long templateId, Integer auditYear,
-                            String submissionJson, Integer templateVersion);
+                            String submissionJson, Integer templateVersion,
+                            Long templateVersionId);
 
     /**
      * Submit the draft:

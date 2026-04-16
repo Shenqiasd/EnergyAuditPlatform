@@ -18,6 +18,9 @@ public class SaveDraftRequest {
 
     private String submissionJson;
 
+    /** Optional: when provided, data extraction runs on save (best-effort). */
+    private Long templateVersionId;
+
     public Long getTemplateId() { return templateId; }
     public void setTemplateId(Long templateId) { this.templateId = templateId; }
 
@@ -29,4 +32,7 @@ public class SaveDraftRequest {
 
     public String getSubmissionJson() { return submissionJson; }
     public void setSubmissionJson(String submissionJson) { this.submissionJson = submissionJson; }
+
+    public Long getTemplateVersionId() { return templateVersionId; }
+    public void setTemplateVersionId(Long templateVersionId) { this.templateVersionId = templateVersionId; }
 }

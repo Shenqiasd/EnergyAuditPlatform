@@ -13,6 +13,8 @@ import com.energy.audit.service.template.TagMappingService;
 import com.energy.audit.service.template.TemplateVersionService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,8 @@ import java.util.Map;
 
 @Service
 public class SubmissionServiceImpl implements SubmissionService {
+
+    private static final Logger log = LoggerFactory.getLogger(SubmissionServiceImpl.class);
 
     private final TplSubmissionMapper submissionMapper;
     private final TagMappingService tagMappingService;
@@ -47,7 +51,8 @@ public class SubmissionServiceImpl implements SubmissionService {
     @Override
     @Transactional
     public TplSubmission saveDraft(Long enterpriseId, Long templateId, Integer auditYear,
-                                   String submissionJson, Integer templateVersion) {
+                                   String submissionJson, Integer templateVersion,
+                                   Long templateVersionId) {
         // M-4: validate JSON format before persisting
         validateJson(submissionJson);
 
@@ -67,6 +72,10 @@ public class SubmissionServiceImpl implements SubmissionService {
             existing.setTemplateVersion(templateVersion);
             existing.setUpdateBy(operator);
             submissionMapper.updateById(existing);
+
+            // Best-effort data extraction on draft save
+            extractOnDraft(existing, enterpriseId, auditYear, submissionJson, templateVersionId);
+
             return existing;
         }
         TplSubmission sub = new TplSubmission();
@@ -79,6 +88,10 @@ public class SubmissionServiceImpl implements SubmissionService {
         sub.setCreateBy(operator);
         sub.setUpdateBy(operator);
         submissionMapper.insert(sub);
+
+        // Best-effort data extraction on draft save
+        extractOnDraft(sub, enterpriseId, auditYear, submissionJson, templateVersionId);
+
         return sub;
     }
 
@@ -138,6 +151,37 @@ public class SubmissionServiceImpl implements SubmissionService {
             throw new BusinessException("填报记录不存在: " + id);
         }
         return sub;
+    }
+
+    /**
+     * Best-effort data extraction during draft save.
+     * Failures are logged but never block the save operation.
+     */
+    private void extractOnDraft(TplSubmission sub, Long enterpriseId, Integer auditYear,
+                                String submissionJson, Long templateVersionId) {
+        if (templateVersionId == null) return;
+        try {
+            List<TplTagMapping> mappings = tagMappingService.listByVersionId(templateVersionId);
+            if (mappings.isEmpty()) return;
+
+            Map<String, Object> extracted = dataExtractor.extractData(submissionJson, mappings);
+            String extractedJson = objectMapper.writeValueAsString(extracted);
+
+            dataPersistenceService.persistExtractedData(
+                    sub.getId(), enterpriseId, auditYear, extracted, mappings);
+
+            TplSubmission upd = new TplSubmission();
+            upd.setId(sub.getId());
+            upd.setExtractedData(extractedJson);
+            upd.setUpdateBy(SecurityUtils.getRequiredCurrentUsername());
+            submissionMapper.updateById(upd);
+
+            log.info("Draft extraction succeeded for submission {} (versionId={})",
+                    sub.getId(), templateVersionId);
+        } catch (Exception e) {
+            log.warn("Draft extraction failed (non-blocking) for submission {}: {}",
+                    sub.getId(), e.getMessage());
+        }
     }
 
     /** M-4: ensure submissionJson is well-formed JSON before persisting */
