@@ -63,6 +63,10 @@ public class SubmissionServiceImpl implements SubmissionService {
         TplSubmission existing = submissionMapper.selectByEnterpriseTemplateYear(
                 enterpriseId, templateId, auditYear);
         if (existing != null) {
+            // Block modifications to approved submissions — data integrity after audit approval
+            if (existing.getStatus() == 2) {
+                throw new BusinessException("该模板已审核通过，不允许修改");
+            }
             // Allow overwriting after submission or rejection — enterprise may need to correct data
             if (existing.getStatus() == 1 || existing.getStatus() == 3) {
                 // Use dedicated SQL to NULL out submit_time & extracted_data & review_comment
