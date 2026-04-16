@@ -29,3 +29,4 @@ application-local.yml
 # Scratch / review notes (never commit)
 attached_assets/
 audit-web/upload/
+deploy-tencent/ssl/

@@ -30,20 +30,22 @@ if ! docker compose version &> /dev/null; then
 fi
 docker compose version
 
-# Step 3: Create SSL directory (self-signed cert for initial test)
+# Step 3: Check SSL certificate
 echo ""
-echo "[3/6] 生成临时自签名 SSL 证书..."
+echo "[3/6] 检查 SSL 证书..."
 mkdir -p ssl
-if [ ! -f ssl/fullchain.pem ]; then
+if [ -f ssl/fullchain.pem ] && [ -f ssl/privkey.pem ]; then
+    echo "SSL 证书已就绪 (energyaudit.ben-china.org.cn)"
+    openssl x509 -in ssl/fullchain.pem -noout -subject -enddate 2>/dev/null || true
+else
+    echo "警告: SSL 证书不存在，生成临时自签名证书..."
     openssl req -x509 -nodes -days 365 \
         -newkey rsa:2048 \
         -keyout ssl/privkey.pem \
         -out ssl/fullchain.pem \
-        -subj "/CN=sjs.ben-china.org.cn" \
+        -subj "/CN=energyaudit.ben-china.org.cn" \
         2>/dev/null
-    echo "自签名证书已生成 (后续替换为 Let's Encrypt)"
-else
-    echo "SSL 证书已存在，跳过"
+    echo "临时自签名证书已生成（浏览器会提示不安全）"
 fi
 
 # Step 4: Import MySQL data
@@ -97,9 +99,9 @@ echo "========================================="
 echo "  部署完成!"
 echo "========================================="
 echo ""
-echo "  HTTPS: https://43.247.89.187  (自签名证书，浏览器会提示不安全)"
+echo "  域名: https://energyaudit.ben-china.org.cn"
+echo "  IP:   https://43.247.89.187"
 echo ""
-echo "  下一步:"
-echo "  1. 将 DNS (sjs.ben-china.org.cn) A 记录指向 43.247.89.187"
-echo "  2. 替换自签名证书为正式证书"
+echo "  请确保 DNS 已配置:"
+echo "  energyaudit.ben-china.org.cn  A  43.247.89.187"
 echo "========================================="
