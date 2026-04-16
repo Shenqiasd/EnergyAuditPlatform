@@ -154,6 +154,10 @@ public class AuditTaskServiceImpl implements AuditTaskService {
         task.setUpdateBy(operatorName);
         taskMapper.updateById(task);
 
+        // Sync: mark all submitted templates as approved
+        submissionMapper.batchUpdateStatusByEnterpriseAndYear(
+                task.getEnterpriseId(), task.getAuditYear(), 1, 2, null, operatorName);
+
         addLog(taskId, operatorId, "APPROVE", comment, operatorName);
     }
 
@@ -172,6 +176,10 @@ public class AuditTaskServiceImpl implements AuditTaskService {
         task.setResult(comment);
         task.setUpdateBy(operatorName);
         taskMapper.updateById(task);
+
+        // Sync: mark all submitted templates as rejected with the review comment
+        submissionMapper.batchUpdateStatusByEnterpriseAndYear(
+                task.getEnterpriseId(), task.getAuditYear(), 1, 3, comment, operatorName);
 
         addLog(taskId, operatorId, "REJECT", comment, operatorName);
     }

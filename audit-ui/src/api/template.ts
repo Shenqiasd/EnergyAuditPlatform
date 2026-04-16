@@ -60,6 +60,7 @@ export interface TplSubmission {
   submissionJson?: string
   extractedData?: string
   status?: number
+  reviewComment?: string
   submitTime?: string
   createTime?: string
   updateTime?: string
@@ -178,6 +179,7 @@ export function saveDraft(params: {
   auditYear: number
   submissionJson: string
   templateVersion: number
+  templateVersionId?: number
 }): Promise<TplSubmission> {
   return request.post('/template/submission/draft', params)
 }

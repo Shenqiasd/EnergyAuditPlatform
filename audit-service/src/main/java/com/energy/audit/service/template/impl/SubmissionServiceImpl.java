@@ -13,6 +13,8 @@ import com.energy.audit.service.template.TagMappingService;
 import com.energy.audit.service.template.TemplateVersionService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,8 @@ import java.util.Map;
 
 @Service
 public class SubmissionServiceImpl implements SubmissionService {
+
+    private static final Logger log = LoggerFactory.getLogger(SubmissionServiceImpl.class);
 
     private final TplSubmissionMapper submissionMapper;
     private final TagMappingService tagMappingService;
@@ -47,7 +51,11 @@ public class SubmissionServiceImpl implements SubmissionService {
     @Override
     @Transactional
     public TplSubmission saveDraft(Long enterpriseId, Long templateId, Integer auditYear,
-                                   String submissionJson, Integer templateVersion) {
+                                   String submissionJson, Integer templateVersion,
+                                   Long templateVersionId) {
+        // NOTE: templateVersionId is accepted but NOT used inside this transaction.
+        // Extraction runs in a separate transaction via extractForDraft() called by the controller,
+        // so that extraction failures never cause the save to roll back.
         // M-4: validate JSON format before persisting
         validateJson(submissionJson);
 
@@ -55,13 +63,19 @@ public class SubmissionServiceImpl implements SubmissionService {
         TplSubmission existing = submissionMapper.selectByEnterpriseTemplateYear(
                 enterpriseId, templateId, auditYear);
         if (existing != null) {
-            // Allow overwriting even after submission — enterprise may need to correct data
-            if (existing.getStatus() == 1) {
-                // Use dedicated SQL to NULL out submit_time & extracted_data
+            // Block modifications to approved submissions — data integrity after audit approval
+            if (existing.getStatus() == 2) {
+                throw new BusinessException("该模板已审核通过，不允许修改");
+            }
+            // Allow overwriting after submission or rejection — enterprise may need to correct data
+            if (existing.getStatus() == 1 || existing.getStatus() == 3) {
+                // Use dedicated SQL to NULL out submit_time & extracted_data & review_comment
                 // (generic updateById skips null fields due to MyBatis <if> guards)
                 submissionMapper.resetToDraft(existing.getId(), operator);
                 existing.setStatus(0);
                 existing.setSubmitTime(null);
+                existing.setReviewComment(null);
+                existing.setExtractedData(null);
             }
             existing.setSubmissionJson(submissionJson);
             existing.setTemplateVersion(templateVersion);
@@ -89,6 +103,10 @@ public class SubmissionServiceImpl implements SubmissionService {
         TplSubmission sub = submissionMapper.selectByIdAndEnterprise(submissionId, enterpriseId);
         if (sub == null) {
             throw new BusinessException("填报记录不存在或无权操作: " + submissionId);
+        }
+        // Block re-submission of approved submissions — data integrity after audit approval
+        if (sub.getStatus() == 2) {
+            throw new BusinessException("该模板已审核通过，不允许重新提交");
         }
         // Allow re-submission: re-extract with latest tag mappings and overwrite previous results
 
@@ -138,6 +156,43 @@ public class SubmissionServiceImpl implements SubmissionService {
             throw new BusinessException("填报记录不存在: " + id);
         }
         return sub;
+    }
+
+    /**
+     * Best-effort data extraction for a draft submission.
+     * Runs in its OWN transaction (REQUIRES_NEW) so that failures never cause
+     * the preceding saveDraft transaction to roll back.
+     * Called from the controller layer AFTER saveDraft() has committed.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void extractForDraft(Long submissionId, Long templateVersionId) {
+        if (templateVersionId == null) return;
+
+        TplSubmission sub = submissionMapper.selectById(submissionId);
+        if (sub == null) return;
+
+        List<TplTagMapping> mappings = tagMappingService.listByVersionId(templateVersionId);
+        if (mappings.isEmpty()) return;
+
+        Map<String, Object> extracted = dataExtractor.extractData(sub.getSubmissionJson(), mappings);
+        String extractedJson;
+        try {
+            extractedJson = objectMapper.writeValueAsString(extracted);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException("草稿抽取序列化失败: " + e.getMessage());
+        }
+
+        dataPersistenceService.persistExtractedData(
+                submissionId, sub.getEnterpriseId(), sub.getAuditYear(), extracted, mappings);
+
+        TplSubmission upd = new TplSubmission();
+        upd.setId(submissionId);
+        upd.setExtractedData(extractedJson);
+        upd.setUpdateBy(SecurityUtils.getRequiredCurrentUsername());
+        submissionMapper.updateById(upd);
+
+        log.info("Draft extraction succeeded for submission {} (versionId={})",
+                submissionId, templateVersionId);
     }
 
     /** M-4: ensure submissionJson is well-formed JSON before persisting */

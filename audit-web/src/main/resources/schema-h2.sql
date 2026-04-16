@@ -373,6 +373,7 @@ CREATE TABLE IF NOT EXISTS tpl_submission (
     submission_json  CLOB,
     extracted_data   CLOB,
     status           TINYINT DEFAULT 0,
+    review_comment   VARCHAR(512),
     submit_time      DATETIME,
     create_by        VARCHAR(64),
     create_time      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

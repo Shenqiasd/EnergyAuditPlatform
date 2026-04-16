@@ -39,7 +39,7 @@ const reports = ref<ArReport[]>([])
 interface Row {
   template: TplTemplate
   submission: TplSubmission | null
-  status: 0 | 1 | -1
+  status: -1 | 0 | 1 | 2 | 3
 }
 
 const rows = computed<Row[]>(() => {
@@ -50,14 +50,14 @@ const rows = computed<Row[]>(() => {
 
   return templates.value.map(t => {
     const sub = t.id != null ? subMap.get(t.id) ?? null : null
-    const status: -1 | 0 | 1 = sub == null ? -1 : (sub.status as 0 | 1)
+    const status: -1 | 0 | 1 | 2 | 3 = sub == null ? -1 : (sub.status as 0 | 1 | 2 | 3)
     return { template: t, submission: sub, status }
   })
 })
 
 const allSubmitted = computed(() => {
   if (rows.value.length === 0) return false
-  return rows.value.every(r => r.status === 1)
+  return rows.value.every(r => r.status === 1 || r.status === 2)
 })
 
 const canSubmitAudit = computed(() => {
@@ -72,10 +72,12 @@ const auditStatusInfo = computed(() => {
   return AUDIT_STATUS_MAP[s] ?? null
 })
 
-const STATUS_MAP: Record<number, { label: string; type: 'info' | 'warning' | 'success' }> = {
+const STATUS_MAP: Record<number, { label: string; type: 'info' | 'warning' | 'success' | 'danger' }> = {
   [-1]: { label: '未开始', type: 'info' },
   0: { label: '草稿', type: 'warning' },
   1: { label: '已提交', type: 'success' },
+  2: { label: '审核通过', type: 'success' },
+  3: { label: '已退回', type: 'danger' },
 }
 
 async function loadData() {
@@ -261,9 +263,18 @@ onMounted(loadData)
         <el-table-column label="年度" width="90" align="center">
           {{ selectedYear }} 年
         </el-table-column>
-        <el-table-column label="状态" width="100" align="center">
+        <el-table-column label="状态" width="120" align="center">
           <template #default="{ row }">
-            <el-tag :type="STATUS_MAP[row.status]?.type" size="small">
+            <el-tooltip
+              v-if="row.status === 3 && row.submission?.reviewComment"
+              :content="row.submission.reviewComment"
+              placement="top"
+            >
+              <el-tag type="danger" size="small" style="cursor: help">
+                已退回
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="STATUS_MAP[row.status]?.type" size="small">
               {{ STATUS_MAP[row.status]?.label }}
             </el-tag>
           </template>
@@ -279,10 +290,10 @@ onMounted(loadData)
             <el-button
               link
               type="primary"
-              :disabled="row.status === 1"
+              :disabled="row.status === 1 || row.status === 2"
               @click="goToFill(row)"
             >
-              去填报
+              {{ row.status === 3 ? '去修改' : '去填报' }}
             </el-button>
             <el-button
               link

@@ -28,6 +28,27 @@ const lockAcquired = ref(false)
 
 const spreadRef = ref<InstanceType<typeof SpreadSheet>>()
 
+const LAST_TEMPLATE_KEY = 'audit_last_template'
+
+function saveLastTemplate() {
+  if (selectedTemplateId.value && selectedYear.value) {
+    localStorage.setItem(LAST_TEMPLATE_KEY, JSON.stringify({
+      templateId: selectedTemplateId.value,
+      auditYear: selectedYear.value,
+    }))
+  }
+}
+
+function loadLastTemplate(): { templateId: number; auditYear: number } | null {
+  try {
+    const raw = localStorage.getItem(LAST_TEMPLATE_KEY)
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    if (obj?.templateId && obj?.auditYear) return obj
+  } catch { /* ignore corrupt data */ }
+  return null
+}
+
 async function loadTemplates() {
   const res = await getTemplateList({ status: 1, pageSize: 200 })
   templates.value = res.rows ?? []
@@ -64,6 +85,7 @@ async function openTemplate() {
     lockLoading.value = false
   }
   isActive.value = true
+  saveLastTemplate()
 }
 
 function onTemplateChange() {
@@ -88,14 +110,29 @@ async function handleSubmit() {
   // call below resets the submission to draft (status=0) before submitting,
   // so we no longer block re-submission here.
 
-  // Validate required fields before submission
-  const requiredErrors = spreadRef.value.validateRequiredFields()
-  if (requiredErrors.length > 0) {
-    ElMessageBox.alert(
-      requiredErrors.map((e, i) => `${i + 1}. ${e}`).join('\n'),
+  // Validate required fields before submission (grouped by sheet)
+  const sheetErrors = spreadRef.value.validateRequiredFieldsBySheet()
+  if (sheetErrors.length > 0) {
+    const lines: string[] = []
+    for (const se of sheetErrors) {
+      lines.push(`【${se.sheetName}】`)
+      for (const err of se.errors) {
+        lines.push(`  • ${err}`)
+      }
+    }
+    await ElMessageBox.alert(
+      lines.join('\n'),
       '必填字段未填写',
-      { type: 'warning', confirmButtonText: '知道了' }
+      {
+        type: 'warning',
+        confirmButtonText: '去填写',
+        dangerouslyUseHTMLString: false,
+      }
     )
+    // Navigate to the first sheet with errors
+    if (sheetErrors[0]) {
+      spreadRef.value.navigateToSheet(sheetErrors[0].sheetIndex)
+    }
     return
   }
 
@@ -146,6 +183,18 @@ onMounted(async () => {
   if (qYear) {
     selectedYear.value = Number(qYear)
   }
+  // Fallback: restore from localStorage if no URL params provided
+  if (!selectedTemplateId.value) {
+    const last = loadLastTemplate()
+    if (last) {
+      // Only restore if the template still exists in the published list
+      const exists = templates.value.some(t => t.id === last.templateId)
+      if (exists) {
+        selectedTemplateId.value = last.templateId
+        selectedYear.value = last.auditYear
+      }
+    }
+  }
   if (selectedTemplateId.value) {
     openTemplate()
   }
@@ -190,6 +239,22 @@ onMounted(async () => {
         >
           打开填报
         </el-button>
+        <div v-if="isActive && !isReadonly" class="action-buttons">
+          <el-button
+            type="primary"
+            :loading="spreadRef?.saving"
+            @click="handleSaveDraft"
+          >
+            保存草稿
+          </el-button>
+          <el-button
+            type="success"
+            :loading="submitting"
+            @click="handleSubmit"
+          >
+            提交数据
+          </el-button>
+        </div>
       </div>
     </el-card>
 
@@ -225,22 +290,6 @@ onMounted(async () => {
         />
       </div>
 
-      <div class="action-bar" v-if="!isReadonly">
-        <el-button
-          type="primary"
-          :loading="spreadRef?.saving"
-          @click="handleSaveDraft"
-        >
-          保存草稿
-        </el-button>
-        <el-button
-          type="success"
-          :loading="submitting"
-          @click="handleSubmit"
-        >
-          提交数据
-        </el-button>
-      </div>
     </template>
   </div>
 </template>
@@ -265,6 +314,12 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.action-buttons {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+}
+
 .empty-area {
   flex: 1;
   display: flex;
@@ -279,12 +334,4 @@ onMounted(async () => {
   flex-direction: column;
 }
 
-.action-bar {
-  flex-shrink: 0;
-  display: flex;
-  gap: 12px;
-  padding: 12px 0;
-  border-top: 1px solid #ebeef5;
-  background: #fff;
-}
 </style>

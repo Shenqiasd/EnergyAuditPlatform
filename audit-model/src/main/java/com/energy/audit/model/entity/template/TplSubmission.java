@@ -35,8 +35,11 @@ public class TplSubmission extends BaseEntity {
     /** Extracted structured data as JSON string (MySQL JSON / H2 CLOB) */
     private String extractedData;
 
-    /** Status (0=draft, 1=submitted) */
+    /** Status (0=draft, 1=submitted, 2=approved, 3=rejected) */
     private Integer status;
+
+    /** Review comment from auditor (set when status changes to 3) */
+    private String reviewComment;
 
     /** Submission timestamp (set when status changes to 1) */
     private LocalDateTime submitTime;

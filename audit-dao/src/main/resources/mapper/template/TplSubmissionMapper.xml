@@ -12,6 +12,7 @@
         <result column="submission_json"  property="submissionJson"/>
         <result column="extracted_data"   property="extractedData"/>
         <result column="status"           property="status"/>
+        <result column="review_comment"  property="reviewComment"/>
         <result column="submit_time"      property="submitTime"/>
         <result column="create_by"        property="createBy"/>
         <result column="create_time"      property="createTime"/>
@@ -22,7 +23,7 @@
 
     <sql id="Base_Column_List">
         id, enterprise_id, template_id, template_version, audit_year,
-        submission_json, extracted_data, status, submit_time,
+        submission_json, extracted_data, status, review_comment, submit_time,
         create_by, create_time, update_by, update_time, deleted
     </sql>
 
@@ -87,9 +88,22 @@
         SET status = 0,
             submit_time = NULL,
             extracted_data = NULL,
+            review_comment = NULL,
             update_by = #{updateBy},
             update_time = NOW()
         WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="batchUpdateStatusByEnterpriseAndYear">
+        UPDATE tpl_submission
+        SET status = #{newStatus},
+            review_comment = #{reviewComment},
+            update_by = #{updateBy},
+            update_time = NOW()
+        WHERE enterprise_id = #{enterpriseId}
+          AND audit_year = #{auditYear}
+          AND status = #{oldStatus}
+          AND deleted = 0
     </update>
 
 </mapper>

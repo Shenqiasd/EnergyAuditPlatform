@@ -17,7 +17,8 @@ public interface SubmissionService {
      * @return saved/updated submission
      */
     TplSubmission saveDraft(Long enterpriseId, Long templateId, Integer auditYear,
-                            String submissionJson, Integer templateVersion);
+                            String submissionJson, Integer templateVersion,
+                            Long templateVersionId);
 
     /**
      * Submit the draft:
@@ -30,6 +31,12 @@ public interface SubmissionService {
      * @param templateVersionId  id of the TplTemplateVersion used to load tag mappings
      */
     void submit(Long submissionId, Long templateVersionId);
+
+    /**
+     * Best-effort data extraction for a draft submission.
+     * Runs in its own transaction so failures never roll back the save.
+     */
+    void extractForDraft(Long submissionId, Long templateVersionId);
 
     /** Find existing submission by unique business key */
     TplSubmission getByKey(Long enterpriseId, Long templateId, Integer auditYear);
