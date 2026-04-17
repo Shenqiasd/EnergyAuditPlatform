@@ -66,7 +66,7 @@ AND NOT EXISTS (SELECT 1 FROM tpl_tag_mapping WHERE template_version_id = v.id A
 INSERT INTO tpl_tag_mapping (template_version_id, tag_name, field_name, target_table,
     data_type, required, sheet_index, sheet_name, mapping_type, source_type, create_by, update_by)
 SELECT v.id, 'has_energy_center', 'hasEnergyCenter', 'ent_enterprise_setting',
-    'STRING', 0, 3, '1.企业概况', 'SCALAR', 'CELL_TAG', 'migration', 'migration'
+    'NUMBER', 0, 3, '1.企业概况', 'SCALAR', 'CELL_TAG', 'migration', 'migration'
 FROM tpl_template_version v WHERE v.id IN (31, 32)
 AND NOT EXISTS (SELECT 1 FROM tpl_tag_mapping WHERE template_version_id = v.id AND tag_name = 'has_energy_center' AND deleted = 0);
 
