@@ -23,6 +23,14 @@ public class EntEnterpriseSetting extends BaseEntity {
     /** FK -> ent_enterprise.id (unique) */
     private Long enterpriseId;
 
+    // ── 基本信息 (从 ent_enterprise / ent_registration 联查) ──
+
+    /** 单位详细名称 (non-persistent, populated from ent_enterprise for prefill) */
+    private transient String enterpriseName;
+
+    /** 统一社会信用代码 (non-persistent, populated from ent_registration for prefill) */
+    private transient String creditCode;
+
     // ── 地区 / 行业 ──
 
     /** 所属地区 */
