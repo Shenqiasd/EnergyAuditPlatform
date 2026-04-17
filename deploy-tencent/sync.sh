@@ -27,15 +27,36 @@ echo "  EnergyAudit 腾讯云同步更新"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')"
 echo "========================================="
 
+# Step 0: Ensure Git identity is configured (needed for merge commits)
+cd "$PROJECT_DIR"
+if [ -z "$(git config user.email)" ]; then
+    echo "[准备] 配置 Git 身份..."
+    git config user.email "deploy@tencent-cloud"
+    git config user.name "Tencent Cloud Deploy"
+fi
+
 # Step 1: Pull latest code
 echo ""
 echo "[1/4] 拉取最新代码..."
-cd "$PROJECT_DIR"
+
+# Stash any local changes to avoid merge conflicts
+if [ -n "$(git status --porcelain)" ]; then
+    echo "检测到本地未提交的改动，自动暂存..."
+    git stash --include-untracked -m "sync-auto-stash-$(date +%Y%m%d%H%M%S)"
+    STASHED=true
+else
+    STASHED=false
+fi
 
 BEFORE_COMMIT=$(git rev-parse HEAD)
 
 git fetch origin master
+git fetch origin deploy/tencent-cloud
 git checkout deploy/tencent-cloud 2>/dev/null || git checkout -b deploy/tencent-cloud origin/deploy/tencent-cloud
+
+# Fast-forward deploy branch to remote if behind
+git merge origin/deploy/tencent-cloud --no-edit 2>/dev/null || true
+
 git merge origin/master --no-edit
 
 AFTER_COMMIT=$(git rev-parse HEAD)
@@ -53,6 +74,12 @@ else
     echo ""
     echo "新增的提交:"
     git log --oneline "$BEFORE_COMMIT".."$AFTER_COMMIT" | head -20
+fi
+
+# Restore stashed changes if any
+if [ "$STASHED" = true ]; then
+    echo "恢复之前暂存的本地改动..."
+    git stash pop || echo "警告: 恢复暂存失败，请手动执行 git stash pop"
 fi
 
 # Step 2: Rebuild and restart containers

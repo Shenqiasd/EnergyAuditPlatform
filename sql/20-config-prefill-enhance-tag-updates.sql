@@ -10,7 +10,7 @@
 UPDATE tpl_tag_mapping
 SET cell_range = 'A4:B15',
     column_mappings = '{"filter":{"isActive":1},"columns":[{"col":"A","field":"name"},{"col":"B","field":"measurementUnit"}]}'
-WHERE version_id = 31
+WHERE template_version_id = 31
   AND mapping_type = 'CONFIG_PREFILL'
   AND sheet_index = 16
   AND target_table = 'bs_energy';
@@ -19,7 +19,7 @@ WHERE version_id = 31
 -- 缩小 cellRange 到合理范围 B5:B20
 UPDATE tpl_tag_mapping
 SET cell_range = 'B5:B20'
-WHERE version_id = 31
+WHERE template_version_id = 31
   AND mapping_type = 'CONFIG_PREFILL'
   AND sheet_index = 18
   AND target_table = 'bs_product';
@@ -30,7 +30,7 @@ WHERE version_id = 31
 UPDATE tpl_tag_mapping
 SET cell_range = 'A26:D33',
     column_mappings = '{"filter":{"isActive":1},"columns":[{"col":"A","field":"name"},{"col":"B","field":"lowHeatValue","dropdown":false},{"col":"C","field":"carbonContent","dropdown":false},{"col":"D","field":"oxidationRate","dropdown":false}]}'
-WHERE version_id = 31
+WHERE template_version_id = 31
   AND mapping_type = 'CONFIG_PREFILL'
   AND sheet_index = 20
   AND target_table = 'bs_energy';
@@ -39,7 +39,7 @@ WHERE version_id = 31
 -- 缩小 cellRange 到 A18:A21 (产品类别区域)
 UPDATE tpl_tag_mapping
 SET cell_range = 'A18:A21'
-WHERE version_id = 31
+WHERE template_version_id = 31
   AND mapping_type = 'CONFIG_PREFILL'
   AND sheet_index = 25
   AND target_table = 'bs_product';
@@ -48,7 +48,7 @@ WHERE version_id = 31
 -- 缩小 cellRange 到 A7:E9 (产品数据区，Row 10 开始是分解表)
 UPDATE tpl_tag_mapping
 SET cell_range = 'A7:E9'
-WHERE version_id = 31
+WHERE template_version_id = 31
   AND mapping_type = 'CONFIG_PREFILL'
   AND sheet_index = 26
   AND target_table = 'bs_product';
