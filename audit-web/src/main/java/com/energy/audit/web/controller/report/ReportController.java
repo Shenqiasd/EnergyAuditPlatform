@@ -144,4 +144,58 @@ public class ReportController {
     public R<List<ArReportTemplate>> listTemplates() {
         return R.ok(reportService.listTemplates());
     }
+
+    // ====== Phase 3: Report Review Workflow (auditor side) ======
+
+    private void requireAuditorOrAdmin() {
+        Integer userType = SecurityUtils.getCurrentUserType();
+        if (userType == null || (userType != 1 && userType != 2)) {
+            throw new BusinessException("仅管理员或审核员可执行此操作");
+        }
+    }
+
+    @Operation(summary = "List reports for review (auditor/admin)")
+    @GetMapping("/review/list")
+    public R<List<ArReport>> listForReview(
+            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) Integer auditYear) {
+        requireAuditorOrAdmin();
+        List<ArReport> reports = reportService.listReportsForReview(status, auditYear);
+        return R.ok(reports);
+    }
+
+    @Operation(summary = "Get report detail for review (auditor/admin)")
+    @GetMapping("/review/{id}")
+    public R<ArReport> reviewDetail(@PathVariable Long id) {
+        requireAuditorOrAdmin();
+        ArReport report = reportService.getReport(id);
+        if (report == null) {
+            return R.fail("报告不存在");
+        }
+        return R.ok(report);
+    }
+
+    @Operation(summary = "Approve a submitted report (status 4 -> 5)")
+    @PostMapping("/review/{id}/approve")
+    public R<ArReport> approveReport(@PathVariable Long id,
+                                      @RequestBody(required = false) Map<String, String> body) {
+        requireAuditorOrAdmin();
+        Long reviewerId = SecurityUtils.getRequiredCurrentUserId();
+        String username = SecurityUtils.getCurrentUsername();
+        String comment = body != null ? body.get("reviewComment") : null;
+        ArReport updated = reportService.approveReport(id, comment, reviewerId, username);
+        return R.ok(updated);
+    }
+
+    @Operation(summary = "Reject/return a submitted report (status 4 -> 6)")
+    @PostMapping("/review/{id}/reject")
+    public R<ArReport> rejectReport(@PathVariable Long id,
+                                     @RequestBody Map<String, String> body) {
+        requireAuditorOrAdmin();
+        Long reviewerId = SecurityUtils.getRequiredCurrentUserId();
+        String username = SecurityUtils.getCurrentUsername();
+        String comment = body != null ? body.get("reviewComment") : null;
+        ArReport updated = reportService.rejectReport(id, comment, reviewerId, username);
+        return R.ok(updated);
+    }
 }

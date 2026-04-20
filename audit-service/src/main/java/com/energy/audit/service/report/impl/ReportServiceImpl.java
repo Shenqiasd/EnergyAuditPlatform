@@ -431,18 +431,17 @@ public class ReportServiceImpl implements ReportService {
     }
 
     /**
-     * Mark a report as failed in a NEW transaction so the status=3 persists
-     * even when the outer @Transactional rolls back.
-     * Uses TransactionTemplate with REQUIRES_NEW to avoid Spring AOP self-invocation trap.
-     */
-    /**
      * Mark a report as failed.
-     * Called after the status=1 init transaction has already committed,
-     * so the row is visible and no outer transaction holds a lock.
+     * Uses REQUIRES_NEW propagation so the status=3 update persists even when
+     * the caller's transaction (e.g. generateReport) rolls back.
+     * For generateReportFromTemplate, the outer tx is already committed so
+     * REQUIRES_NEW is harmless but still correct.
      */
     private void markReportFailed(Long reportId, String username) {
         try {
             TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+            txTemplate.setPropagationBehavior(
+                org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             txTemplate.executeWithoutResult(status -> {
                 int updated = jdbcTemplate.update(
                     "UPDATE ar_report SET status = 3, update_by = ?, update_time = NOW() " +
@@ -462,5 +461,53 @@ public class ReportServiceImpl implements ReportService {
             return List.of();
         }
         return reportTemplateMapper.selectAll();
+    }
+
+    // ====== Phase 3: Report Review Workflow (auditor side) ======
+
+    @Override
+    public List<ArReport> listReportsForReview(Integer status, Integer auditYear) {
+        return reportMapper.selectByStatus(status, auditYear);
+    }
+
+    @Override
+    @Transactional
+    public ArReport approveReport(Long reportId, String reviewComment, Long reviewerId, String username) {
+        ArReport report = reportMapper.selectById(reportId);
+        if (report == null) {
+            throw new BusinessException("报告不存在");
+        }
+        if (report.getStatus() == null || report.getStatus() != 4) {
+            throw new BusinessException("只有已提交审核的报告才能审批（当前状态: " + report.getStatus() + "）");
+        }
+        report.setStatus(5); // review_approved
+        report.setReviewComment(reviewComment);
+        report.setReviewerId(reviewerId);
+        report.setUpdateBy(username);
+        reportMapper.update(report);
+        log.info("[ReportService] Report approved: id={} reviewer={}", reportId, username);
+        return reportMapper.selectById(reportId);
+    }
+
+    @Override
+    @Transactional
+    public ArReport rejectReport(Long reportId, String reviewComment, Long reviewerId, String username) {
+        ArReport report = reportMapper.selectById(reportId);
+        if (report == null) {
+            throw new BusinessException("报告不存在");
+        }
+        if (report.getStatus() == null || report.getStatus() != 4) {
+            throw new BusinessException("只有已提交审核的报告才能退回（当前状态: " + report.getStatus() + "）");
+        }
+        if (reviewComment == null || reviewComment.trim().isEmpty()) {
+            throw new BusinessException("退回报告必须填写退回理由");
+        }
+        report.setStatus(6); // review_rejected
+        report.setReviewComment(reviewComment);
+        report.setReviewerId(reviewerId);
+        report.setUpdateBy(username);
+        reportMapper.update(report);
+        log.info("[ReportService] Report rejected: id={} reviewer={} reason={}", reportId, username, reviewComment);
+        return reportMapper.selectById(reportId);
     }
 }

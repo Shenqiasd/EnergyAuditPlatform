@@ -71,6 +71,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'dashboard', name: 'AuditorDashboard', component: () => import('@/views/auditor/dashboard/index.vue'), meta: { title: '审计首页' } },
       { path: 'tasks', name: 'AuditorTasks', component: () => import('@/views/auditor/tasks/index.vue'), meta: { title: '审计任务' } },
       { path: 'review', name: 'AuditorReview', component: () => import('@/views/auditor/review/index.vue'), meta: { title: '审核详情' } },
+      { path: 'report-review', name: 'AuditorReportReview', component: () => import('@/views/auditor/report-review/index.vue'), meta: { title: '报告审核' } },
     ],
   },
 ]

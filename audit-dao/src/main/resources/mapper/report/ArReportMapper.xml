@@ -125,4 +125,23 @@
         LIMIT 1
     </select>
 
+    <select id="selectByStatus" resultMap="LightResultMap">
+        SELECT r.id, r.enterprise_id, r.audit_year, r.report_name, r.report_type,
+               r.status, r.generated_file_path, r.uploaded_file_path,
+               r.generate_time, r.submit_time, r.template_id, r.submission_id,
+               r.flow_chart_path, r.review_comment, r.reviewer_id,
+               r.create_by, r.create_time, r.update_by, r.update_time, r.deleted,
+               e.enterprise_name
+        FROM ar_report r
+        LEFT JOIN ent_enterprise e ON e.id = r.enterprise_id
+        WHERE r.deleted = 0
+        <if test="status != null">
+            AND r.status = #{status}
+        </if>
+        <if test="auditYear != null">
+            AND r.audit_year = #{auditYear}
+        </if>
+        ORDER BY r.submit_time DESC, r.update_time DESC
+    </select>
+
 </mapper>

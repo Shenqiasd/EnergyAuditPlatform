@@ -21,4 +21,11 @@ public interface ArReportMapper {
     ArReport selectByEnterpriseAndYear(@Param("enterpriseId") Long enterpriseId,
                                        @Param("auditYear") Integer auditYear,
                                        @Param("reportType") Integer reportType);
+
+    /**
+     * List reports pending review (status=4) or all reports for auditor/admin.
+     * If status is null, returns all non-deleted reports.
+     */
+    List<ArReport> selectByStatus(@Param("status") Integer status,
+                                   @Param("auditYear") Integer auditYear);
 }

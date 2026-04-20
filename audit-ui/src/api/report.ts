@@ -93,3 +93,35 @@ export function submitForReview(reportId: number) {
 export function listTemplates() {
   return request.get('/report/templates')
 }
+
+// ====== Phase 3: Report Review Workflow (auditor side) ======
+
+/**
+ * List reports for auditor review.
+ * @param status filter by status (4=pending, 5=approved, 6=rejected), undefined=all
+ * @param auditYear filter by audit year
+ */
+export function listReportsForReview(status?: number, auditYear?: number) {
+  return request.get('/report/review/list', { params: { status, auditYear } })
+}
+
+/**
+ * Get report detail for review (includes reportHtml).
+ */
+export function getReportForReview(id: number) {
+  return request.get(`/report/review/${id}`)
+}
+
+/**
+ * Approve a submitted report (status 4 -> 5).
+ */
+export function approveReport(id: number, reviewComment?: string) {
+  return request.post(`/report/review/${id}/approve`, { reviewComment })
+}
+
+/**
+ * Reject/return a submitted report (status 4 -> 6).
+ */
+export function rejectReport(id: number, reviewComment: string) {
+  return request.post(`/report/review/${id}/reject`, { reviewComment })
+}

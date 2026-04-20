@@ -104,4 +104,10 @@ export const auditorMenus: MenuSection[] = [
       { key: 'review', icon: '🔍', title: '审核详情', path: '/auditor/review' },
     ],
   },
+  {
+    section: '报告管理',
+    items: [
+      { key: 'report-review', icon: '📄', title: '报告审核', path: '/auditor/report-review' },
+    ],
+  },
 ]
