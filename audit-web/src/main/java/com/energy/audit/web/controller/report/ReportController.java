@@ -93,6 +93,7 @@ public class ReportController {
             @RequestParam Long submissionId,
             @RequestPart(required = false) MultipartFile flowChartImage) {
         requireEnterprise();
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         String username = SecurityUtils.getCurrentUsername();
         byte[] imageBytes = null;
         if (flowChartImage != null && !flowChartImage.isEmpty()) {
@@ -102,7 +103,7 @@ public class ReportController {
                 return R.fail("能源流向图上传失败");
             }
         }
-        ArReport report = reportService.generateReportFromTemplate(submissionId, imageBytes, username);
+        ArReport report = reportService.generateReportFromTemplate(submissionId, enterpriseId, imageBytes, username);
         return R.ok(report);
     }
 

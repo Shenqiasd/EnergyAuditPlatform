@@ -374,8 +374,9 @@ public class TemplateBasedReportBuilder {
                             // Write empty comments
                             String emptyComments = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
                                 "<w:comments xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"/>";
-                            part.getOutputStream().write(emptyComments.getBytes());
-                            part.getOutputStream().close();
+                            try (OutputStream os = part.getOutputStream()) {
+                                os.write(emptyComments.getBytes());
+                            }
                         }
                     } catch (Exception ignored) {}
                 }

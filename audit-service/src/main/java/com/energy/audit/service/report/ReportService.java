@@ -26,7 +26,7 @@ public interface ReportService {
      * @param username       current user
      * @return the generated report record
      */
-    ArReport generateReportFromTemplate(Long submissionId, byte[] flowChartImage, String username);
+    ArReport generateReportFromTemplate(Long submissionId, Long callerEnterpriseId, byte[] flowChartImage, String username);
 
     /**
      * Save edited HTML content for a report (from TinyMCE editor).

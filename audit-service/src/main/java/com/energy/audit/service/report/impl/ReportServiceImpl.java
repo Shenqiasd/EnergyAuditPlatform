@@ -242,7 +242,7 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     @Transactional
-    public ArReport generateReportFromTemplate(Long submissionId, byte[] flowChartImage, String username) {
+    public ArReport generateReportFromTemplate(Long submissionId, Long callerEnterpriseId, byte[] flowChartImage, String username) {
         // 1. Load submission and verify status = 2 (approved)
         Map<String, Object> submission;
         try {
@@ -262,6 +262,11 @@ public class ReportServiceImpl implements ReportService {
         }
 
         Long enterpriseId = ((Number) submission.get("enterprise_id")).longValue();
+
+        // Verify the submission belongs to the calling user's enterprise
+        if (callerEnterpriseId != null && !callerEnterpriseId.equals(enterpriseId)) {
+            throw new BusinessException("无权访问其他企业的填报记录");
+        }
         Integer auditYear = ((Number) submission.get("audit_year")).intValue();
         String submissionJson = (String) submission.get("submission_json");
         String enterpriseName = (String) submission.getOrDefault("enterprise_name", "企业");
