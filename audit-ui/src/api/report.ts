@@ -94,6 +94,33 @@ export function listTemplates() {
   return request.get('/report/templates')
 }
 
+// ====== Phase 4: Admin Report Template Management ======
+
+export function uploadReportTemplate(file: File, templateName?: string) {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (templateName) {
+    formData.append('templateName', templateName)
+  }
+  return request.post('/report/template/upload', formData)
+}
+
+export function getReportTemplate(id: number) {
+  return request.get(`/report/template/${id}`)
+}
+
+export function activateReportTemplate(id: number) {
+  return request.post(`/report/template/${id}/activate`)
+}
+
+export function deactivateReportTemplate(id: number) {
+  return request.post(`/report/template/${id}/deactivate`)
+}
+
+export function deleteReportTemplate(id: number) {
+  return request.delete(`/report/template/${id}`)
+}
+
 // ====== Phase 3: Report Review Workflow (auditor side) ======
 
 /**

@@ -78,6 +78,7 @@ export const adminMenus: MenuSection[] = [
     section: '系统配置',
     items: [
       { key: 'template',        icon: '📋', title: '模板管理',       path: '/admin/template' },
+      { key: 'report-template', icon: '📄', title: '报告模板管理',   path: '/admin/report-template' },
       { key: 'energy-category', icon: '⚡', title: '能源品类管理',   path: '/admin/energy-category' },
       { key: 'emission-factor', icon: '🌡️', title: '碳排放因子管理', path: '/admin/emission-factor' },
     ],

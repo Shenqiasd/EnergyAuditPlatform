@@ -19,4 +19,7 @@ public interface ArReportTemplateMapper {
 
     /** Get the currently active template (status=1), most recent first */
     ArReportTemplate selectActive();
+
+    /** Soft-delete a template by ID */
+    int softDelete(@Param("id") Long id, @Param("updateBy") String updateBy);
 }

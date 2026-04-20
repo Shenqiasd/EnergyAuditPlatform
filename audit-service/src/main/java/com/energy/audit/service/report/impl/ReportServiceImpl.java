@@ -474,6 +474,131 @@ public class ReportServiceImpl implements ReportService {
         return reportTemplateMapper.selectAll();
     }
 
+    // ====== Phase 4: Admin Report Template Management ======
+
+    @Override
+    @Transactional
+    public ArReportTemplate uploadTemplate(String fileName, byte[] fileBytes, String templateName, String username) {
+        if (reportTemplateMapper == null) {
+            throw new BusinessException("报告模板模块未初始化");
+        }
+        if (fileBytes == null || fileBytes.length == 0) {
+            throw new BusinessException("文件不能为空");
+        }
+        if (!fileName.toLowerCase().endsWith(".docx") && !fileName.toLowerCase().endsWith(".doc")) {
+            throw new BusinessException("仅支持 .docx 或 .doc 格式的模板文件");
+        }
+
+        try {
+            Path dirPath = Paths.get(uploadDir, "templates").toAbsolutePath().normalize();
+            Files.createDirectories(dirPath);
+
+            String safeFileName = "template_" + System.currentTimeMillis() + "_" +
+                fileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+            Path filePath = dirPath.resolve(safeFileName).normalize();
+            if (!filePath.startsWith(dirPath)) {
+                throw new BusinessException("非法文件名");
+            }
+            Files.write(filePath, fileBytes);
+
+            // Determine next version number
+            List<ArReportTemplate> existing = reportTemplateMapper.selectAll();
+            int maxVersion = existing.stream()
+                .mapToInt(t -> t.getVersion() != null ? t.getVersion() : 0)
+                .max().orElse(0);
+
+            ArReportTemplate template = new ArReportTemplate();
+            template.setTemplateName(templateName != null && !templateName.isEmpty() ? templateName : fileName);
+            template.setTemplateFilePath(filePath.toString());
+            template.setVersion(maxVersion + 1);
+            template.setStatus(0); // draft by default
+            template.setCreateBy(username);
+            template.setUpdateBy(username);
+            reportTemplateMapper.insert(template);
+
+            log.info("[ReportService] Template uploaded: id={} name={} path={}", template.getId(), templateName, filePath);
+            return reportTemplateMapper.selectById(template.getId());
+        } catch (BusinessException be) {
+            throw be;
+        } catch (Exception e) {
+            log.error("Failed to upload report template", e);
+            throw new BusinessException("模板上传失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    @Transactional
+    public ArReportTemplate activateTemplate(Long templateId, String username) {
+        if (reportTemplateMapper == null) {
+            throw new BusinessException("报告模板模块未初始化");
+        }
+        ArReportTemplate template = reportTemplateMapper.selectById(templateId);
+        if (template == null) {
+            throw new BusinessException("模板不存在");
+        }
+
+        // Deactivate all other templates first
+        List<ArReportTemplate> all = reportTemplateMapper.selectAll();
+        for (ArReportTemplate t : all) {
+            if (t.getStatus() != null && t.getStatus() == 1 && !t.getId().equals(templateId)) {
+                t.setStatus(0);
+                t.setUpdateBy(username);
+                reportTemplateMapper.update(t);
+            }
+        }
+
+        // Activate the target template
+        template.setStatus(1);
+        template.setUpdateBy(username);
+        reportTemplateMapper.update(template);
+
+        log.info("[ReportService] Template activated: id={} name={}", templateId, template.getTemplateName());
+        return reportTemplateMapper.selectById(templateId);
+    }
+
+    @Override
+    @Transactional
+    public ArReportTemplate deactivateTemplate(Long templateId, String username) {
+        if (reportTemplateMapper == null) {
+            throw new BusinessException("报告模板模块未初始化");
+        }
+        ArReportTemplate template = reportTemplateMapper.selectById(templateId);
+        if (template == null) {
+            throw new BusinessException("模板不存在");
+        }
+        template.setStatus(0);
+        template.setUpdateBy(username);
+        reportTemplateMapper.update(template);
+
+        log.info("[ReportService] Template deactivated: id={} name={}", templateId, template.getTemplateName());
+        return reportTemplateMapper.selectById(templateId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteReportTemplate(Long templateId, String username) {
+        if (reportTemplateMapper == null) {
+            throw new BusinessException("报告模板模块未初始化");
+        }
+        ArReportTemplate template = reportTemplateMapper.selectById(templateId);
+        if (template == null) {
+            throw new BusinessException("模板不存在");
+        }
+        if (template.getStatus() != null && template.getStatus() == 1) {
+            throw new BusinessException("已激活的模板不可删除，请先停用");
+        }
+        reportTemplateMapper.softDelete(templateId, username);
+        log.info("[ReportService] Template deleted: id={} name={}", templateId, template.getTemplateName());
+    }
+
+    @Override
+    public ArReportTemplate getReportTemplate(Long templateId) {
+        if (reportTemplateMapper == null) {
+            return null;
+        }
+        return reportTemplateMapper.selectById(templateId);
+    }
+
     // ====== Phase 3: Report Review Workflow (auditor side) ======
 
     @Override
