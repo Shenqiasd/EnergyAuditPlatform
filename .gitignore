@@ -26,6 +26,15 @@ Thumbs.db
 application-local.yml
 .local/
 
+# TinyMCE static assets (copied from node_modules by scripts/setup-tinymce.sh)
+audit-ui/public/tinymce/
+
 # Scratch / review notes (never commit)
 attached_assets/
 audit-web/upload/
+
+# Eclipse / IDE project files
+.project
+.settings/
+.classpath
+.factorypath

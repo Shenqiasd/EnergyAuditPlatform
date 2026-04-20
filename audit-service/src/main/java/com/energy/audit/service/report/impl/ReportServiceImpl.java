@@ -14,7 +14,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -41,6 +43,9 @@ public class ReportServiceImpl implements ReportService {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Value("${app.report.upload-dir:upload/report}")
     private String uploadDir;
@@ -101,9 +106,7 @@ public class ReportServiceImpl implements ReportService {
             return reportMapper.selectById(record.getId());
         } catch (Exception e) {
             log.error("Report generation failed for enterprise={} year={}", enterpriseId, auditYear, e);
-            record.setStatus(3);
-            record.setUpdateBy(username);
-            reportMapper.update(record);
+            markReportFailed(record.getId(), username);
             throw new RuntimeException("报告生成失败，请稍后重试");
         }
     }
@@ -375,9 +378,7 @@ public class ReportServiceImpl implements ReportService {
             throw be;
         } catch (Exception e) {
             log.error("Template-based report generation failed for submission={}", submissionId, e);
-            record.setStatus(3); // failed
-            record.setUpdateBy(username);
-            reportMapper.update(record);
+            markReportFailed(record.getId(), username);
             throw new BusinessException("报告生成失败: " + e.getMessage());
         }
     }
@@ -416,6 +417,29 @@ public class ReportServiceImpl implements ReportService {
         report.setUpdateBy(username);
         reportMapper.update(report);
         return reportMapper.selectById(reportId);
+    }
+
+    /**
+     * Mark a report as failed in a NEW transaction so the status=3 persists
+     * even when the outer @Transactional rolls back.
+     * Uses TransactionTemplate with REQUIRES_NEW to avoid Spring AOP self-invocation trap.
+     */
+    private void markReportFailed(Long reportId, String username) {
+        try {
+            TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+            txTemplate.setPropagationBehavior(
+                org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            txTemplate.executeWithoutResult(status -> {
+                ArReport report = reportMapper.selectById(reportId);
+                if (report != null) {
+                    report.setStatus(3); // failed
+                    report.setUpdateBy(username);
+                    reportMapper.update(report);
+                }
+            });
+        } catch (Exception ex) {
+            log.warn("[ReportService] Failed to mark report {} as failed: {}", reportId, ex.getMessage());
+        }
     }
 
     @Override

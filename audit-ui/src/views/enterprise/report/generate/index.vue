@@ -18,6 +18,7 @@ import {
 } from '@/api/audit-task'
 import {
   generateReport,
+  generateReportFromTemplate,
   listReports,
   downloadReport,
   REPORT_STATUS_MAP,
@@ -163,20 +164,34 @@ function viewDetail(row: Row) {
 }
 
 async function handleGenerateReport() {
+  // Find submitted submissions for the selected year to use template-based generation
+  const submittedSubs = submissions.value.filter(
+    s => s.auditYear === selectedYear.value && s.status === 1
+  )
+  const useTemplate = submittedSubs.length > 0 && submittedSubs[0].id != null
+
+  const confirmMsg = useTemplate
+    ? `确认为 ${selectedYear.value} 年度基于模板生成审计报告？系统将从填报数据自动生成 Word 文档并转换为在线可编辑报告。`
+    : `确认为 ${selectedYear.value} 年度生成审计报告？系统将根据已提交的数据自动生成报告。`
   try {
-    await ElMessageBox.confirm(
-      `确认为 ${selectedYear.value} 年度生成审计报告（Word文档）？系统将根据已提交的数据自动生成报告。`,
-      '生成报告',
-      { type: 'info' }
-    )
+    await ElMessageBox.confirm(confirmMsg, '生成报告', { type: 'info' })
   } catch {
     return
   }
   generatingReport.value = true
   try {
-    await generateReport(selectedYear.value)
+    let result: ArReport
+    if (useTemplate) {
+      result = await generateReportFromTemplate(submittedSubs[0].id!) as ArReport
+    } else {
+      result = await generateReport(selectedYear.value) as ArReport
+    }
     ElMessage.success('报告生成成功')
     loadData()
+    // Automatically navigate to editor if report has HTML
+    if (result?.id && result.status === 2) {
+      router.push({ path: '/enterprise/report/edit', query: { id: result.id } })
+    }
   } catch (e: any) {
     ElMessage.error('报告生成失败：' + (e?.message ?? '未知错误'))
   } finally {
@@ -196,6 +211,10 @@ async function handleDownloadReport(report: ArReport) {
   } catch (e: any) {
     ElMessage.error('下载失败：' + (e?.message ?? '未知错误'))
   }
+}
+
+function goToEditReport(report: ArReport) {
+  router.push({ path: '/enterprise/report/edit', query: { id: report.id } })
 }
 
 onMounted(loadData)
@@ -353,11 +372,19 @@ onMounted(loadData)
         <el-table-column label="生成时间" width="170">
           <template #default="{ row }">{{ row.generateTime ?? '—' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button
               link
               type="primary"
+              :disabled="row.status < 2 || row.status === 4 || row.status === 5"
+              @click="goToEditReport(row)"
+            >
+              编辑
+            </el-button>
+            <el-button
+              link
+              type="info"
               :disabled="row.status < 2"
               @click="handleDownloadReport(row)"
             >

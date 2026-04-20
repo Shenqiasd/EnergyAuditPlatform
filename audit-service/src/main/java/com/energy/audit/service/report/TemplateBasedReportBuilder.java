@@ -419,12 +419,12 @@ public class TemplateBasedReportBuilder {
         if (tblPr == null) {
             tblPr = table.getCTTbl().addNewTblPr();
         }
-        CTTblWidth tw = tblPr.addNewTblW();
+        CTTblWidth tw = tblPr.isSetTblW() ? tblPr.getTblW() : tblPr.addNewTblW();
         tw.setType(STTblWidth.DXA);
         tw.setW(BigInteger.valueOf(9000)); // ~16cm
 
         // Set table borders
-        CTTblBorders borders = tblPr.addNewTblBorders();
+        CTTblBorders borders = tblPr.isSetTblBorders() ? tblPr.getTblBorders() : tblPr.addNewTblBorders();
         setBorder(borders.addNewTop());
         setBorder(borders.addNewBottom());
         setBorder(borders.addNewLeft());

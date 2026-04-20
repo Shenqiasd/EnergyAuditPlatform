@@ -46,6 +46,7 @@ export const enterpriseMenus: MenuSection[] = [
   {
     section: '报告管理',
     items: [
+      { key: 'report-edit',   icon: '📝', title: '在线编辑报告', path: '/enterprise/report/edit' },
       { key: 'report-upload', icon: '📤', title: '上传最终报告', path: '/enterprise/report/upload' },
       { key: 'report-detail', icon: '👁️', title: '报告详情',     path: '/enterprise/report/detail' },
     ],
