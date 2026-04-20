@@ -318,8 +318,7 @@ onMounted(loadTask)
           <el-descriptions-item label="统一信用代码">{{ enterpriseInfo.creditCode || '—' }}</el-descriptions-item>
           <el-descriptions-item label="法人代表">{{ enterpriseInfo.legalRepresentative || '—' }}</el-descriptions-item>
           <el-descriptions-item label="企业地址">{{ enterpriseInfo.enterpriseAddress || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="行业类别">{{ enterpriseInfo.industryCategory || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="行业名称">{{ enterpriseInfo.industryName || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="行业分类">{{ enterpriseInfo.industryCode ? `${enterpriseInfo.industryCode} ${enterpriseInfo.industryName || ''}` : (enterpriseInfo.industryName || '—') }}</el-descriptions-item>
           <el-descriptions-item label="单位性质">{{ enterpriseInfo.unitNature || '—' }}</el-descriptions-item>
           <el-descriptions-item label="用能企业类型">{{ enterpriseInfo.energyEnterpriseType || '—' }}</el-descriptions-item>
           <el-descriptions-item label="注册资本(万元)">{{ enterpriseInfo.registeredCapital ?? '—' }}</el-descriptions-item>

@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getEnterpriseSetting, upsertEnterpriseSetting, type EnterpriseSetting } from '@/api/enterpriseSetting'
+import { INDUSTRY_CLASSIFICATION, buildIndustryLookup, type IndustryNode } from '@/config/industry-classification'
 
 const saving = ref(false)
 const loading = ref(false)
@@ -9,11 +10,47 @@ const loading = ref(false)
 const formRef = ref()
 const form = ref<Partial<EnterpriseSetting>>({})
 
+// ── Industry cascading selector ──
+const industryLookup = buildIndustryLookup()
+const industryOptions: IndustryNode[] = INDUSTRY_CLASSIFICATION
+
+/** Current cascader selection path, e.g. ['C', 'C28', 'C281'] */
+const industryCascaderValue = ref<string[]>([])
+
+/** Resolve stored industryCode back to cascader path on load */
+function resolveIndustryPath(code: string | undefined | null): string[] {
+  if (!code) return []
+  const entry = industryLookup.get(code)
+  return entry ? [...entry.fullPath] : []
+}
+
+/** Handle cascader selection change */
+function onIndustryChange(value: string[] | null) {
+  if (!value || value.length === 0) {
+    form.value.industryCode = undefined
+    form.value.industryName = undefined
+    form.value.industryCategory = undefined
+    return
+  }
+  const selectedCode = value[value.length - 1]
+  const entry = industryLookup.get(selectedCode)
+  if (entry) {
+    // Extract just the name part (after the code prefix)
+    const nameOnly = entry.name.replace(/^\S+\s+/, '')
+    form.value.industryCode = selectedCode
+    form.value.industryName = nameOnly
+    // Store the 大类 code (second level) for category
+    form.value.industryCategory = value.length >= 2 ? value[1] : value[0]
+  }
+}
+
 async function loadData() {
   loading.value = true
   try {
     const res = await getEnterpriseSetting()
     form.value = res ?? {}
+    // Restore cascader path from stored industry code
+    industryCascaderValue.value = resolveIndustryPath(form.value.industryCode)
   } finally {
     loading.value = false
   }
@@ -56,8 +93,17 @@ onMounted(loadData)
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="行业分类名称">
-            <el-input v-model="form.industryName" placeholder="如：化学纤维制造业" />
+          <el-form-item label="行业分类">
+            <el-cascader
+              v-model="industryCascaderValue"
+              :options="industryOptions"
+              :props="{ expandTrigger: 'hover', emitPath: true }"
+              filterable
+              clearable
+              placeholder="请选择行业分类"
+              style="width: 100%"
+              @change="onIndustryChange"
+            />
           </el-form-item>
         </el-col>
         <el-col :span="12">
