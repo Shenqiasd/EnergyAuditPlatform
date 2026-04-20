@@ -128,8 +128,8 @@ const COL_LABELS: Record<string, string> = {
   recovery_utilization: '回收利用',
   indicator_name: '指标名称',
   indicator_unit: '指标单位',
-  numerator_unit: '分子单位',
-  denominator_unit: '分母单位',
+  numerator_unit: '分子项单位',
+  denominator_unit: '分母项单位',
   conversion_factor: '转换系数',
   current_indicator: '本期指标',
   current_numerator: '本期分子',
@@ -376,6 +376,7 @@ const NUMERIC_COLS = new Set([
   'low_heat_value', 'carbon_content', 'oxidation_rate',
   'peak_emission', 'current_emission', 'reduction_target',
   'output', 'energy_consumption',
+  'prev_unit_consumption', 'prev_energy_consumption', 'prev_output',
   'unit_count',
 ])
 
