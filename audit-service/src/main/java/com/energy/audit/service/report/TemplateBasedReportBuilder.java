@@ -575,12 +575,14 @@ public class TemplateBasedReportBuilder {
             XWPFPictureData picData = pic.getPictureData();
             if (picData == null) return;
             byte[] data = picData.getData();
+            int picType = picData.getPictureType();
             String mimeType;
-            switch (picData.getPictureType()) {
-                case XWPFDocument.PICTURE_TYPE_PNG -> mimeType = "image/png";
-                case XWPFDocument.PICTURE_TYPE_JPEG -> mimeType = "image/jpeg";
-                case XWPFDocument.PICTURE_TYPE_GIF -> mimeType = "image/gif";
-                default -> mimeType = "image/png";
+            if (picType == XWPFDocument.PICTURE_TYPE_JPEG) {
+                mimeType = "image/jpeg";
+            } else if (picType == XWPFDocument.PICTURE_TYPE_GIF) {
+                mimeType = "image/gif";
+            } else {
+                mimeType = "image/png";
             }
             String base64 = Base64.getEncoder().encodeToString(data);
             html.append("<img src='data:").append(mimeType)
