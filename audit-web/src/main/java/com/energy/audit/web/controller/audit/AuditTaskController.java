@@ -171,6 +171,7 @@ public class AuditTaskController {
         if (setting != null) {
             result.put("enterpriseAddress", setting.getEnterpriseAddress());
             result.put("legalRepresentative", setting.getLegalRepresentative());
+            result.put("industryCode", setting.getIndustryCode());
             result.put("industryCategory", setting.getIndustryCategory());
             result.put("industryName", setting.getIndustryName());
             result.put("unitNature", setting.getUnitNature());

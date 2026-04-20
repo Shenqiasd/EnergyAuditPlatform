@@ -103,6 +103,7 @@ export interface EnterpriseInfo {
   contactEmail?: string
   enterpriseAddress?: string
   legalRepresentative?: string
+  industryCode?: string
   industryCategory?: string
   industryName?: string
   unitNature?: string
