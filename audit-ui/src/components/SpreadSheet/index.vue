@@ -282,15 +282,18 @@ function applyOneConfigPrefill(
 ) {
   if (!tag.targetTable || !tag.cellRange || !tag.columnMappings) return
 
-  // 1. Get data source records
-  const allRecords = configData[tag.targetTable] ?? []
-
-  // 2. Parse columnMappings JSON
+  // 1. Parse columnMappings JSON first so we can honour the optional `source`
+  //    override before reading configData.
   // mode: "prefill" (default) = write values + dropdowns + hide empty rows
   //       "dropdown_only" = only inject dropdowns, no value writing, no row hiding
+  // source: optional config-data key to read from when it differs from
+  //         targetTable (e.g. target_table='de_product_unit_consumption' is a
+  //         submission storage table that isn't returned by the config-prefill
+  //         API — the actual data source is bs_product).
   let config: {
     filter?: Record<string, unknown>
     mode?: 'prefill' | 'dropdown_only'
+    source?: string
     columns: ConfigPrefillColDef[]
   }
   try {
@@ -302,6 +305,11 @@ function applyOneConfigPrefill(
   const columns = config.columns ?? []
   if (!columns.length) return
   const isDropdownOnly = config.mode === 'dropdown_only'
+
+  // 2. Resolve data source records. Prefer explicit `source` when provided,
+  //    otherwise fall back to targetTable.
+  const sourceKey = config.source ?? tag.targetTable
+  const allRecords = configData[sourceKey] ?? []
 
   // 3. Apply filter (e.g. { "isActive": 1 })
   let records = allRecords
