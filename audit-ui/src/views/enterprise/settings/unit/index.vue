@@ -39,7 +39,8 @@ const rules = {
 }
 
 const currentTabType = computed(() => Number(activeTab.value))
-const isEndUse = computed(() => (dialogVisible.value ? form.value.unitType === 3 : currentTabType.value === 3))
+const isEndUseTab = computed(() => currentTabType.value === 3)
+const isEndUse = computed(() => (dialogVisible.value ? form.value.unitType === 3 : isEndUseTab.value))
 
 const energyOptions = ref<BsEnergy[]>([])
 const endUseCategoryOptions = ref<DictData[]>([])
@@ -187,7 +188,7 @@ onMounted(async () => {
           row-key="id"
           @expand-change="onExpandChange"
         >
-          <el-table-column type="expand">
+          <el-table-column v-if="!isEndUseTab" type="expand">
             <template #default="{ row }">
               <div class="energy-panel" v-if="row.id">
                 <div class="energy-add-row">
