@@ -163,6 +163,10 @@ async function handleSubmitReview() {
         type: 'warning',
       })
       await handleSave()
+      // If save failed, isDirty is still true — abort submission
+      if (isDirty.value) {
+        return
+      }
     } catch {
       return
     }

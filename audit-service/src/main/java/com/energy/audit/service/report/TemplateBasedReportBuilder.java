@@ -88,35 +88,35 @@ public class TemplateBasedReportBuilder {
                                      String submissionJson,
                                      byte[] flowChartImage,
                                      Map<String, String> metadata) throws Exception {
-        XWPFDocument doc = new XWPFDocument(templateInputStream);
+        try (XWPFDocument doc = new XWPFDocument(templateInputStream)) {
 
-        // Step 1: Find all comment anchor positions in the document body
-        Map<Integer, Integer> commentPositions = findCommentPositions(doc);
-        log.info("[ReportBuilder] Found {} comment positions in template", commentPositions.size());
+            // Step 1: Find all comment anchor positions in the document body
+            Map<Integer, Integer> commentPositions = findCommentPositions(doc);
+            log.info("[ReportBuilder] Found {} comment positions in template", commentPositions.size());
 
-        // Step 2: Process annotations in reverse body-index order (to avoid position shifting)
-        // Sort by body index (not comment ID) because comment IDs don't follow document order
-        List<Map.Entry<Integer, Integer>> sortedEntries = new ArrayList<>(commentPositions.entrySet());
-        sortedEntries.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+            // Step 2: Process annotations in reverse body-index order (to avoid position shifting)
+            // Sort by body index (not comment ID) because comment IDs don't follow document order
+            List<Map.Entry<Integer, Integer>> sortedEntries = new ArrayList<>(commentPositions.entrySet());
+            sortedEntries.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
 
-        for (var entry : sortedEntries) {
-            int annotationId = entry.getKey();
-            int bodyIndex = entry.getValue();
-            try {
-                processAnnotation(doc, annotationId, bodyIndex, submissionJson, flowChartImage, metadata);
-            } catch (Exception e) {
-                log.warn("[ReportBuilder] Failed to process annotation ID={}: {}", annotationId, e.getMessage());
+            for (var entry : sortedEntries) {
+                int annotationId = entry.getKey();
+                int bodyIndex = entry.getValue();
+                try {
+                    processAnnotation(doc, annotationId, bodyIndex, submissionJson, flowChartImage, metadata);
+                } catch (Exception e) {
+                    log.warn("[ReportBuilder] Failed to process annotation ID={}: {}", annotationId, e.getMessage());
+                }
             }
+
+            // Step 3: Remove all comments from the document
+            removeAllComments(doc);
+
+            // Step 4: Write to byte array
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.write(out);
+            return out.toByteArray();
         }
-
-        // Step 3: Remove all comments from the document
-        removeAllComments(doc);
-
-        // Step 4: Write to byte array
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        doc.write(out);
-        doc.close();
-        return out.toByteArray();
     }
 
     /**
@@ -470,32 +470,32 @@ public class TemplateBasedReportBuilder {
      * Uses a simplified approach: iterate paragraphs and tables → HTML string.
      */
     public static String convertDocxToHtml(byte[] docxBytes) throws Exception {
-        XWPFDocument doc = new XWPFDocument(new ByteArrayInputStream(docxBytes));
-        StringBuilder html = new StringBuilder();
-        html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
-        html.append("<style>body{font-family:SimSun,serif;font-size:12pt;margin:2cm;line-height:1.6;}");
-        html.append("table{border-collapse:collapse;width:100%;margin:10px 0;}");
-        html.append("td,th{border:1px solid #333;padding:4px 8px;font-size:9pt;text-align:center;}");
-        html.append("th{background:#D9E2F3;font-weight:bold;}");
-        html.append("h1{font-size:18pt;text-align:center;}");
-        html.append("h2{font-size:14pt;margin-top:20px;}");
-        html.append("h3{font-size:12pt;margin-top:16px;}");
-        html.append("p{text-indent:2em;margin:6px 0;}");
-        html.append(".center{text-align:center;text-indent:0;}");
-        html.append("img{max-width:100%;height:auto;display:block;margin:10px auto;}");
-        html.append("</style></head><body>");
+        try (XWPFDocument doc = new XWPFDocument(new ByteArrayInputStream(docxBytes))) {
+            StringBuilder html = new StringBuilder();
+            html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
+            html.append("<style>body{font-family:SimSun,serif;font-size:12pt;margin:2cm;line-height:1.6;}");
+            html.append("table{border-collapse:collapse;width:100%;margin:10px 0;}");
+            html.append("td,th{border:1px solid #333;padding:4px 8px;font-size:9pt;text-align:center;}");
+            html.append("th{background:#D9E2F3;font-weight:bold;}");
+            html.append("h1{font-size:18pt;text-align:center;}");
+            html.append("h2{font-size:14pt;margin-top:20px;}");
+            html.append("h3{font-size:12pt;margin-top:16px;}");
+            html.append("p{text-indent:2em;margin:6px 0;}");
+            html.append(".center{text-align:center;text-indent:0;}");
+            html.append("img{max-width:100%;height:auto;display:block;margin:10px auto;}");
+            html.append("</style></head><body>");
 
-        for (var element : doc.getBodyElements()) {
-            if (element instanceof XWPFParagraph para) {
-                convertParagraphToHtml(para, html);
-            } else if (element instanceof XWPFTable table) {
-                convertTableToHtml(table, html);
+            for (var element : doc.getBodyElements()) {
+                if (element instanceof XWPFParagraph para) {
+                    convertParagraphToHtml(para, html);
+                } else if (element instanceof XWPFTable table) {
+                    convertTableToHtml(table, html);
+                }
             }
-        }
 
-        html.append("</body></html>");
-        doc.close();
-        return html.toString();
+            html.append("</body></html>");
+            return html.toString();
+        }
     }
 
     private static void convertParagraphToHtml(XWPFParagraph para, StringBuilder html) {

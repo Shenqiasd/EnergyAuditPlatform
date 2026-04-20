@@ -428,6 +428,9 @@ public class ReportServiceImpl implements ReportService {
         if (report.getStatus() == null || report.getStatus() < 2 || report.getStatus() == 3) {
             throw new BusinessException("报告尚未生成，不可提交审核");
         }
+        if (report.getStatus() == 4) {
+            throw new BusinessException("报告已提交审核，请勿重复提交");
+        }
         if (report.getStatus() == 5) {
             throw new BusinessException("报告已审核通过，无需重复提交");
         }
