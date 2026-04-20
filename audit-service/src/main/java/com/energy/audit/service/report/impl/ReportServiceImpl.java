@@ -390,8 +390,8 @@ public class ReportServiceImpl implements ReportService {
         if (report == null) {
             throw new BusinessException("报告不存在");
         }
-        if (report.getStatus() != null && report.getStatus() == 5) {
-            throw new BusinessException("报告已审核通过，不可编辑");
+        if (report.getStatus() != null && (report.getStatus() == 4 || report.getStatus() == 5)) {
+            throw new BusinessException(report.getStatus() == 5 ? "报告已审核通过，不可编辑" : "报告已提交审核，不可编辑");
         }
         report.setReportHtml(html);
         report.setUpdateBy(username);
@@ -430,11 +430,18 @@ public class ReportServiceImpl implements ReportService {
             txTemplate.setPropagationBehavior(
                 org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             txTemplate.executeWithoutResult(status -> {
-                ArReport report = reportMapper.selectById(reportId);
-                if (report != null) {
-                    report.setStatus(3); // failed
-                    report.setUpdateBy(username);
-                    reportMapper.update(report);
+                // Use direct SQL to avoid visibility issues with REQUIRES_NEW:
+                // The outer transaction's uncommitted INSERT may not be visible
+                // to this new transaction under READ_COMMITTED isolation.
+                // Using INSERT ... ON DUPLICATE KEY UPDATE ensures the record
+                // is created or updated regardless.
+                int updated = jdbcTemplate.update(
+                    "UPDATE ar_report SET status = 3, update_by = ?, update_time = NOW() " +
+                    "WHERE id = ? AND deleted = 0", username, reportId);
+                if (updated == 0) {
+                    log.warn("[ReportService] markReportFailed: no record found for id={}, " +
+                        "likely uncommitted INSERT from outer transaction — status=3 will not be persisted",
+                        reportId);
                 }
             });
         } catch (Exception ex) {

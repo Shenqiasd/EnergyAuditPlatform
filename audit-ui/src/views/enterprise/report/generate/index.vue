@@ -166,7 +166,7 @@ function viewDetail(row: Row) {
 async function handleGenerateReport() {
   // Find submitted submissions for the selected year to use template-based generation
   const submittedSubs = submissions.value.filter(
-    s => s.auditYear === selectedYear.value && s.status === 1
+    s => s.auditYear === selectedYear.value && s.status === 2
   )
   const useTemplate = submittedSubs.length > 0 && submittedSubs[0].id != null
 
