@@ -228,6 +228,10 @@ const COL_LABELS: Record<string, string> = {
   year_label: '年份标签',
   decline_rate: '下降率',
   product_name: '产品名称',
+  indicator_name: '指标名称',
+  indicator_unit: '指标单位',
+  numerator_unit: '分子项单位',
+  denominator_unit: '分母项单位',
   indicator_value: '指标值',
   actual_value: '实际值',
   energy_control_total: '能源管控总量',
@@ -376,6 +380,7 @@ const NUMERIC_COLS = new Set([
   'low_heat_value', 'carbon_content', 'oxidation_rate',
   'peak_emission', 'current_emission', 'reduction_target',
   'output', 'energy_consumption',
+  'prev_unit_consumption', 'prev_energy_consumption', 'prev_output',
   'unit_count',
 ])
 

@@ -266,6 +266,8 @@ interface ConfigPrefillColDef {
   format?: string
   dropdown?: boolean
   prefill?: boolean
+  /** When true, the cell is locked after writing — user cannot edit (auto-generated column). */
+  locked?: boolean
   /** When set, this column's value is auto-derived from the record matching the master column.
    *  The column is locked and auto-updates when the master column value changes.
    *  Example: { "masterCol": "A", "lookupField": "name" } */
@@ -426,8 +428,18 @@ function applyOneConfigPrefill(
         } catch { /* ignore styling errors */ }
       }
 
-      // Set dropdown validator (skip if dropdown: false or linkedTo)
-      if (DataValidation && colDef.dropdown !== false && !colDef.linkedTo) {
+      // Lock columns with locked: true — auto-generated, user should not edit
+      if (colDef.locked && !colDef.linkedTo) {
+        try {
+          const style = sheet.getStyle(startRow + i, colIndex) || new (window.GC.Spread.Sheets.Style)()
+          style.locked = true
+          style.backColor = '#F5F5F5' // light gray to indicate read-only
+          sheet.setStyle(startRow + i, colIndex, style)
+        } catch { /* ignore styling errors */ }
+      }
+
+      // Set dropdown validator (skip if dropdown: false or linkedTo or locked)
+      if (DataValidation && colDef.dropdown !== false && !colDef.linkedTo && !colDef.locked) {
         const dropdownVals = colDropdownValues.get(colIndex)
         if (dropdownVals?.length) {
           try {
