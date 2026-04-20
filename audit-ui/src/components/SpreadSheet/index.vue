@@ -259,6 +259,20 @@ function applyConfigPrefill(
   }
 }
 
+/** Column definition type for CONFIG_PREFILL mappings */
+interface ConfigPrefillColDef {
+  col: string | number
+  field: string
+  format?: string
+  dropdown?: boolean
+  prefill?: boolean
+  /** When set, this column's value is auto-derived from the record matching the master column.
+   *  The column is locked and auto-updates when the master column value changes.
+   *  Example: { "masterCol": "A", "lookupField": "name" } */
+  linkedTo?: { masterCol: string; lookupField: string }
+  extraSources?: Array<{ table: string; field: string; filter?: Record<string, unknown> }>
+}
+
 function applyOneConfigPrefill(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tag: TplTagMapping,
@@ -275,7 +289,7 @@ function applyOneConfigPrefill(
   let config: {
     filter?: Record<string, unknown>
     mode?: 'prefill' | 'dropdown_only'
-    columns: Array<{ col: string | number; field: string; format?: string; dropdown?: boolean; prefill?: boolean; extraSources?: Array<{ table: string; field: string; filter?: Record<string, unknown> }> }>
+    columns: ConfigPrefillColDef[]
   }
   try {
     config = JSON.parse(tag.columnMappings)
@@ -348,8 +362,8 @@ function applyOneConfigPrefill(
   // 8. Build per-column deduplicated dropdown value lists from ALL filtered records
   const colDropdownValues = new Map<number, string[]>()
   for (const colDef of columns) {
-    // Skip dropdown for columns explicitly marked dropdown: false
-    if (colDef.dropdown === false) continue
+    // Skip dropdown for columns explicitly marked dropdown: false OR linkedTo columns
+    if (colDef.dropdown === false || colDef.linkedTo) continue
     const colIndex = resolveColIndex(colDef)
     const values: string[] = []
     const seen = new Set<string>()
@@ -402,8 +416,18 @@ function applyOneConfigPrefill(
         }
       }
 
-      // Set dropdown validator (skip if dropdown: false)
-      if (DataValidation && colDef.dropdown !== false) {
+      // Lock linkedTo columns — value is derived, user should not edit directly
+      if (colDef.linkedTo) {
+        try {
+          const style = sheet.getStyle(startRow + i, colIndex) || new (window.GC.Spread.Sheets.Style)()
+          style.locked = true
+          style.backColor = '#F5F5F5' // light gray to indicate read-only
+          sheet.setStyle(startRow + i, colIndex, style)
+        } catch { /* ignore styling errors */ }
+      }
+
+      // Set dropdown validator (skip if dropdown: false or linkedTo)
+      if (DataValidation && colDef.dropdown !== false && !colDef.linkedTo) {
         const dropdownVals = colDropdownValues.get(colIndex)
         if (dropdownVals?.length) {
           try {
@@ -432,9 +456,103 @@ function applyOneConfigPrefill(
     }
   }
 
+  // 11. Identify master columns that have linkedTo dependents (for event binding)
+  const linkedCols = columns.filter(c => c.linkedTo)
+  // Identify master columns with dropdowns (for duplicate prevention)
+  const masterColDefs = columns.filter(c => !c.linkedTo && c.dropdown !== false && colDropdownValues.has(resolveColIndex(c)))
+
+  // Helper: rebuild per-row dropdowns excluding values already used in other rows
+  const refreshDropdownsExcludingDuplicates = () => {
+    if (!DataValidation || !masterColDefs.length) return
+    for (const colDef of masterColDefs) {
+      const colIndex = resolveColIndex(colDef)
+      const allVals = colDropdownValues.get(colIndex)
+      if (!allVals?.length) continue
+
+      // Collect values currently used in all rows for this column
+      const usedValues = new Set<string>()
+      for (let r = 0; r < rowsToFill; r++) {
+        const cellVal = sheet.getValue(startRow + r, colIndex)
+        if (cellVal != null && String(cellVal) !== '') {
+          usedValues.add(String(cellVal))
+        }
+      }
+
+      // For each row, set dropdown = allVals minus values used in OTHER rows
+      for (let r = 0; r < rowsToFill; r++) {
+        const currentVal = sheet.getValue(startRow + r, colIndex)
+        const currentStr = currentVal != null ? String(currentVal) : ''
+        const availableVals = allVals.filter(v => v === currentStr || !usedValues.has(v))
+        if (!availableVals.length) continue
+        try {
+          const listStr = availableVals.map(v => v.replace(/,/g, '\uff0c')).join(',')
+          const dv = DataValidation.createListValidator(listStr)
+          dv.inCellDropdown(true)
+          dv.showInputMessage(true)
+          dv.inputTitle('请选择')
+          dv.inputMessage('点击下拉箭头选择')
+          sheet.setDataValidator(startRow + r, colIndex, dv)
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
+  // Apply initial duplicate exclusion on prefill mode (each row pre-filled with unique record)
+  if (!isDropdownOnly && masterColDefs.length > 0) {
+    refreshDropdownsExcludingDuplicates()
+  }
+
+  // Bind CellChanged for linkedTo auto-fill AND duplicate prevention
+  if ((linkedCols.length > 0 || masterColDefs.length > 0) && !isDropdownOnly) {
+    const Events = window.GC?.Spread?.Sheets?.Events
+    if (Events?.CellChanged) {
+      sheet.bind(Events.CellChanged, (_sender: unknown, args: { row: number; col: number; newValue: unknown }) => {
+        const { row, col: changedCol, newValue } = args
+        // Only process changes within our data range
+        if (row < startRow || row >= startRow + rowsToFill) return
+
+        // Auto-fill linkedTo columns when master column changes
+        for (const linked of linkedCols) {
+          const masterColIndex = resolveColIndex({ col: linked.linkedTo!.masterCol })
+          if (changedCol !== masterColIndex) continue
+
+          // Look up the record matching the new master value
+          const lookupField = linked.linkedTo!.lookupField
+          const newValStr = newValue != null ? String(newValue) : ''
+          const matchedRecord = records.find(r => String(r[lookupField] ?? '') === newValStr)
+
+          // Auto-fill the linked column with the matched record's field value
+          const linkedColIndex = resolveColIndex(linked)
+          if (matchedRecord) {
+            let fillVal: unknown
+            if (linked.format) {
+              fillVal = linked.format.replace(/\{(\w+)\}/g, (_, key: string) => String(matchedRecord[key] ?? ''))
+            } else {
+              fillVal = matchedRecord[linked.field]
+            }
+            sheet.setValue(row, linkedColIndex, fillVal != null ? fillVal : '')
+          } else {
+            sheet.setValue(row, linkedColIndex, '')
+          }
+        }
+
+        // Refresh all master column dropdowns to exclude newly selected value from other rows
+        const isMasterCol = masterColDefs.some(c => resolveColIndex(c) === changedCol)
+        if (isMasterCol) {
+          refreshDropdownsExcludingDuplicates()
+        }
+      })
+      const features: string[] = []
+      if (linkedCols.length > 0) features.push(`${linkedCols.length} linkedTo`)
+      if (masterColDefs.length > 0) features.push('duplicate prevention')
+      console.log(`[config-prefill] "${tag.tagName}": bound CellChanged (${features.join(' + ')})`)
+    }
+  }
+
   console.log(
     `[config-prefill] "${tag.tagName}" [${isDropdownOnly ? 'dropdown_only' : 'prefill'}]: ` +
-    `${rowsToFill} rows processed` + (isDropdownOnly ? '' : `, ${maxRows - rowsToFill} empty rows hidden`),
+    `${rowsToFill} rows processed` + (isDropdownOnly ? '' : `, ${maxRows - rowsToFill} empty rows hidden`) +
+    (linkedCols.length > 0 ? `, ${linkedCols.length} linked column(s)` : ''),
   )
 }
 
