@@ -79,7 +79,7 @@
             <if test="templateId != null">template_id = #{templateId},</if>
             <if test="submissionId != null">submission_id = #{submissionId},</if>
             <if test="flowChartPath != null">flow_chart_path = #{flowChartPath},</if>
-            <if test="reviewComment != null">review_comment = #{reviewComment},</if>
+            review_comment = #{reviewComment},
             <if test="reviewerId != null">reviewer_id = #{reviewerId},</if>
             update_by = #{updateBy},
             update_time = CURRENT_TIMESTAMP,

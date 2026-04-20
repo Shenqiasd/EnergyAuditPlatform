@@ -458,7 +458,8 @@ public class TemplateBasedReportBuilder {
 
         if (isHeader) {
             // Light gray background for header
-            CTShd shd = cell.getCTTc().addNewTcPr().addNewShd();
+            CTTcPr tcPr = cell.getCTTc().isSetTcPr() ? cell.getCTTc().getTcPr() : cell.getCTTc().addNewTcPr();
+            CTShd shd = tcPr.addNewShd();
             shd.setVal(STShd.CLEAR);
             shd.setColor("auto");
             shd.setFill("D9E2F3");
