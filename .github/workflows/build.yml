@@ -1,0 +1,46 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  frontend-build:
+    name: Frontend build (audit-ui)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: audit-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+        env:
+          npm_config_registry: https://registry.npmmirror.com
+
+      - name: Vite build
+        run: npx vite build
+
+  backend-compile:
+    name: Backend compile (maven)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      - name: Maven compile
+        run: mvn -B -ntp -DskipTests compile
