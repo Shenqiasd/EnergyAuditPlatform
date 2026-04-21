@@ -620,7 +620,7 @@ function fillTaggedCell(
 
   // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
   if (tag.tagName) {
-    const found = lookupCellTag(wb, tag.tagName, tag.sheetIndex)
+    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
     if (found) {
       const sheet = wb.getSheet(found.sheetIndex)
       sheet.setValue(found.row, found.col, value)
@@ -921,7 +921,7 @@ function unlockScalarCell(
 
   // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
   if (tag.tagName) {
-    const found = lookupCellTag(wb, tag.tagName, tag.sheetIndex)
+    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
     if (found) {
       const sheet = wb.getSheet(found.sheetIndex)
       const cell = sheet.getCell(found.row, found.col)
@@ -1111,7 +1111,6 @@ function buildCellTagIndex(wb: import('@/types/spreadjs').GCSpreadWorkbook): voi
  * Returns {sheetIndex, row, col} or null if not found.
  */
 function lookupCellTag(
-  wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tagName: string,
   sheetIndex?: number | null,
 ): { sheetIndex: number; row: number; col: number } | null {
@@ -1162,7 +1161,7 @@ function isScalarCellEmpty(
 
   // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
   if (tag.tagName) {
-    const found = lookupCellTag(wb, tag.tagName, tag.sheetIndex)
+    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
     if (found) {
       const sheet = wb.getSheet(found.sheetIndex)
       const val = sheet.getValue(found.row, found.col)
