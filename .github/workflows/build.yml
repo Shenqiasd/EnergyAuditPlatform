@@ -7,6 +7,10 @@ on:
       - master
 
 jobs:
+  # ----------------------------------------------------------------------
+  # REQUIRED — must pass for PRs to be merged
+  # ----------------------------------------------------------------------
+
   frontend-build:
     name: Frontend build (audit-ui)
     runs-on: ubuntu-latest
@@ -44,3 +48,144 @@ jobs:
 
       - name: Maven compile
         run: mvn -B -ntp -DskipTests compile
+
+  # ----------------------------------------------------------------------
+  # ADVISORY — reported but does not block merges.
+  # Intent: give visibility into drift (type errors / lint warnings / SQL
+  # style issues / migration correctness) without breaking the existing
+  # build. These will be promoted to required checks in a follow-up once
+  # the existing debt is cleaned up.
+  #
+  # NOTE on sql-migrations: several existing migrations use `ALTER TABLE
+  # ... ADD COLUMN IF NOT EXISTS` which is not supported by vanilla MySQL
+  # 8.0 (only MariaDB / some Railway MySQL flavors). This advisory job
+  # exposes that drift so a fresh bootstrap of the schema (e.g. Tencent
+  # Cloud) doesn't silently fail.
+  # ----------------------------------------------------------------------
+
+  sql-migrations:
+    name: SQL migrations (dry-run on empty MySQL 8.0, advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: audit_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for MySQL to be ready
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -uroot -proot --silent; then
+              echo "MySQL is ready"
+              exit 0
+            fi
+            echo "Waiting for MySQL... ($i/30)"
+            sleep 2
+          done
+          echo "MySQL failed to start" >&2
+          exit 1
+
+      - name: Apply migrations in order
+        env:
+          MYSQL_PWD: root
+        run: |
+          set -e
+          shopt -s nullglob
+          # Apply 00-schema.sql first (baseline) then all numbered migrations
+          # in lexical order, which matches the numeric prefix convention.
+          failed=0
+          for f in $(ls sql/*.sql | sort); do
+            echo "::group::Applying $f"
+            if mysql -h 127.0.0.1 -P 3306 -uroot audit_test < "$f"; then
+              echo "OK: $f"
+            else
+              echo "::error file=$f::Migration failed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Verify key tables exist
+        env:
+          MYSQL_PWD: root
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -uroot audit_test -e "
+            SELECT COUNT(*) AS tpl_tag_mapping_rows FROM tpl_tag_mapping;
+            SELECT COUNT(*) AS ent_enterprise_rows FROM ent_enterprise;
+            SHOW COLUMNS FROM tpl_submission LIKE 'review_comment';
+          "
+
+  frontend-typecheck:
+    name: Frontend typecheck (vue-tsc, advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: audit-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+        env:
+          npm_config_registry: https://registry.npmmirror.com
+
+      - name: Run vue-tsc
+        run: npm run typecheck
+
+  frontend-lint:
+    name: Frontend lint (eslint, advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: audit-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+        env:
+          npm_config_registry: https://registry.npmmirror.com
+
+      - name: Run eslint
+        run: npm run lint
+
+  sql-lint:
+    name: SQL lint (sqlfluff, advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install sqlfluff
+        run: pip install 'sqlfluff==3.0.7'
+
+      - name: Run sqlfluff
+        run: sqlfluff lint sql/ --dialect mysql --nofail --disable-progress-bar

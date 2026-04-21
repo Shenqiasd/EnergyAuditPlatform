@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
+    "build:no-typecheck": "vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",
+    "lint": "eslint \"src/**/*.{vue,ts,tsx}\" --max-warnings 999999",
+    "lint:fix": "eslint \"src/**/*.{vue,ts,tsx}\" --fix --max-warnings 999999",
     "preview": "vite preview",
     "postinstall": "bash scripts/setup-tinymce.sh || true"
   },
@@ -34,7 +38,11 @@
     "@grapecity/spread-sheets-print": "18.2.5",
     "@grapecity/spread-sheets-shapes": "18.2.5",
     "@types/node": "^20.11.25",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "@vitejs/plugin-vue": "^5.0.4",
+    "eslint": "^8.57.1",
+    "eslint-plugin-vue": "^9.33.0",
     "sass": "^1.72.0",
     "typescript": "^5.4.2",
     "unplugin-auto-import": "^0.17.5",
