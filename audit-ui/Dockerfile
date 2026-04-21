@@ -6,6 +6,11 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --registry=https://registry.npmmirror.com
 COPY . .
+# Re-run setup-tinymce.sh after COPY . . because COPY overwrites the
+# public/tinymce/ directory that postinstall created during npm install.
+# The gitignored public/tinymce/ files are lost when COPY replaces them
+# with the (empty) git version.
+RUN bash scripts/setup-tinymce.sh
 ENV VITE_SPREADJS_LICENSE=$VITE_SPREADJS_LICENSE
 ENV VITE_SPREADJS_DESIGNER_LICENSE=$VITE_SPREADJS_DESIGNER_LICENSE
 RUN npx vite build
