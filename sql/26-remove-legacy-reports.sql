@@ -16,7 +16,7 @@ WHERE report_type = 1
 -- 2. Activate the report template (ensure template-based generation works)
 -- Only activate if there's at least one template
 UPDATE ar_report_template
-SET is_active = 1,
+SET status = 1,
     update_by = 'SYSTEM_MIGRATION',
     update_time = NOW()
 WHERE id = (
@@ -27,4 +27,4 @@ WHERE id = (
         LIMIT 1
     ) AS t
 )
-AND (is_active IS NULL OR is_active = 0);
+AND (status IS NULL OR status = 0);
