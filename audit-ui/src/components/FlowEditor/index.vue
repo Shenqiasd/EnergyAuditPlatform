@@ -551,14 +551,55 @@ function fitView() {
 async function exportPng(): Promise<string | null> {
   if (!graph) return null
   try {
-    const svg = await graph.toSVG()
-    if (typeof svg === 'string') {
-      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
-    }
-    return null
+    const dataUri = await exportPngDataUri()
+    return dataUri
   } catch {
     return null
   }
+}
+
+/**
+ * Export the flow chart as a PNG Blob — used by report generation to embed
+ * the energy flow diagram image into the Word document.
+ */
+async function exportPngBlob(): Promise<Blob | null> {
+  if (!graph) return null
+  try {
+    const dataUri = await exportPngDataUri()
+    if (!dataUri) return null
+    // Convert data URI to Blob
+    const resp = await fetch(dataUri)
+    return resp.blob()
+  } catch {
+    return null
+  }
+}
+
+/** Internal: render SVG to Canvas then export as PNG data URI */
+async function exportPngDataUri(): Promise<string | null> {
+  if (!graph) return null
+  const svgStr = await graph.toSVG()
+  if (typeof svgStr !== 'string') return null
+
+  return new Promise<string | null>((resolve) => {
+    const img = new Image()
+    // Use a larger scale for better quality in printed reports
+    const SCALE = 2
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth * SCALE
+      canvas.height = img.naturalHeight * SCALE
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(null); return }
+      ctx.fillStyle = '#FFFFFF'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.scale(SCALE, SCALE)
+      ctx.drawImage(img, 0, 0)
+      resolve(canvas.toDataURL('image/png'))
+    }
+    img.onerror = () => resolve(null)
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr)
+  })
 }
 
 watch(
@@ -571,7 +612,7 @@ watch(
   { deep: true }
 )
 
-defineExpose({ fitView, exportPng })
+defineExpose({ fitView, exportPng, exportPngBlob })
 </script>
 
 <template>

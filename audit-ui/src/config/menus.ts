@@ -46,6 +46,7 @@ export const enterpriseMenus: MenuSection[] = [
   {
     section: '报告管理',
     items: [
+      { key: 'report-edit',   icon: '📝', title: '在线编辑报告', path: '/enterprise/report/edit' },
       { key: 'report-upload', icon: '📤', title: '上传最终报告', path: '/enterprise/report/upload' },
       { key: 'report-detail', icon: '👁️', title: '报告详情',     path: '/enterprise/report/detail' },
     ],
@@ -101,6 +102,12 @@ export const auditorMenus: MenuSection[] = [
     items: [
       { key: 'tasks',  icon: '📋', title: '任务列表', path: '/auditor/tasks' },
       { key: 'review', icon: '🔍', title: '审核详情', path: '/auditor/review' },
+    ],
+  },
+  {
+    section: '报告管理',
+    items: [
+      { key: 'report-review', icon: '📄', title: '报告审核', path: '/auditor/report-review' },
     ],
   },
 ]

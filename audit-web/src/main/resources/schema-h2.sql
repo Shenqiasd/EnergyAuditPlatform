@@ -1377,6 +1377,27 @@ CREATE TABLE IF NOT EXISTS ar_report (
     onlyoffice_doc_key     VARCHAR(128),
     generate_time          DATETIME,
     submit_time            DATETIME,
+    report_html            LONGTEXT,
+    template_id            BIGINT,
+    submission_id          BIGINT,
+    flow_chart_path        VARCHAR(512),
+    review_comment         VARCHAR(512),
+    reviewer_id            BIGINT,
+    create_by              VARCHAR(64),
+    create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by              VARCHAR(64),
+    update_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT       NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- ar_report_template (report template management)
+CREATE TABLE IF NOT EXISTS ar_report_template (
+    id                     BIGINT        NOT NULL AUTO_INCREMENT,
+    template_name          VARCHAR(128)  NOT NULL,
+    template_file_path     VARCHAR(512)  NOT NULL,
+    version                INT           DEFAULT 1,
+    status                 TINYINT       DEFAULT 0,
     create_by              VARCHAR(64),
     create_time            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_by              VARCHAR(64),

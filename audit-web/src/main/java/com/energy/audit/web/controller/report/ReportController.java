@@ -4,6 +4,7 @@ import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.model.entity.report.ArReport;
+import com.energy.audit.model.entity.report.ArReportTemplate;
 import com.energy.audit.service.report.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -12,10 +13,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 @Tag(name = "Report", description = "Audit report management")
 @RestController
@@ -32,7 +35,7 @@ public class ReportController {
         }
     }
 
-    @Operation(summary = "Generate audit report")
+    @Operation(summary = "Generate audit report (legacy code-based)")
     @PostMapping("/generate")
     public R<ArReport> generate(@RequestParam Integer auditYear) {
         requireEnterprise();
@@ -66,11 +69,20 @@ public class ReportController {
     @Operation(summary = "Download report file")
     @GetMapping("/{id}/download")
     public ResponseEntity<byte[]> download(@PathVariable Long id) {
-        requireEnterprise();
-        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        Integer userType = SecurityUtils.getCurrentUserType();
+        if (userType == null || (userType != 1 && userType != 2 && userType != 3)) {
+            throw new BusinessException("无权下载报告");
+        }
         ArReport report = reportService.getReport(id);
-        if (report == null || !report.getEnterpriseId().equals(enterpriseId)) {
+        if (report == null) {
             return ResponseEntity.notFound().build();
+        }
+        // Enterprise users can only download their own reports
+        if (userType == 3) {
+            Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+            if (!report.getEnterpriseId().equals(enterpriseId)) {
+                return ResponseEntity.notFound().build();
+            }
         }
         byte[] content = reportService.downloadReport(id);
         String fileName = report.getReportName() + ".docx";
@@ -80,5 +92,119 @@ public class ReportController {
                 "attachment; filename*=UTF-8''" + encodedFileName)
             .contentType(MediaType.APPLICATION_OCTET_STREAM)
             .body(content);
+    }
+
+    // ====== Template-based report generation (Phase 1) ======
+
+    @Operation(summary = "Generate report from Word template using SpreadJS submission data")
+    @PostMapping("/generate-from-template")
+    public R<ArReport> generateFromTemplate(
+            @RequestParam Long submissionId,
+            @RequestPart(required = false) MultipartFile flowChartImage) {
+        requireEnterprise();
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        String username = SecurityUtils.getCurrentUsername();
+        byte[] imageBytes = null;
+        if (flowChartImage != null && !flowChartImage.isEmpty()) {
+            try {
+                imageBytes = flowChartImage.getBytes();
+            } catch (Exception e) {
+                return R.fail("能源流向图上传失败");
+            }
+        }
+        ArReport report = reportService.generateReportFromTemplate(submissionId, enterpriseId, imageBytes, username);
+        return R.ok(report);
+    }
+
+    @Operation(summary = "Save edited report HTML (from TinyMCE editor)")
+    @PostMapping("/{id}/edit")
+    public R<ArReport> editHtml(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        requireEnterprise();
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        ArReport report = reportService.getReport(id);
+        if (report == null || !report.getEnterpriseId().equals(enterpriseId)) {
+            return R.fail("报告不存在");
+        }
+        String html = body.get("html");
+        if (html == null) {
+            return R.fail("缺少 html 字段");
+        }
+        String username = SecurityUtils.getCurrentUsername();
+        ArReport updated = reportService.saveReportHtml(id, html, username);
+        return R.ok(updated);
+    }
+
+    @Operation(summary = "Submit report for auditor review")
+    @PostMapping("/{id}/submit-for-review")
+    public R<ArReport> submitForReview(@PathVariable Long id) {
+        requireEnterprise();
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        ArReport report = reportService.getReport(id);
+        if (report == null || !report.getEnterpriseId().equals(enterpriseId)) {
+            return R.fail("报告不存在");
+        }
+        String username = SecurityUtils.getCurrentUsername();
+        ArReport updated = reportService.submitForReview(id, username);
+        return R.ok(updated);
+    }
+
+    @Operation(summary = "List available report templates")
+    @GetMapping("/templates")
+    public R<List<ArReportTemplate>> listTemplates() {
+        return R.ok(reportService.listTemplates());
+    }
+
+    // ====== Phase 3: Report Review Workflow (auditor side) ======
+
+    private void requireAuditorOrAdmin() {
+        Integer userType = SecurityUtils.getCurrentUserType();
+        if (userType == null || (userType != 1 && userType != 2)) {
+            throw new BusinessException("仅管理员或审核员可执行此操作");
+        }
+    }
+
+    @Operation(summary = "List reports for review (auditor/admin)")
+    @GetMapping("/review/list")
+    public R<List<ArReport>> listForReview(
+            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) Integer auditYear) {
+        requireAuditorOrAdmin();
+        List<ArReport> reports = reportService.listReportsForReview(status, auditYear);
+        return R.ok(reports);
+    }
+
+    @Operation(summary = "Get report detail for review (auditor/admin)")
+    @GetMapping("/review/{id}")
+    public R<ArReport> reviewDetail(@PathVariable Long id) {
+        requireAuditorOrAdmin();
+        ArReport report = reportService.getReport(id);
+        if (report == null) {
+            return R.fail("报告不存在");
+        }
+        return R.ok(report);
+    }
+
+    @Operation(summary = "Approve a submitted report (status 4 -> 5)")
+    @PostMapping("/review/{id}/approve")
+    public R<ArReport> approveReport(@PathVariable Long id,
+                                      @RequestBody(required = false) Map<String, String> body) {
+        requireAuditorOrAdmin();
+        Long reviewerId = SecurityUtils.getRequiredCurrentUserId();
+        String username = SecurityUtils.getCurrentUsername();
+        String comment = body != null ? body.get("reviewComment") : null;
+        ArReport updated = reportService.approveReport(id, comment, reviewerId, username);
+        return R.ok(updated);
+    }
+
+    @Operation(summary = "Reject/return a submitted report (status 4 -> 6)")
+    @PostMapping("/review/{id}/reject")
+    public R<ArReport> rejectReport(@PathVariable Long id,
+                                     @RequestBody Map<String, String> body) {
+        requireAuditorOrAdmin();
+        Long reviewerId = SecurityUtils.getRequiredCurrentUserId();
+        String username = SecurityUtils.getCurrentUsername();
+        String comment = body != null ? body.get("reviewComment") : null;
+        ArReport updated = reportService.rejectReport(id, comment, reviewerId, username);
+        return R.ok(updated);
     }
 }

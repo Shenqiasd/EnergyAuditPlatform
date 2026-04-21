@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import {
@@ -18,11 +18,17 @@ import {
 } from '@/api/audit-task'
 import {
   generateReport,
+  generateReportFromTemplate,
   listReports,
   downloadReport,
   REPORT_STATUS_MAP,
   type ArReport,
 } from '@/api/report'
+import { getEnergyFlowList } from '@/api/energyFlow'
+import type { EnergyFlowItem } from '@/api/energyFlow'
+import { queryExtractedTable } from '@/api/extracted-data'
+import FlowEditor from '@/components/FlowEditor/index.vue'
+import type { EnergyBalanceItem } from '@/components/FlowEditor/index.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -35,6 +41,12 @@ const auditTask = ref<AuditTask | null>(null)
 const submittingAudit = ref(false)
 const generatingReport = ref(false)
 const reports = ref<ArReport[]>([])
+
+// Flow chart off-screen rendering for report embedding
+const flowChartRef = ref<InstanceType<typeof FlowEditor>>()
+const flowData = ref<EnergyFlowItem[]>([])
+const balanceData = ref<EnergyBalanceItem[]>([])
+const showFlowChart = ref(false)
 
 interface Row {
   template: TplTemplate
@@ -162,21 +174,71 @@ function viewDetail(row: Row) {
   router.push({ path: '/enterprise/report/detail', query: { id: row.submission?.id } })
 }
 
-async function handleGenerateReport() {
+/**
+ * Capture the energy flow chart as a PNG File for embedding in the Word report.
+ * Renders the FlowEditor off-screen, waits for graph to build, then exports PNG.
+ */
+async function captureFlowChartImage(): Promise<File | undefined> {
   try {
-    await ElMessageBox.confirm(
-      `确认为 ${selectedYear.value} 年度生成审计报告（Word文档）？系统将根据已提交的数据自动生成报告。`,
-      '生成报告',
-      { type: 'info' }
-    )
+    // Load flow data for the selected year
+    const [flows, balanceResult] = await Promise.all([
+      getEnergyFlowList(selectedYear.value).catch(() => [] as EnergyFlowItem[]),
+      queryExtractedTable('de_energy_balance', { auditYear: selectedYear.value, pageSize: 100 })
+        .catch(() => ({ records: [] as Record<string, unknown>[], total: 0 })),
+    ])
+    if (!flows.length) return undefined
+
+    flowData.value = flows
+    balanceData.value = (balanceResult.records || []) as unknown as EnergyBalanceItem[]
+    showFlowChart.value = true
+
+    // Wait for FlowEditor to mount and render the graph
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    if (!flowChartRef.value) return undefined
+    const blob = await flowChartRef.value.exportPngBlob()
+    showFlowChart.value = false
+
+    if (!blob) return undefined
+    return new File([blob], `energy-flow-${selectedYear.value}.png`, { type: 'image/png' })
+  } catch {
+    showFlowChart.value = false
+    return undefined
+  }
+}
+
+async function handleGenerateReport() {
+  // Find submitted submissions for the selected year to use template-based generation
+  const submittedSubs = submissions.value.filter(
+    s => s.auditYear === selectedYear.value && s.status === 2
+  )
+  const useTemplate = submittedSubs.length > 0 && submittedSubs[0].id != null
+
+  const confirmMsg = useTemplate
+    ? `确认为 ${selectedYear.value} 年度基于模板生成审计报告？系统将从填报数据自动生成 Word 文档并转换为在线可编辑报告。`
+    : `确认为 ${selectedYear.value} 年度生成审计报告？系统将根据已提交的数据自动生成报告。`
+  try {
+    await ElMessageBox.confirm(confirmMsg, '生成报告', { type: 'info' })
   } catch {
     return
   }
   generatingReport.value = true
   try {
-    await generateReport(selectedYear.value)
+    let result: ArReport
+    if (useTemplate) {
+      // Capture flow chart screenshot for embedding in the Word report
+      const flowChartImage = await captureFlowChartImage()
+      result = await generateReportFromTemplate(submittedSubs[0].id!, flowChartImage) as ArReport
+    } else {
+      result = await generateReport(selectedYear.value) as ArReport
+    }
     ElMessage.success('报告生成成功')
     loadData()
+    // Automatically navigate to editor if report has HTML
+    if (result?.id && result.status === 2) {
+      router.push({ path: '/enterprise/report/edit', query: { id: result.id } })
+    }
   } catch (e: any) {
     ElMessage.error('报告生成失败：' + (e?.message ?? '未知错误'))
   } finally {
@@ -196,6 +258,10 @@ async function handleDownloadReport(report: ArReport) {
   } catch (e: any) {
     ElMessage.error('下载失败：' + (e?.message ?? '未知错误'))
   }
+}
+
+function goToEditReport(report: ArReport) {
+  router.push({ path: '/enterprise/report/edit', query: { id: report.id } })
 }
 
 onMounted(loadData)
@@ -323,6 +389,11 @@ onMounted(loadData)
       </div>
     </el-card>
 
+    <!-- Off-screen FlowEditor for capturing flow chart screenshot -->
+    <div v-if="showFlowChart" class="flow-chart-offscreen">
+      <FlowEditor ref="flowChartRef" :flow-data="flowData" :balance-data="balanceData" />
+    </div>
+
     <el-card shadow="never" style="margin-top: 16px">
       <template #header>
         <div class="card-header">
@@ -353,11 +424,19 @@ onMounted(loadData)
         <el-table-column label="生成时间" width="170">
           <template #default="{ row }">{{ row.generateTime ?? '—' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button
               link
               type="primary"
+              :disabled="row.status < 2 || row.status === 4 || row.status === 5"
+              @click="goToEditReport(row)"
+            >
+              编辑
+            </el-button>
+            <el-button
+              link
+              type="info"
               :disabled="row.status < 2"
               @click="handleDownloadReport(row)"
             >
@@ -408,5 +487,14 @@ onMounted(loadData)
 .submit-hint {
   margin-top: 12px;
   text-align: center;
+}
+
+.flow-chart-offscreen {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  width: 1200px;
+  height: 800px;
+  overflow: hidden;
 }
 </style>

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.energy.audit.dao.mapper.report.ArReportTemplateMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.report.ArReportTemplate">
+        <id column="id" property="id"/>
+        <result column="template_name" property="templateName"/>
+        <result column="template_file_path" property="templateFilePath"/>
+        <result column="version" property="version"/>
+        <result column="status" property="status"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ar_report_template (template_name, template_file_path, version, status,
+                                        create_by, update_by)
+        VALUES (#{templateName}, #{templateFilePath}, #{version}, #{status},
+                #{createBy}, #{updateBy})
+    </insert>
+
+    <update id="update">
+        UPDATE ar_report_template
+        <set>
+            <if test="templateName != null">template_name = #{templateName},</if>
+            <if test="templateFilePath != null">template_file_path = #{templateFilePath},</if>
+            <if test="version != null">version = #{version},</if>
+            <if test="status != null">status = #{status},</if>
+            update_by = #{updateBy},
+            update_time = CURRENT_TIMESTAMP,
+        </set>
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT * FROM ar_report_template
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectAll" resultMap="BaseResultMap">
+        SELECT * FROM ar_report_template
+        WHERE deleted = 0
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectActive" resultMap="BaseResultMap">
+        SELECT * FROM ar_report_template
+        WHERE status = 1 AND deleted = 0
+        ORDER BY version DESC
+        LIMIT 1
+    </select>
+
+</mapper>
