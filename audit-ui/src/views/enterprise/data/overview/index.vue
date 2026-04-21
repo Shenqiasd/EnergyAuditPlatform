@@ -138,7 +138,6 @@ const COL_LABELS: Record<string, string> = {
   previous_numerator: '上期分子',
   previous_denominator: '上期分母',
   equipment_type: '设备类型',
-  equipment_name: '设备名称',
   model: '型号',
   quantity: '数量',
   capacity: '容量',
@@ -312,7 +311,6 @@ const COL_LABELS: Record<string, string> = {
   product_id: '关联产品',
   output: '产量',
   energy_consumption: '能源消耗量(吨标煤)',
-  product_name: '产品名称',
   // de_equipment_benchmark (重点用能设备能效对标 - 主要列)
   device_purpose: '设备用途',
   unit_count: '台数',
