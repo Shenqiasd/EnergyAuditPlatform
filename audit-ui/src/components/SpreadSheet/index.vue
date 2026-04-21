@@ -127,6 +127,11 @@ async function initWorkbook() {
           getConfigPrefillData().catch(() => null),
         ])
 
+        // Build cell-tag index ONCE for O(1) lookups (replaces O(tags × rows × cols) scans)
+        // Must be called BEFORE applyPrefill/applyConfigPrefill/applyDataEntryProtection
+        // since they all use fillTaggedCell/unlockScalarCell which rely on the index.
+        buildCellTagIndex(workbook)
+
         // Pre-fill enterprise settings (uses pre-fetched tags + prefillData)
         if (!currentSubmission && prefillData) {
           applyPrefill(workbook, tags, prefillData)
@@ -142,9 +147,6 @@ async function initWorkbook() {
 
         // Bind ValidationError event on every sheet
         bindValidationErrorDialogs(workbook)
-
-        // Build cell-tag index ONCE for O(1) lookups (replaces O(tags × rows × cols) scans)
-        buildCellTagIndex(workbook)
 
         // Apply cell protection + required field markers (uses pre-fetched tags)
         if (publishedVersion.protectionEnabled !== 0) {
