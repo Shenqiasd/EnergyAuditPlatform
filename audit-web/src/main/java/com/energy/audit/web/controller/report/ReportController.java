@@ -35,16 +35,6 @@ public class ReportController {
         }
     }
 
-    @Operation(summary = "Generate audit report (legacy code-based)")
-    @PostMapping("/generate")
-    public R<ArReport> generate(@RequestParam Integer auditYear) {
-        requireEnterprise();
-        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        String username = SecurityUtils.getCurrentUsername();
-        ArReport report = reportService.generateReport(enterpriseId, auditYear, username);
-        return R.ok(report);
-    }
-
     @Operation(summary = "List enterprise reports")
     @GetMapping("/list")
     public R<List<ArReport>> list(@RequestParam(required = false) Integer auditYear) {

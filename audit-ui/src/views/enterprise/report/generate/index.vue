@@ -17,7 +17,6 @@ import {
   type AuditTask,
 } from '@/api/audit-task'
 import {
-  generateReport,
   generateReportFromTemplate,
   listReports,
   downloadReport,
@@ -209,30 +208,28 @@ async function captureFlowChartImage(): Promise<File | undefined> {
 }
 
 async function handleGenerateReport() {
-  // Find submitted submissions for the selected year to use template-based generation
+  // Only template-based generation is supported — requires approved submissions (status=2)
   const submittedSubs = submissions.value.filter(
     s => s.auditYear === selectedYear.value && s.status === 2
   )
-  const useTemplate = submittedSubs.length > 0 && submittedSubs[0].id != null
+  if (submittedSubs.length === 0 || submittedSubs[0].id == null) {
+    ElMessage.warning('请先完成模板填报并通过审核后，再生成审计报告')
+    return
+  }
 
-  const confirmMsg = useTemplate
-    ? `确认为 ${selectedYear.value} 年度基于模板生成审计报告？系统将从填报数据自动生成 Word 文档并转换为在线可编辑报告。`
-    : `确认为 ${selectedYear.value} 年度生成审计报告？系统将根据已提交的数据自动生成报告。`
   try {
-    await ElMessageBox.confirm(confirmMsg, '生成报告', { type: 'info' })
+    await ElMessageBox.confirm(
+      `确认为 ${selectedYear.value} 年度基于模板生成审计报告？系统将从填报数据自动生成 Word 文档并转换为在线可编辑报告。`,
+      '生成报告',
+      { type: 'info' }
+    )
   } catch {
     return
   }
   generatingReport.value = true
   try {
-    let result: ArReport
-    if (useTemplate) {
-      // Capture flow chart screenshot for embedding in the Word report
-      const flowChartImage = await captureFlowChartImage()
-      result = await generateReportFromTemplate(submittedSubs[0].id!, flowChartImage) as ArReport
-    } else {
-      result = await generateReport(selectedYear.value) as ArReport
-    }
+    const flowChartImage = await captureFlowChartImage()
+    const result = await generateReportFromTemplate(submittedSubs[0].id!, flowChartImage) as ArReport
     ElMessage.success('报告生成成功')
     loadData()
     // Automatically navigate to editor if report has HTML

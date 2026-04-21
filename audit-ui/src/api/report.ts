@@ -40,11 +40,6 @@ export const REPORT_STATUS_MAP: Record<number, { label: string; type: 'info' | '
   6: { label: '审核退回', type: 'danger' },
 }
 
-// Legacy code-based generation
-export function generateReport(auditYear: number) {
-  return request.post('/report/generate', null, { params: { auditYear } })
-}
-
 export function listReports(auditYear?: number) {
   return request.get('/report/list', { params: { auditYear } })
 }

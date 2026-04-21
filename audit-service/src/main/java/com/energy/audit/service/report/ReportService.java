@@ -7,8 +7,6 @@ import java.util.List;
 
 public interface ReportService {
 
-    ArReport generateReport(Long enterpriseId, Integer auditYear, String username);
-
     List<ArReport> listReports(Long enterpriseId, Integer auditYear);
 
     ArReport getReport(Long id);
