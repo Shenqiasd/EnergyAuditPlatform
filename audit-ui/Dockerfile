@@ -10,7 +10,7 @@ COPY . .
 # public/tinymce/ directory that postinstall created during npm install.
 # The gitignored public/tinymce/ files are lost when COPY replaces them
 # with the (empty) git version.
-RUN bash scripts/setup-tinymce.sh
+RUN sh scripts/setup-tinymce.sh
 ENV VITE_SPREADJS_LICENSE=$VITE_SPREADJS_LICENSE
 ENV VITE_SPREADJS_DESIGNER_LICENSE=$VITE_SPREADJS_DESIGNER_LICENSE
 RUN npx vite build
