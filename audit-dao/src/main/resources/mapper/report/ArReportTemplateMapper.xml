@@ -55,4 +55,10 @@
         LIMIT 1
     </select>
 
+    <update id="softDelete">
+        UPDATE ar_report_template
+        SET deleted = 1, update_by = #{updateBy}, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
 </mapper>

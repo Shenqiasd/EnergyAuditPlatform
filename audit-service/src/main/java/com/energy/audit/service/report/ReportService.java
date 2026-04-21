@@ -43,6 +43,38 @@ public interface ReportService {
      */
     List<ArReportTemplate> listTemplates();
 
+    // ====== Phase 4: Admin Report Template Management ======
+
+    /**
+     * Upload a new report template (.docx file).
+     * @param fileName       original filename
+     * @param fileBytes      file content
+     * @param templateName   display name for the template
+     * @param username       current admin user
+     * @return the created template record
+     */
+    ArReportTemplate uploadTemplate(String fileName, byte[] fileBytes, String templateName, String username);
+
+    /**
+     * Activate a report template (set status=1, deactivate all others).
+     */
+    ArReportTemplate activateTemplate(Long templateId, String username);
+
+    /**
+     * Deactivate a report template (set status=0).
+     */
+    ArReportTemplate deactivateTemplate(Long templateId, String username);
+
+    /**
+     * Soft-delete a report template.
+     */
+    void deleteReportTemplate(Long templateId, String username);
+
+    /**
+     * Get a single report template by ID.
+     */
+    ArReportTemplate getReportTemplate(Long templateId);
+
     // ====== Phase 3: Report Review Workflow (auditor side) ======
 
     /**

@@ -154,6 +154,74 @@ public class ReportController {
         return R.ok(reportService.listTemplates());
     }
 
+    // ====== Phase 4: Admin Report Template Management ======
+
+    private void requireAdmin() {
+        Integer userType = SecurityUtils.getCurrentUserType();
+        if (userType == null || userType != 1) {
+            throw new BusinessException("该操作仅管理员可执行");
+        }
+    }
+
+    @Operation(summary = "Upload a new report template (.docx)")
+    @PostMapping("/template/upload")
+    public R<ArReportTemplate> uploadTemplate(
+            @RequestPart("file") MultipartFile file,
+            @RequestParam(required = false) String templateName) {
+        requireAdmin();
+        if (file == null || file.isEmpty()) {
+            return R.fail("请选择要上传的文件");
+        }
+        String username = SecurityUtils.getCurrentUsername();
+        try {
+            ArReportTemplate template = reportService.uploadTemplate(
+                file.getOriginalFilename(), file.getBytes(), templateName, username);
+            return R.ok(template);
+        } catch (BusinessException be) {
+            return R.fail(be.getMessage());
+        } catch (Exception e) {
+            return R.fail("文件上传失败");
+        }
+    }
+
+    @Operation(summary = "Get report template detail")
+    @GetMapping("/template/{id}")
+    public R<ArReportTemplate> getTemplate(@PathVariable Long id) {
+        requireAdmin();
+        ArReportTemplate template = reportService.getReportTemplate(id);
+        if (template == null) {
+            return R.fail("模板不存在");
+        }
+        return R.ok(template);
+    }
+
+    @Operation(summary = "Activate a report template (set as current active)")
+    @PostMapping("/template/{id}/activate")
+    public R<ArReportTemplate> activateTemplate(@PathVariable Long id) {
+        requireAdmin();
+        String username = SecurityUtils.getCurrentUsername();
+        ArReportTemplate template = reportService.activateTemplate(id, username);
+        return R.ok(template);
+    }
+
+    @Operation(summary = "Deactivate a report template")
+    @PostMapping("/template/{id}/deactivate")
+    public R<ArReportTemplate> deactivateTemplate(@PathVariable Long id) {
+        requireAdmin();
+        String username = SecurityUtils.getCurrentUsername();
+        ArReportTemplate template = reportService.deactivateTemplate(id, username);
+        return R.ok(template);
+    }
+
+    @Operation(summary = "Delete a report template (soft delete)")
+    @DeleteMapping("/template/{id}")
+    public R<Void> deleteTemplate(@PathVariable Long id) {
+        requireAdmin();
+        String username = SecurityUtils.getCurrentUsername();
+        reportService.deleteReportTemplate(id, username);
+        return R.ok(null);
+    }
+
     // ====== Phase 3: Report Review Workflow (auditor side) ======
 
     private void requireAuditorOrAdmin() {
