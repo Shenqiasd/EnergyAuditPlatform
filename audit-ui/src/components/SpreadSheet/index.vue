@@ -127,6 +127,11 @@ async function initWorkbook() {
           getConfigPrefillData().catch(() => null),
         ])
 
+        // Build cell-tag index ONCE for O(1) lookups (replaces O(tags × rows × cols) scans)
+        // Must be called BEFORE applyPrefill/applyConfigPrefill/applyDataEntryProtection
+        // since they all use fillTaggedCell/unlockScalarCell which rely on the index.
+        buildCellTagIndex(workbook)
+
         // Pre-fill enterprise settings (uses pre-fetched tags + prefillData)
         if (!currentSubmission && prefillData) {
           applyPrefill(workbook, tags, prefillData)
@@ -613,21 +618,13 @@ function fillTaggedCell(
     }
   }
 
-  // Fall back to cell tag scan: iterate cells on the target sheet (or all sheets)
-  const startSheet = tag.sheetIndex ?? 0
-  const endSheet = tag.sheetIndex != null ? tag.sheetIndex + 1 : sheetCount
-  for (let si = startSheet; si < endSheet && si < sheetCount; si++) {
-    const sheet = wb.getSheet(si)
-    const rowCount = sheet.getRowCount()
-    const colCount = sheet.getColumnCount()
-    for (let r = 0; r < rowCount; r++) {
-      for (let c = 0; c < colCount; c++) {
-        const cellTag = sheet.getTag(r, c)
-        if (cellTag === tag.tagName) {
-          sheet.setValue(r, c, value)
-          return true
-        }
-      }
+  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
+  if (tag.tagName) {
+    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      sheet.setValue(found.row, found.col, value)
+      return true
     }
   }
 
@@ -887,6 +884,7 @@ function applyDataEntryProtection(
 
 /**
  * Unlock a single SCALAR cell and optionally mark it as required.
+ * Uses the pre-built cellTagIndex for O(1) lookups instead of scanning all cells.
  */
 function unlockScalarCell(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
@@ -921,23 +919,15 @@ function unlockScalarCell(
     }
   }
 
-  // Fall back to cell tag scan (or primary path for non-NAMED_RANGE tags)
-  const startSheet = tag.sheetIndex ?? 0
-  const endSheet = tag.sheetIndex != null ? tag.sheetIndex + 1 : sheetCount
-  for (let si = startSheet; si < endSheet && si < sheetCount; si++) {
-    const sheet = wb.getSheet(si)
-    const rowCount = sheet.getRowCount()
-    const colCount = sheet.getColumnCount()
-    for (let r = 0; r < rowCount; r++) {
-      for (let c = 0; c < colCount; c++) {
-        const cellTag = sheet.getTag(r, c)
-        if (cellTag === tag.tagName) {
-          const cell = sheet.getCell(r, c)
-          cell.locked(false)
-          if (tag.required === 1) markCellRequired(cell, hint)
-          return
-        }
-      }
+  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
+  if (tag.tagName) {
+    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      const cell = sheet.getCell(found.row, found.col)
+      cell.locked(false)
+      if (tag.required === 1) markCellRequired(cell, hint)
+      return
     }
   }
   console.warn(
@@ -1084,6 +1074,63 @@ function validateRequiredFields(): string[] {
 /** Cached tag mappings loaded during protection setup */
 let cachedTags: TplTagMapping[] = []
 
+/**
+ * Pre-built cell-tag index: sheetIndex → Map<tagName, {row, col}>.
+ * Built ONCE per workbook load to avoid O(tags × rows × cols) repeated scans.
+ * The expensive getTag() calls happen exactly once per cell across all sheets.
+ */
+let cellTagIndex: Map<number, Map<string, { row: number; col: number }>> | null = null
+
+function buildCellTagIndex(wb: import('@/types/spreadjs').GCSpreadWorkbook): void {
+  cellTagIndex = new Map()
+  const sheetCount = wb.getSheetCount()
+  for (let si = 0; si < sheetCount; si++) {
+    const sheet = wb.getSheet(si)
+    const rowCount = sheet.getRowCount()
+    const colCount = sheet.getColumnCount()
+    const sheetMap = new Map<string, { row: number; col: number }>()
+    for (let r = 0; r < rowCount; r++) {
+      for (let c = 0; c < colCount; c++) {
+        const tag = sheet.getTag(r, c)
+        if (tag && typeof tag === 'string' && !sheetMap.has(tag)) {
+          sheetMap.set(tag, { row: r, col: c })
+        }
+      }
+    }
+    if (sheetMap.size > 0) {
+      cellTagIndex.set(si, sheetMap)
+    }
+  }
+  let totalIndexed = 0
+  cellTagIndex.forEach(m => { totalIndexed += m.size })
+  console.log(`[perf] cell-tag index built: ${totalIndexed} tags across ${cellTagIndex.size} sheets`)
+}
+
+/**
+ * Look up a cell-tag from the pre-built index. O(1) per lookup.
+ * Returns {sheetIndex, row, col} or null if not found.
+ */
+function lookupCellTag(
+  tagName: string,
+  sheetIndex?: number | null,
+): { sheetIndex: number; row: number; col: number } | null {
+  if (!cellTagIndex) return null
+  if (sheetIndex != null) {
+    const sheetMap = cellTagIndex.get(sheetIndex)
+    if (sheetMap) {
+      const pos = sheetMap.get(tagName)
+      if (pos) return { sheetIndex, ...pos }
+    }
+    return null
+  }
+  // Search all sheets
+  for (const [si, sheetMap] of cellTagIndex) {
+    const pos = sheetMap.get(tagName)
+    if (pos) return { sheetIndex: si, ...pos }
+  }
+  return null
+}
+
 function isScalarCellEmpty(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tag: TplTagMapping,
@@ -1112,21 +1159,13 @@ function isScalarCellEmpty(
     }
   }
 
-  // Fall back to cell tag scan
-  const startSheet = tag.sheetIndex ?? 0
-  const endSheet = tag.sheetIndex != null ? tag.sheetIndex + 1 : sheetCount
-  for (let si = startSheet; si < endSheet && si < sheetCount; si++) {
-    const sheet = wb.getSheet(si)
-    const rowCount = sheet.getRowCount()
-    const colCount = sheet.getColumnCount()
-    for (let r = 0; r < rowCount; r++) {
-      for (let c = 0; c < colCount; c++) {
-        const cellTag = sheet.getTag(r, c)
-        if (cellTag === tag.tagName) {
-          const val = sheet.getValue(r, c)
-          return val == null || val === ''
-        }
-      }
+  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
+  if (tag.tagName) {
+    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      const val = sheet.getValue(found.row, found.col)
+      return val == null || val === ''
     }
   }
   return true // if we can't find the cell, treat as empty
