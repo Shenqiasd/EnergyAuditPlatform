@@ -1492,7 +1492,15 @@ function enterReadonly() {
 function applyReadonlyProtection() {
   if (!workbook) return
   const count = workbook.getSheetCount()
+  cpTrace('applyReadonlyProtection.start', { sheets: count })
+  // Match Phase 2 suspend envelope: paint + event + calcService.
+  // Without suspendEvent/suspendCalcService the subsequent
+  // `range.locked(true)` on ~45 sheets × thousands of cells each fires
+  // cell-change events and calc re-evaluation per mutation, which locks
+  // the main thread for 300+ seconds on submitted templates.
   workbook.suspendPaint()
+  suspendEventSafe(workbook)
+  suspendCalcServiceSafe(workbook)
   try {
     for (let i = 0; i < count; i++) {
       const sheet = workbook.getSheet(i)
@@ -1505,7 +1513,10 @@ function applyReadonlyProtection() {
       sheet.options.isProtected = true
     }
   } finally {
+    resumeCalcServiceSafe(workbook)
+    resumeEventSafe(workbook)
     workbook.resumePaint()
+    cpTrace('applyReadonlyProtection.done')
   }
 }
 
