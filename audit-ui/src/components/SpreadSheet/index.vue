@@ -84,6 +84,38 @@ function calculateAllSafe(wb: WB) {
   } catch { /* best-effort */ }
 }
 
+// ── Persistent trace helper for diagnosing main-thread freezes ─────────
+// When Phase 2 mutation hangs the browser, normal console logs are lost
+// on reload. `cpTrace` synchronously appends to localStorage so the last
+// checkpoint before the freeze is still visible after a hard refresh.
+// A traceId is reset at the start of each template load so stale traces
+// from previous sessions don't confuse diagnosis.
+const CP_TRACE_KEY = '__cpLog'
+let cpTraceT0 = 0
+function cpTraceReset() {
+  cpTraceT0 = (typeof performance !== 'undefined') ? performance.now() : Date.now()
+  try { localStorage.setItem(CP_TRACE_KEY, JSON.stringify([{ t: 0, ev: 'reset', ts: new Date().toISOString() }])) } catch { /* ignore */ }
+}
+function cpTrace(ev: string, data?: Record<string, unknown>) {
+  try {
+    const now = (typeof performance !== 'undefined') ? performance.now() : Date.now()
+    const raw = localStorage.getItem(CP_TRACE_KEY)
+    const arr = raw ? JSON.parse(raw) as unknown[] : []
+    arr.push({ t: Math.round(now - cpTraceT0), ev, ...(data ?? {}) })
+    // Cap at 500 entries to avoid blowing out localStorage
+    const trimmed = arr.length > 500 ? arr.slice(-500) : arr
+    localStorage.setItem(CP_TRACE_KEY, JSON.stringify(trimmed))
+  } catch { /* ignore */ }
+}
+// Expose a global dumper so we can read the trace via the console
+// AFTER a browser freeze + hard reload. Keeps diagnosis possible even
+// when the main thread never returns control.
+if (typeof window !== 'undefined') {
+  (window as unknown as { __dumpCpLog?: () => unknown }).__dumpCpLog = () => {
+    try { return JSON.parse(localStorage.getItem(CP_TRACE_KEY) ?? '[]') } catch { return null }
+  }
+}
+
 watch(
   () => props.readonly,
   (isNowReadonly) => {
@@ -115,6 +147,8 @@ async function initWorkbook() {
     releaseLockIfOwned()
     return
   }
+  cpTraceReset()
+  cpTrace('initWorkbook.start', { templateId: props.templateId, auditYear: props.auditYear })
   initSpreadJSLicense()
   loading.value = true
   errorMsg.value = ''
@@ -160,6 +194,7 @@ async function initWorkbook() {
     try {
       if (publishedVersion.id) {
         try {
+          cpTrace('phase2.fetch.start')
           console.time('[perf] phase2-fetch')
           const [tags, prefillData, configPrefillData] = await Promise.all([
             listTags(publishedVersion.id).catch(e => {
@@ -173,6 +208,7 @@ async function initWorkbook() {
             getConfigPrefillData().catch(() => null),
           ])
           console.timeEnd('[perf] phase2-fetch')
+          cpTrace('phase2.fetch.done', { tagCount: tags.length })
 
           // Master suspend envelope for all Phase 2 mutations — prevents the
           // ~1000 setValue/setStyle/setDataValidator calls below from each
@@ -183,6 +219,7 @@ async function initWorkbook() {
           workbook.suspendPaint()
           suspendEventSafe(workbook)
           suspendCalcServiceSafe(workbook)
+          cpTrace('phase2.mutate.suspended')
           try {
             // Build cell-tag index ONCE for O(1) lookups (replaces O(tags ×
             // rows × cols) scans). Must be called BEFORE applyPrefill /
@@ -191,41 +228,56 @@ async function initWorkbook() {
             console.time('[perf] buildCellTagIndex')
             buildCellTagIndex(workbook)
             console.timeEnd('[perf] buildCellTagIndex')
+            cpTrace('buildCellTagIndex.done')
 
             // Pre-fill enterprise settings (uses pre-fetched tags + prefillData)
             if (!currentSubmission && prefillData) {
+              cpTrace('applyPrefill.start')
               console.time('[perf] applyPrefill')
               applyPrefill(workbook, tags, prefillData)
               console.timeEnd('[perf] applyPrefill')
+              cpTrace('applyPrefill.done')
             }
 
             // Config-driven prefill: always write values + dropdowns + hide empty rows
             if (configPrefillData) {
+              cpTrace('applyConfigPrefill.start')
               console.time('[perf] applyConfigPrefill')
               applyConfigPrefill(workbook, tags, configPrefillData)
               console.timeEnd('[perf] applyConfigPrefill')
+              cpTrace('applyConfigPrefill.done')
             }
 
             // Inject dictionary-based dropdown validators (uses pre-fetched tags)
+            cpTrace('applyDictValidators.start')
             console.time('[perf] applyDictValidators')
             await applyDictValidators(workbook, tags)
             console.timeEnd('[perf] applyDictValidators')
+            cpTrace('applyDictValidators.done')
 
             // Bind ValidationError event on every sheet
+            cpTrace('bindValidationErrorDialogs.start')
             console.time('[perf] bindValidationErrorDialogs')
             bindValidationErrorDialogs(workbook)
             console.timeEnd('[perf] bindValidationErrorDialogs')
+            cpTrace('bindValidationErrorDialogs.done')
 
             // Apply cell protection + required field markers (uses pre-fetched tags)
             if (publishedVersion.protectionEnabled !== 0) {
+              cpTrace('applyDataEntryProtection.start')
               console.time('[perf] applyDataEntryProtection')
               applyDataEntryProtection(workbook, tags)
               console.timeEnd('[perf] applyDataEntryProtection')
+              cpTrace('applyDataEntryProtection.done')
             }
           } finally {
+            cpTrace('phase2.resume.start')
             resumeCalcServiceSafe(workbook)
+            cpTrace('phase2.resumeCalcService.done')
             resumeEventSafe(workbook)
+            cpTrace('phase2.resumeEvent.done')
             workbook.resumePaint()
+            cpTrace('phase2.resumePaint.done')
             console.timeEnd('[perf] phase2-mutate')
           }
         } catch (e) {
@@ -241,9 +293,11 @@ async function initWorkbook() {
       // skipped / failed) — this MUST run to compensate for the
       // doNotRecalculateAfterLoad flag passed to fromJSON above. Otherwise
       // formula cells would render stale/unevaluated.
+      cpTrace('calculate.start')
       console.time('[perf] calculate')
       calculateAllSafe(workbook)
       console.timeEnd('[perf] calculate')
+      cpTrace('calculate.done')
     }
 
     // Force readonly when:
@@ -334,12 +388,16 @@ function applyConfigPrefill(
 
     wb.suspendPaint()
     try {
-      for (const tag of prefillTags) {
+      for (let idx = 0; idx < prefillTags.length; idx++) {
+        const tag = prefillTags[idx]
+        cpTrace('cp.loop.beforeTag', { idx, tag: tag.tagName, sheet: tag.sheetName, range: tag.cellRange })
         try {
           applyOneConfigPrefill(wb, tag, configData)
         } catch (e) {
           console.warn(`[config-prefill] failed for tag "${tag.tagName}":`, e)
+          cpTrace('cp.loop.tagThrew', { idx, tag: tag.tagName, err: String(e) })
         }
+        cpTrace('cp.loop.afterTag', { idx, tag: tag.tagName })
       }
     } finally {
       wb.resumePaint()
@@ -402,7 +460,9 @@ function applyOneConfigPrefill(
   const tagLabel = tag.tagName ?? '<unnamed>'
   console.log(`[config-prefill] START "${tagLabel}"`)
   console.time(`[config-prefill] "${tagLabel}" total`)
+  cpTrace('cp.tag.start', { tag: tagLabel })
   if (!tag.targetTable || !tag.cellRange || !tag.columnMappings) {
+    cpTrace('cp.tag.skip.missingFields', { tag: tagLabel })
     console.timeEnd(`[config-prefill] "${tagLabel}" total`)
     return
   }
@@ -469,10 +529,12 @@ function applyOneConfigPrefill(
   // 5. Resolve sheet
   const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
   if (!sheet) {
+    cpTrace('cp.tag.skip.noSheet', { tag: tagLabel, sheetName: tag.sheetName, sheetIndex: tag.sheetIndex })
     console.warn(`[config-prefill] sheet not found for tag "${tagLabel}"`)
     console.timeEnd(`[config-prefill] "${tagLabel}" total`)
     return
   }
+  cpTrace('cp.tag.sheetResolved', { tag: tagLabel, maxRows, cols: columns.length, records: records.length, isDropdownOnly })
 
   // 6. Resolve column indices helper
   const resolveColIndex = (colDef: { col: string | number }) => {
@@ -484,6 +546,7 @@ function applyOneConfigPrefill(
 
   // Clear old data before writing (skip in dropdown_only mode)
   if (!isDropdownOnly) {
+    cpTrace('cp.tag.clear.start', { tag: tagLabel })
     for (let i = 0; i < maxRows; i++) {
       for (const colDef of columns) {
         if (colDef.prefill === false) continue // don't clear dropdown-only columns
@@ -491,6 +554,7 @@ function applyOneConfigPrefill(
         sheet.setValue(startRow + i, colIndex, null)
       }
     }
+    cpTrace('cp.tag.clear.done', { tag: tagLabel })
   }
 
   // 7. Determine rows to process
@@ -542,10 +606,14 @@ function applyOneConfigPrefill(
 
   // 9. Fill rows with values AND set dropdown validators
   const DataValidation = window.GC?.Spread?.Sheets?.DataValidation
+  cpTrace('cp.tag.fill.start', { tag: tagLabel, rowsToFill, cols: columns.length })
+  let fillOps = 0
   for (let i = 0; i < rowsToFill; i++) {
     const record = i < records.length ? records[i] : null
     for (const colDef of columns) {
       const colIndex = resolveColIndex(colDef)
+      // checkpoint every 25 ops so we can see last-reached point if we freeze mid-loop
+      if ((++fillOps) % 25 === 0) cpTrace('cp.tag.fill.progress', { tag: tagLabel, fillOps, row: i, col: colIndex })
 
       // Write cell value (skip in dropdown_only mode or if prefill: false or no record)
       if (!isDropdownOnly && colDef.prefill !== false && record) {
@@ -577,6 +645,7 @@ function applyOneConfigPrefill(
           try { sheet.setStyle(startRow + i, colIndex, style) } catch { /* ignore */ }
         }
       }
+      // end of per-cell style block
 
       // Set dropdown validator (skip if dropdown: false or linkedTo or locked)
       if (DataValidation && colDef.dropdown !== false && !colDef.linkedTo && !colDef.locked) {
@@ -597,6 +666,7 @@ function applyOneConfigPrefill(
       }
     }
   }
+  cpTrace('cp.tag.fill.done', { tag: tagLabel, fillOps })
 
   // 10. Hide empty rows beyond the filled data (skip in dropdown_only mode)
   if (!isDropdownOnly) {
@@ -651,7 +721,9 @@ function applyOneConfigPrefill(
 
   // Apply initial duplicate exclusion on prefill mode (each row pre-filled with unique record)
   if (!isDropdownOnly && masterColDefs.length > 0) {
+    cpTrace('cp.tag.refreshDropdowns.start', { tag: tagLabel, masterCols: masterColDefs.length })
     refreshDropdownsExcludingDuplicates()
+    cpTrace('cp.tag.refreshDropdowns.done', { tag: tagLabel })
   }
 
   // Bind CellChanged for linkedTo auto-fill AND duplicate prevention
@@ -706,6 +778,7 @@ function applyOneConfigPrefill(
     `${rowsToFill} rows processed` + (isDropdownOnly ? '' : `, ${maxRows - rowsToFill} empty rows hidden`) +
     (linkedCols.length > 0 ? `, ${linkedCols.length} linked column(s)` : ''),
   )
+  cpTrace('cp.tag.end', { tag: tagLabel })
   console.timeEnd(`[config-prefill] "${tagLabel}" total`)
 }
 
@@ -834,10 +907,13 @@ async function applyDictValidators(
       }
     }
 
+    cpTrace('dict.targets', { dictTypes: dictTypesNeeded.size, targets: targets.length })
     if (dictTypesNeeded.size === 0 || targets.length === 0) return
 
     // Fetch all needed dictionary data in one batch call
+    cpTrace('dict.fetch.start')
     const dictMap = await getDataByTypes([...dictTypesNeeded])
+    cpTrace('dict.fetch.done', { keys: dictMap ? Object.keys(dictMap).length : 0 })
     if (!dictMap || Object.keys(dictMap).length === 0) return
 
     const DataValidation = window.GC?.Spread?.Sheets?.DataValidation
@@ -848,9 +924,12 @@ async function applyDictValidators(
 
     wb.suspendPaint()
     try {
+      let targetIdx = 0
+      let setOps = 0
       for (const target of targets) {
+        cpTrace('dict.target.start', { idx: targetIdx, dictType: target.dictType, col: target.col, rows: target.endRow - target.startRow + 1 })
         const items: DictData[] = dictMap[target.dictType] ?? []
-        if (items.length === 0) continue
+        if (items.length === 0) { targetIdx++; continue }
 
         // Sanitize labels: replace commas with fullwidth comma to avoid SpreadJS separator conflict
         const listStr = items.map((d) => d.dictLabel.replace(/,/g, '\uff0c')).join(',')
@@ -865,12 +944,16 @@ async function applyDictValidators(
 
         // Find target sheet
         const sheet = findSheet(wb, target.sheetName, target.sheetIndex)
-        if (!sheet) continue
+        if (!sheet) { targetIdx++; continue }
 
         for (let r = target.startRow; r <= target.endRow; r++) {
           sheet.setDataValidator(r, target.col, dv)
+          if ((++setOps) % 100 === 0) cpTrace('dict.setDataValidator.progress', { setOps, row: r, col: target.col })
         }
+        cpTrace('dict.target.done', { idx: targetIdx })
+        targetIdx++
       }
+      cpTrace('dict.all.done', { setOps })
     } finally {
       wb.resumePaint()
     }
@@ -947,6 +1030,7 @@ function applyDataEntryProtection(
     wb.suspendPaint()
     try {
       const sheetCount = wb.getSheetCount()
+      cpTrace('protection.suspendPaint.done', { sheetCount })
 
       // Step 1: Lock all cells by default on every sheet. This forces `locked=true`
       // on every cell including those whose template-level style has `locked=false`
