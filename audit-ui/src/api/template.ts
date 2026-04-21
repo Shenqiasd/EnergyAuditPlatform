@@ -180,6 +180,7 @@ export function saveDraft(params: {
   submissionJson: string
   templateVersion: number
   templateVersionId?: number
+  skipExtraction?: boolean
 }): Promise<TplSubmission> {
   return request.post('/template/submission/draft', params)
 }
@@ -187,6 +188,7 @@ export function saveDraft(params: {
 export function submitSubmission(submissionId: number, templateVersionId: number): Promise<void> {
   return request.post(`/template/submission/${submissionId}/submit`, null, {
     params: { templateVersionId },
+    timeout: 120000, // P2: submit involves data extraction + persistence, needs more than default 30s
   })
 }
 
