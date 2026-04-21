@@ -7,51 +7,74 @@
 -- =====================================================
 
 -- 1a. de_tech_indicator (+4 columns)
-ALTER TABLE de_tech_indicator
-    ADD COLUMN IF NOT EXISTS employee_count               INT           NULL AFTER coal_actual,
-    ADD COLUMN IF NOT EXISTS energy_manager_count          INT           NULL AFTER employee_count,
-    ADD COLUMN IF NOT EXISTS total_energy_equiv_excl_green DECIMAL(18,4) NULL AFTER energy_manager_count,
-    ADD COLUMN IF NOT EXISTS total_energy_equal_excl_green DECIMAL(18,4) NULL AFTER total_energy_equiv_excl_green;
+CALL ensure_column('de_tech_indicator', 'employee_count',
+    'INT           NULL AFTER coal_actual');
+CALL ensure_column('de_tech_indicator', 'energy_manager_count',
+    'INT           NULL AFTER employee_count');
+CALL ensure_column('de_tech_indicator', 'total_energy_equiv_excl_green',
+    'DECIMAL(18,4) NULL AFTER energy_manager_count');
+CALL ensure_column('de_tech_indicator', 'total_energy_equal_excl_green',
+    'DECIMAL(18,4) NULL AFTER total_energy_equiv_excl_green');
 
 -- 1b. de_energy_consumption (+6 columns)
-ALTER TABLE de_energy_consumption
-    ADD COLUMN IF NOT EXISTS non_industrial_consumption DECIMAL(18,4) NULL AFTER standard_coal,
-    ADD COLUMN IF NOT EXISTS consumption_total          DECIMAL(18,4) NULL AFTER non_industrial_consumption,
-    ADD COLUMN IF NOT EXISTS ref_factor                 DECIMAL(18,6) NULL AFTER consumption_total,
-    ADD COLUMN IF NOT EXISTS transfer_out               DECIMAL(18,4) NULL AFTER ref_factor,
-    ADD COLUMN IF NOT EXISTS gain_loss                  DECIMAL(18,4) NULL AFTER transfer_out,
-    ADD COLUMN IF NOT EXISTS unit_price                 DECIMAL(18,4) NULL AFTER gain_loss;
+CALL ensure_column('de_energy_consumption', 'non_industrial_consumption',
+    'DECIMAL(18,4) NULL AFTER standard_coal');
+CALL ensure_column('de_energy_consumption', 'consumption_total',
+    'DECIMAL(18,4) NULL AFTER non_industrial_consumption');
+CALL ensure_column('de_energy_consumption', 'ref_factor',
+    'DECIMAL(18,6) NULL AFTER consumption_total');
+CALL ensure_column('de_energy_consumption', 'transfer_out',
+    'DECIMAL(18,4) NULL AFTER ref_factor');
+CALL ensure_column('de_energy_consumption', 'gain_loss',
+    'DECIMAL(18,4) NULL AFTER transfer_out');
+CALL ensure_column('de_energy_consumption', 'unit_price',
+    'DECIMAL(18,4) NULL AFTER gain_loss');
 
 -- 1c. de_equipment_detail (+2 columns)
-ALTER TABLE de_equipment_detail
-    ADD COLUMN IF NOT EXISTS equipment_overview VARCHAR(512)  NULL AFTER detail_json,
-    ADD COLUMN IF NOT EXISTS obsolete_status    VARCHAR(128)  NULL AFTER equipment_overview;
+CALL ensure_column('de_equipment_detail', 'equipment_overview',
+    'VARCHAR(512)  NULL AFTER detail_json');
+CALL ensure_column('de_equipment_detail', 'obsolete_status',
+    'VARCHAR(128)  NULL AFTER equipment_overview');
 
 -- 1d. de_carbon_emission (+8 columns)
-ALTER TABLE de_carbon_emission
-    ADD COLUMN IF NOT EXISTS low_heat_value           DECIMAL(18,6) NULL AFTER co2_emission,
-    ADD COLUMN IF NOT EXISTS carbon_content           DECIMAL(18,6) NULL AFTER low_heat_value,
-    ADD COLUMN IF NOT EXISTS oxidation_rate           DECIMAL(8,4)  NULL AFTER carbon_content,
-    ADD COLUMN IF NOT EXISTS conversion_output        DECIMAL(18,4) NULL AFTER oxidation_rate,
-    ADD COLUMN IF NOT EXISTS recovery_amount          DECIMAL(18,4) NULL AFTER conversion_output,
-    ADD COLUMN IF NOT EXISTS unit_output_emission     DECIMAL(18,6) NULL AFTER recovery_amount,
-    ADD COLUMN IF NOT EXISTS total_energy_consumption DECIMAL(18,4) NULL AFTER unit_output_emission,
-    ADD COLUMN IF NOT EXISTS unit_output_energy       DECIMAL(18,6) NULL AFTER total_energy_consumption;
+CALL ensure_column('de_carbon_emission', 'low_heat_value',
+    'DECIMAL(18,6) NULL AFTER co2_emission');
+CALL ensure_column('de_carbon_emission', 'carbon_content',
+    'DECIMAL(18,6) NULL AFTER low_heat_value');
+CALL ensure_column('de_carbon_emission', 'oxidation_rate',
+    'DECIMAL(8,4)  NULL AFTER carbon_content');
+CALL ensure_column('de_carbon_emission', 'conversion_output',
+    'DECIMAL(18,4) NULL AFTER oxidation_rate');
+CALL ensure_column('de_carbon_emission', 'recovery_amount',
+    'DECIMAL(18,4) NULL AFTER conversion_output');
+CALL ensure_column('de_carbon_emission', 'unit_output_emission',
+    'DECIMAL(18,6) NULL AFTER recovery_amount');
+CALL ensure_column('de_carbon_emission', 'total_energy_consumption',
+    'DECIMAL(18,4) NULL AFTER unit_output_emission');
+CALL ensure_column('de_carbon_emission', 'unit_output_energy',
+    'DECIMAL(18,6) NULL AFTER total_energy_consumption');
 
 -- 1e. de_energy_balance (+2 columns)
-ALTER TABLE de_energy_balance
-    ADD COLUMN IF NOT EXISTS measurement_unit VARCHAR(32) NULL AFTER energy_value,
-    ADD COLUMN IF NOT EXISTS row_seq          INT         NULL AFTER measurement_unit;
+CALL ensure_column('de_energy_balance', 'measurement_unit',
+    'VARCHAR(32) NULL AFTER energy_value');
+CALL ensure_column('de_energy_balance', 'row_seq',
+    'INT         NULL AFTER measurement_unit');
 
 -- 1f. ent_enterprise_setting (+7 columns)
-ALTER TABLE ent_enterprise_setting
-    ADD COLUMN IF NOT EXISTS is_central_enterprise    TINYINT      DEFAULT 0  AFTER energy_enterprise_type,
-    ADD COLUMN IF NOT EXISTS group_name               VARCHAR(256) NULL       AFTER is_central_enterprise,
-    ADD COLUMN IF NOT EXISTS admin_division_code       VARCHAR(16)  NULL       AFTER group_name,
-    ADD COLUMN IF NOT EXISTS energy_leader_phone       VARCHAR(20)  NULL       AFTER admin_division_code,
-    ADD COLUMN IF NOT EXISTS energy_dept_leader_phone  VARCHAR(20)  NULL       AFTER energy_leader_phone,
-    ADD COLUMN IF NOT EXISTS energy_manager_cert        VARCHAR(128) NULL       AFTER energy_dept_leader_phone,
-    ADD COLUMN IF NOT EXISTS has_energy_center          TINYINT      DEFAULT 0  AFTER energy_manager_cert;
+CALL ensure_column('ent_enterprise_setting', 'is_central_enterprise',
+    'TINYINT      DEFAULT 0  AFTER energy_enterprise_type');
+CALL ensure_column('ent_enterprise_setting', 'group_name',
+    'VARCHAR(256) NULL       AFTER is_central_enterprise');
+CALL ensure_column('ent_enterprise_setting', 'admin_division_code',
+    'VARCHAR(16)  NULL       AFTER group_name');
+CALL ensure_column('ent_enterprise_setting', 'energy_leader_phone',
+    'VARCHAR(20)  NULL       AFTER admin_division_code');
+CALL ensure_column('ent_enterprise_setting', 'energy_dept_leader_phone',
+    'VARCHAR(20)  NULL       AFTER energy_leader_phone');
+CALL ensure_column('ent_enterprise_setting', 'energy_manager_cert',
+    'VARCHAR(128) NULL       AFTER energy_dept_leader_phone');
+CALL ensure_column('ent_enterprise_setting', 'has_energy_center',
+    'TINYINT      DEFAULT 0  AFTER energy_manager_cert');
 
 -- =====================================================
 -- Part 2: Create 14 new de_* tables

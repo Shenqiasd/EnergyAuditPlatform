@@ -42,8 +42,12 @@ function openUploadDialog() {
   uploadDialogVisible.value = true
 }
 
-function handleFileChange(uploadFile: { raw: File }) {
+// `el-upload`'s on-change hands us `(uploadFile, uploadFiles)`. We only need
+// the file itself; the second arg is unused but typed explicitly to satisfy
+// the Element Plus handler signature.
+function handleFileChange(uploadFile: { raw?: File }) {
   const file = uploadFile.raw
+  if (!file) return
   if (!file.name.toLowerCase().endsWith('.docx') && !file.name.toLowerCase().endsWith('.doc')) {
     ElMessage.error('仅支持 .docx 或 .doc 格式的模板文件')
     return

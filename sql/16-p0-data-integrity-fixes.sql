@@ -4,8 +4,8 @@
 -- ============================================================================
 
 -- ─── P0-1: de_ghg_emission 补充 submission_id 列 ───
-ALTER TABLE de_ghg_emission
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NOT NULL DEFAULT 0 COMMENT '关联提交ID' AFTER id;
+CALL ensure_column('de_ghg_emission', 'submission_id',
+    'BIGINT NOT NULL DEFAULT 0 COMMENT ''关联提交ID'' AFTER id');
 
 -- ─── P0-2: 新建 de_carbon_peak_info 表 (Sheet 21 碳达峰信息) ───
 CREATE TABLE IF NOT EXISTS `de_carbon_peak_info` (
@@ -31,10 +31,11 @@ CREATE TABLE IF NOT EXISTS `de_carbon_peak_info` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='碳达峰信息';
 
 -- ─── P0-4: de_equipment_energy 补充 submission_id 列 ───
-ALTER TABLE de_equipment_energy
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NOT NULL DEFAULT 0 COMMENT '关联提交ID' AFTER id;
+CALL ensure_column('de_equipment_energy', 'submission_id',
+    'BIGINT NOT NULL DEFAULT 0 COMMENT ''关联提交ID'' AFTER id');
 
 -- ─── P0-5: de_product_energy_cost 补充 cost_ratio + energy_total_ratio 列 ───
-ALTER TABLE de_product_energy_cost
-    ADD COLUMN IF NOT EXISTS cost_ratio DECIMAL(8,4) DEFAULT NULL COMMENT '能源成本占比(%)' AFTER production_cost,
-    ADD COLUMN IF NOT EXISTS energy_total_ratio DECIMAL(8,4) DEFAULT NULL COMMENT '能源费用占总能源费用比(%)' AFTER cost_ratio;
+CALL ensure_column('de_product_energy_cost', 'cost_ratio',
+    'DECIMAL(8,4) DEFAULT NULL COMMENT ''能源成本占比(%)'' AFTER production_cost');
+CALL ensure_column('de_product_energy_cost', 'energy_total_ratio',
+    'DECIMAL(8,4) DEFAULT NULL COMMENT ''能源费用占总能源费用比(%)'' AFTER cost_ratio');

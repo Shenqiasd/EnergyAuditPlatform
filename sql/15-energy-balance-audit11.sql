@@ -4,7 +4,12 @@
 -- 放宽约束: energy_id NOT NULL → DEFAULT 0
 -- =============================================
 
-ALTER TABLE de_energy_balance ADD COLUMN IF NOT EXISTS energy_name VARCHAR(128) DEFAULT NULL COMMENT '能源名称(冗余)' AFTER energy_id;
-ALTER TABLE de_energy_balance ADD COLUMN IF NOT EXISTS measurement_unit VARCHAR(32) DEFAULT NULL COMMENT '计量单位' AFTER energy_name;
-ALTER TABLE de_energy_balance ADD COLUMN IF NOT EXISTS gain_loss DECIMAL(18,4) DEFAULT NULL COMMENT '盈亏量' AFTER closing_stock;
+CALL ensure_column('de_energy_balance', 'energy_name',
+    'VARCHAR(128) DEFAULT NULL COMMENT ''能源名称(冗余)'' AFTER energy_id');
+CALL ensure_column('de_energy_balance', 'measurement_unit',
+    'VARCHAR(32)  DEFAULT NULL COMMENT ''计量单位'' AFTER energy_name');
+CALL ensure_column('de_energy_balance', 'gain_loss',
+    'DECIMAL(18,4) DEFAULT NULL COMMENT ''盈亏量'' AFTER closing_stock');
+
+-- MODIFY COLUMN is naturally idempotent — safe to re-run.
 ALTER TABLE de_energy_balance MODIFY COLUMN energy_id BIGINT DEFAULT 0 COMMENT '关联能源 -> bs_energy.id';

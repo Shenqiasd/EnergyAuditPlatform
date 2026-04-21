@@ -273,7 +273,7 @@ onMounted(() => {
         </el-form-item>
         <el-form-item v-if="form.userType === 3" label="所属企业">
           <el-select v-model="form.enterpriseId" placeholder="请选择企业" filterable style="width:100%" :disabled="isEdit">
-            <el-option v-for="ent in enterpriseList" :key="ent.id" :label="ent.enterpriseName" :value="ent.id" />
+            <el-option v-for="ent in enterpriseList" v-show="ent.id !== undefined" :key="ent.id" :label="ent.enterpriseName" :value="(ent.id as number)" />
           </el-select>
         </el-form-item>
         <el-form-item label="电话">

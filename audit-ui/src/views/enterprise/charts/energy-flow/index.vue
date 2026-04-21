@@ -21,10 +21,10 @@ async function loadData() {
     const [flows, balanceResult] = await Promise.all([
       getEnergyFlowList(auditYear.value).catch(() => [] as EnergyFlowItem[]),
       queryExtractedTable('de_energy_balance', { auditYear: auditYear.value, pageSize: 100 })
-        .catch(() => ({ records: [] as Record<string, unknown>[], total: 0 })),
+        .catch(() => ({ rows: [] as Record<string, unknown>[], total: 0 })),
     ])
     flowData.value = flows
-    balanceData.value = (balanceResult.records || []) as unknown as EnergyBalanceItem[]
+    balanceData.value = (balanceResult.rows || []) as unknown as EnergyBalanceItem[]
   } catch {
     flowData.value = []
     balanceData.value = []
