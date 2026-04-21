@@ -97,11 +97,29 @@ export interface GCSpreadSheet {
   zoom(factor: number): void
   getDefaultStyle(): GCDefaultStyle | null
   setDefaultStyle(style: GCDefaultStyle): void
-  bind(eventType: string, handler: (...args: unknown[]) => void): void
+  getStyle(row: number, col: number): GCStyle | null
+  setStyle(row: number, col: number, style: GCStyle | null): void
+  bind<A extends unknown[] = unknown[]>(eventType: string, handler: (...args: A) => void): void
 }
 
 export interface GCDefaultStyle {
   locked?: boolean
+}
+
+/**
+ * Runtime representation of a SpreadJS cell style. Only the subset of
+ * properties actually touched from TypeScript is declared here; the class
+ * has many more fields (font, borders, alignment, etc.) that are consumed
+ * only by the engine itself.
+ */
+export interface GCStyle {
+  locked?: boolean
+  backColor?: string | null
+  clone?(): GCStyle
+}
+
+export interface GCStyleConstructor {
+  new (): GCStyle
 }
 
 export interface GCSpreadWorkbook {
@@ -116,10 +134,15 @@ export interface GCSpreadWorkbook {
   commandManager(): GCSpreadCommandManager
   suspendPaint(): void
   resumePaint(): void
+  suspendEvent(): void
+  resumeEvent(): void
+  suspendCalcService(): void
+  resumeCalcService(options?: { doNotRecalculateAfterResume?: boolean }): void
+  calculate(fullRebuild?: number): void
   repaint(): void
   destroy(): void
   options: GCSpreadWorkbookOptions & { tabStripVisible?: boolean }
-  bind(eventType: string, handler: (...args: unknown[]) => void): void
+  bind<A extends unknown[] = unknown[]>(eventType: string, handler: (...args: A) => void): void
 }
 
 export interface GCSpreadDesigner {
@@ -134,6 +157,10 @@ export interface GCSpreadDesignerConstructor {
     workbook: GCSpreadWorkbook | null
   ): GCSpreadDesigner
   DefaultConfig: object
+  // V18 exposes the Designer license as a static property on the
+  // constructor itself. V17 attaches it under `Designer.Designer.LicenseKey`,
+  // which is handled via the `{ Designer; DefaultConfig }` union variant.
+  LicenseKey: string
 }
 
 export interface GCSpreadSheetsWorkbookConstructor {
@@ -149,11 +176,21 @@ export interface GCSpreadSheetsEvents {
 
 export interface GCSpreadSheets {
   Workbook: GCSpreadSheetsWorkbookConstructor
-  Designer: GCSpreadDesignerConstructor | { Designer: GCSpreadDesignerConstructor; DefaultConfig: object }
+  Designer:
+    | (GCSpreadDesignerConstructor & {
+        Designer?: GCSpreadDesignerConstructor
+        LicenseKey?: string
+      })
+    | {
+        Designer: GCSpreadDesignerConstructor
+        DefaultConfig: object
+        LicenseKey?: string
+      }
   DataValidation: GCDataValidation
   Comments: { Comment: GCCommentConstructor }
   Events: GCSpreadSheetsEvents
   LicenseKey: string
+  Style: GCStyleConstructor
 }
 
 export interface GCSpread {

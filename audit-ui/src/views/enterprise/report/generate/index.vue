@@ -183,12 +183,12 @@ async function captureFlowChartImage(): Promise<File | undefined> {
     const [flows, balanceResult] = await Promise.all([
       getEnergyFlowList(selectedYear.value).catch(() => [] as EnergyFlowItem[]),
       queryExtractedTable('de_energy_balance', { auditYear: selectedYear.value, pageSize: 100 })
-        .catch(() => ({ records: [] as Record<string, unknown>[], total: 0 })),
+        .catch(() => ({ rows: [] as Record<string, unknown>[], total: 0 })),
     ])
     if (!flows.length) return undefined
 
     flowData.value = flows
-    balanceData.value = (balanceResult.records || []) as unknown as EnergyBalanceItem[]
+    balanceData.value = (balanceResult.rows || []) as unknown as EnergyBalanceItem[]
     showFlowChart.value = true
 
     // Wait for FlowEditor to mount and render the graph

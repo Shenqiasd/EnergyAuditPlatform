@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DOMPurify from 'dompurify'
 import {
@@ -13,7 +12,6 @@ import {
   type ArReport,
 } from '@/api/report'
 
-const router = useRouter()
 const loading = ref(false)
 const reports = ref<ArReport[]>([])
 const filterStatus = ref<number | undefined>(undefined)
@@ -28,8 +26,13 @@ const detailDialogVisible = ref(false)
 const detailReport = ref<ArReport | null>(null)
 const detailLoading = ref(false)
 
-const statusOptions = [
-  { value: undefined, label: '全部状态' },
+// `undefined` sentinels represent "no filter"; they're cast so el-option's
+// strict value typing accepts them. The select is `clearable`, which resets
+// the v-model to undefined at runtime.
+const ALL: number = undefined as unknown as number
+
+const statusOptions: { value: number; label: string }[] = [
+  { value: ALL, label: '全部状态' },
   { value: 4, label: '待审核' },
   { value: 5, label: '已通过' },
   { value: 6, label: '已退回' },
@@ -37,7 +40,7 @@ const statusOptions = [
 
 const currentYear = new Date().getFullYear()
 const yearOptions = computed(() => {
-  const years: { value: number | undefined; label: string }[] = [{ value: undefined, label: '全部年度' }]
+  const years: { value: number; label: string }[] = [{ value: ALL, label: '全部年度' }]
   for (let y = currentYear; y >= currentYear - 5; y--) {
     years.push({ value: y, label: `${y}年` })
   }

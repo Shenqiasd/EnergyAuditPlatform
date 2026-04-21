@@ -96,13 +96,13 @@ onMounted(loadData)
           <el-form-item label="行业分类">
             <el-cascader
               v-model="industryCascaderValue"
-              :options="industryOptions"
+              :options="(industryOptions as unknown as import('element-plus').CascaderOption[])"
               :props="{ expandTrigger: 'hover', emitPath: true }"
               filterable
               clearable
               placeholder="请选择行业分类"
               style="width: 100%"
-              @change="onIndustryChange"
+              @change="(value: unknown) => onIndustryChange(value as string[] | null)"
             />
           </el-form-item>
         </el-col>

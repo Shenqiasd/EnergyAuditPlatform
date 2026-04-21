@@ -531,7 +531,11 @@ function initGraph() {
       maxScale: 3,
     },
     interacting: { nodeMovable: false, edgeMovable: false, edgeLabelMovable: false },
-    connecting: { enabled: false },
+    // Disable interactive edge creation (mirrors the interacting=false setup
+    // above). `allowNode: false` prevents users from dragging new connections
+    // between nodes at runtime; we render edges programmatically from
+    // `buildGraph`.
+    connecting: { allowNode: false, allowBlank: false, allowLoop: false, allowMulti: false, allowEdge: false, allowPort: false },
   })
   if (props.flowData.length) {
     buildGraph(props.flowData, props.balanceData)
@@ -578,7 +582,12 @@ async function exportPngBlob(): Promise<Blob | null> {
 /** Internal: render SVG to Canvas then export as PNG data URI */
 async function exportPngDataUri(): Promise<string | null> {
   if (!graph) return null
-  const svgStr = await graph.toSVG()
+  // `toSVG()` is provided by `@antv/x6-plugin-export` at runtime but isn't
+  // in the base `Graph` d.ts. Cast narrowly rather than polluting the global
+  // augmentation.
+  const toSVG = (graph as unknown as { toSVG?: () => Promise<string> | string }).toSVG
+  if (typeof toSVG !== 'function') return null
+  const svgStr = await toSVG.call(graph)
   if (typeof svgStr !== 'string') return null
 
   return new Promise<string | null>((resolve) => {

@@ -3,12 +3,16 @@
 -- ==========================================================================
 
 -- 1. Extend tpl_tag_mapping with new columns for SCALAR/TABLE dual mapping
-ALTER TABLE tpl_tag_mapping
-    ADD COLUMN mapping_type    VARCHAR(16)  DEFAULT 'SCALAR'   AFTER cell_range,
-    ADD COLUMN source_type     VARCHAR(16)  DEFAULT 'CELL_TAG' AFTER mapping_type,
-    ADD COLUMN row_key_column  INT          NULL               AFTER source_type,
-    ADD COLUMN column_mappings TEXT         NULL               AFTER row_key_column,
-    ADD COLUMN header_row      INT          NULL               AFTER column_mappings;
+CALL ensure_column('tpl_tag_mapping', 'mapping_type',
+    'VARCHAR(16) DEFAULT ''SCALAR'' AFTER cell_range');
+CALL ensure_column('tpl_tag_mapping', 'source_type',
+    'VARCHAR(16) DEFAULT ''CELL_TAG'' AFTER mapping_type');
+CALL ensure_column('tpl_tag_mapping', 'row_key_column',
+    'INT NULL AFTER source_type');
+CALL ensure_column('tpl_tag_mapping', 'column_mappings',
+    'TEXT NULL AFTER row_key_column');
+CALL ensure_column('tpl_tag_mapping', 'header_row',
+    'INT NULL AFTER column_mappings');
 
 -- 2. de_company_overview
 CREATE TABLE IF NOT EXISTS de_company_overview (

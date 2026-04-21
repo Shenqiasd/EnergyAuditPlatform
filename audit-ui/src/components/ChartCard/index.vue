@@ -2,9 +2,15 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 
+// EChartsOption's generated type has deeply-nested variance mismatches
+// (e.g. `graphic.elements.children` widens to `never[]` in some paths) that
+// reject perfectly valid option objects built by callers. Accept the same
+// loose shape echarts.setOption itself takes.
+type EChartsOptionLoose = echarts.EChartsOption | Record<string, unknown>
+
 const props = defineProps<{
   title: string
-  option: echarts.EChartsOption
+  option: EChartsOptionLoose
   height?: string
   loading?: boolean
 }>()
@@ -29,7 +35,7 @@ watch(
   () => props.option,
   (val) => {
     if (chart && val) {
-      chart.setOption(val, true)
+      chart.setOption(val as echarts.EChartsOption, true)
     }
   },
   { deep: true }
@@ -39,7 +45,7 @@ function initChart() {
   if (!chartRef.value) return
   chart = echarts.init(chartRef.value)
   if (props.option) {
-    chart.setOption(props.option)
+    chart.setOption(props.option as echarts.EChartsOption)
   }
 }
 
@@ -58,7 +64,7 @@ defineExpose({
     <template #header>
       <span class="chart-title">{{ title }}</span>
     </template>
-    <div v-loading="loading" class="chart-body">
+    <div v-loading="!!loading" class="chart-body">
       <div ref="chartRef" class="chart-container" :style="{ height: height || '360px' }"></div>
     </div>
   </el-card>

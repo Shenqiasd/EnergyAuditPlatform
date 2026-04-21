@@ -3,5 +3,5 @@
 -- Excel column C "项目类型" was missing from the original schema.
 -- ============================================================================
 
-ALTER TABLE de_tech_reform_history
-    ADD COLUMN project_type VARCHAR(64) AFTER project_name;
+CALL ensure_column('de_tech_reform_history', 'project_type',
+    'VARCHAR(64) AFTER project_name');

@@ -5,73 +5,73 @@
 -- ==========================================================================
 
 -- 1. de_company_overview
-ALTER TABLE de_company_overview
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_company_overview
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_company_overview', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_company_overview', 'idx_submission',
+    '(submission_id)');
 
 -- 2. de_tech_indicator
-ALTER TABLE de_tech_indicator
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_tech_indicator
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_tech_indicator', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_tech_indicator', 'idx_submission',
+    '(submission_id)');
 
 -- 3. de_product_unit_consumption
-ALTER TABLE de_product_unit_consumption
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_product_unit_consumption
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_product_unit_consumption', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_product_unit_consumption', 'idx_submission',
+    '(submission_id)');
 
 -- 4. de_energy_balance
-ALTER TABLE de_energy_balance
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_energy_balance
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_energy_balance', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_energy_balance', 'idx_submission',
+    '(submission_id)');
 
 -- 5. de_five_year_target
-ALTER TABLE de_five_year_target
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_five_year_target
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_five_year_target', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_five_year_target', 'idx_submission',
+    '(submission_id)');
 
 -- 6. de_meter_instrument
-ALTER TABLE de_meter_instrument
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_meter_instrument
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_meter_instrument', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_meter_instrument', 'idx_submission',
+    '(submission_id)');
 
 -- 7. de_meter_config_rate
-ALTER TABLE de_meter_config_rate
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_meter_config_rate
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_meter_config_rate', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_meter_config_rate', 'idx_submission',
+    '(submission_id)');
 
 -- 8. de_obsolete_equipment
-ALTER TABLE de_obsolete_equipment
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_obsolete_equipment
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_obsolete_equipment', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_obsolete_equipment', 'idx_submission',
+    '(submission_id)');
 
 -- 9. de_product_energy_cost
-ALTER TABLE de_product_energy_cost
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_product_energy_cost
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_product_energy_cost', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_product_energy_cost', 'idx_submission',
+    '(submission_id)');
 
 -- 10. de_management_policy
-ALTER TABLE de_management_policy
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_management_policy
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_management_policy', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_management_policy', 'idx_submission',
+    '(submission_id)');
 
 -- 11. de_saving_potential
-ALTER TABLE de_saving_potential
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_saving_potential
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_saving_potential', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_saving_potential', 'idx_submission',
+    '(submission_id)');
 
 -- 12. de_rectification
-ALTER TABLE de_rectification
-    ADD COLUMN IF NOT EXISTS submission_id BIGINT NULL AFTER id;
-ALTER TABLE de_rectification
-    ADD INDEX IF NOT EXISTS idx_submission (submission_id);
+CALL ensure_column('de_rectification', 'submission_id',
+    'BIGINT NULL AFTER id');
+CALL ensure_index('de_rectification', 'idx_submission',
+    '(submission_id)');
