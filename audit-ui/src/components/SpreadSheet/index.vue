@@ -429,7 +429,10 @@ function applyOneConfigPrefill(
     return
   }
   const columns = config.columns ?? []
-  if (!columns.length) return
+  if (!columns.length) {
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
+    return
+  }
   const isDropdownOnly = config.mode === 'dropdown_only'
 
   // 2. Resolve data source records. Prefer explicit `source` when provided,
@@ -446,12 +449,16 @@ function applyOneConfigPrefill(
     )
   }
   // For prefill mode, we need records to fill values; for dropdown_only, proceed even if empty
-  if (!records.length && !isDropdownOnly) return
+  if (!records.length && !isDropdownOnly) {
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
+    return
+  }
 
   // 4. Parse cellRange → startRow, startCol, maxRows
   const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
   if (!rangeMatch) {
-    console.warn(`[config-prefill] invalid cellRange "${tag.cellRange}" for tag "${tag.tagName}"`)
+    console.warn(`[config-prefill] invalid cellRange "${tag.cellRange}" for tag "${tagLabel}"`)
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
     return
   }
   const startRow = parseInt(rangeMatch[2]) - 1 // 0-based
@@ -462,7 +469,8 @@ function applyOneConfigPrefill(
   // 5. Resolve sheet
   const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
   if (!sheet) {
-    console.warn(`[config-prefill] sheet not found for tag "${tag.tagName}"`)
+    console.warn(`[config-prefill] sheet not found for tag "${tagLabel}"`)
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
     return
   }
 
