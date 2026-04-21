@@ -307,25 +307,41 @@ async function initWorkbook() {
     const submissionStatus = currentSubmission?.status ?? 0
     const isSubmittedOrApproved = submissionStatus === 1 || submissionStatus === 2
     const forceReadonly = props.readonly || isSubmittedOrApproved
+    cpTrace('postcalc.readonlyCheck', { forceReadonly, submissionStatus, propsReadonly: props.readonly })
     if (forceReadonly) {
+      cpTrace('postcalc.applyReadonlyProtection.start')
       applyReadonlyProtection()
+      cpTrace('postcalc.applyReadonlyProtection.done')
       releaseLockIfOwned()
+      cpTrace('postcalc.releaseLockIfOwned.done')
     } else {
       startHeartbeat()
+      cpTrace('postcalc.startHeartbeat.done')
     }
 
     // ── Sheet navigation setup ──────────────────────────────────────────
+    cpTrace('postcalc.bindSheetNavEvents.start')
     bindSheetNavEvents(workbook)
+    cpTrace('postcalc.bindSheetNavEvents.done')
     activeSheetIndex.value = workbook.getActiveSheetIndex()
+    cpTrace('postcalc.computeAllSheetStatuses.start')
     computeAllSheetStatuses()
+    cpTrace('postcalc.computeAllSheetStatuses.done')
     // Auto-fit the initial sheet after a tick to allow layout to settle
+    cpTrace('postcalc.nextTick.start')
     await nextTick()
+    cpTrace('postcalc.nextTick.done')
+    cpTrace('postcalc.autoFitCurrentSheet.start')
     autoFitCurrentSheet()
+    cpTrace('postcalc.autoFitCurrentSheet.done')
     window.addEventListener('resize', onWindowResize)
+    cpTrace('postcalc.allDone')
   } catch (e: any) {
     errorMsg.value = '加载模板失败：' + (e?.message ?? '未知错误')
+    cpTrace('initWorkbook.catch', { err: String(e?.message ?? e) })
     releaseLockIfOwned()
   } finally {
+    cpTrace('initWorkbook.finally.loadingFalse')
     loading.value = false
   }
 }
