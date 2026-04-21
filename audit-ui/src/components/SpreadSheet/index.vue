@@ -905,32 +905,25 @@ function applyDataEntryProtection(
     try {
       const sheetCount = wb.getSheetCount()
 
-      // Step 1: Force sheet-level defaultStyle.locked=true on every sheet.
-      // SpreadJS's global cell defaultStyle is locked=true, but templates
-      // authored in Designer/Excel may ship cells whose own style has
-      // locked=false. Calling `sheet.getRange(0,0,rows,cols).locked(true)` on
-      // all ~55K cells across 45 sheets (the pre-optimization behaviour) was
-      // costing several seconds because it creates a Style object per cell.
-      // Using `setDefaultStyle` instead applies one Style at the sheet level,
-      // so it's ~45 cheap calls total — while still guaranteeing that every
-      // non-tagged cell is locked once `isProtected=true` is set in Step 4.
+      // Step 1: Lock all cells by default on every sheet. This forces `locked=true`
+      // on every cell including those whose template-level style has `locked=false`
+      // (e.g. cells authored in SpreadJS Designer / Excel with explicit unlock).
+      // Without this, Step 4's `isProtected=true` would leave those cells editable.
+      //
+      // NOTE: on templates with many large sheets this loop creates a Style object
+      // per cell and is itself a few seconds of work. The bigger perf win for
+      // template-open time comes from (a) avoiding the O(tags × rows × cols)
+      // getTag scans that used to live in unlockScalarCell/fillTaggedCell
+      // (addressed by the cell-tag index in a separate PR), and (b) the suspend
+      // envelope / single-recalc changes in this PR. We deliberately keep the
+      // original "brute-force lock-all" semantics here because `setDefaultStyle`
+      // alone does NOT override per-cell explicit `locked=false`.
       for (let si = 0; si < sheetCount; si++) {
         const sheet = wb.getSheet(si)
-        try {
-          const GCSpread = (window.GC?.Spread?.Sheets ?? {}) as unknown as {
-            Style?: new () => Record<string, unknown>
-          }
-          if (typeof GCSpread.Style === 'function') {
-            const defStyle = new GCSpread.Style()
-            defStyle.locked = true
-            ;(sheet as unknown as { setDefaultStyle: (s: unknown) => void }).setDefaultStyle(defStyle)
-          }
-        } catch (e) {
-          // Best-effort: if setDefaultStyle is unavailable the global cell
-          // defaultStyle.locked=true will still lock every cell that doesn't
-          // have an explicit style override from the template JSON.
-          console.warn('[protection] setDefaultStyle failed on sheet', si, e)
-        }
+        const rows = sheet.getRowCount()
+        const cols = sheet.getColumnCount()
+        const allRange = sheet.getRange(0, 0, rows, cols)
+        allRange.locked(true)
       }
 
       // Step 2 & 3: Unlock mapped cells and mark required ones
