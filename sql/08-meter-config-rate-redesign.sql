@@ -2,10 +2,27 @@
 -- Each energy type = 1 row, 3 levels × 4 indicators = 12 numeric columns
 -- Replaces the old normalized design (level_type TINYINT, 1 row per level)
 --
--- Idempotent: ensure_column/DROP ... IF EXISTS so reruns are safe.
+-- Idempotent: safe to re-run. TRUNCATE only fires when the old normalized
+-- schema is still present (i.e. the redesign has not yet been applied), so
+-- a second run against a DB that has already been migrated preserves data.
 
--- Step 1: Clear old data (always safe)
-TRUNCATE TABLE de_meter_config_rate;
+-- Step 1: Clear stale rows only when the old schema is still in place. The
+-- old normalized rows (keyed by level_type) are meaningless under the new
+-- wide-table layout, so wiping them on the first run is intentional. On
+-- subsequent runs, `level_type` no longer exists (dropped in Step 4 below),
+-- so this block is a no-op and real production data is preserved.
+SET @has_level_type := (
+    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'de_meter_config_rate'
+      AND COLUMN_NAME  = 'level_type'
+);
+SET @trunc_sql := IF(@has_level_type = 1,
+    'TRUNCATE TABLE de_meter_config_rate',
+    'DO 0'); -- no-op when redesign has already been applied
+PREPARE stmt_trunc FROM @trunc_sql;
+EXECUTE stmt_trunc;
+DEALLOCATE PREPARE stmt_trunc;
 
 -- Step 2: Add submission_id (may already exist from 04-fix-add-submission-id.sql)
 CALL ensure_column('de_meter_config_rate', 'submission_id',
