@@ -16,14 +16,14 @@
   "dependencies": {
     "@antv/x6": "^2.19.2",
     "@element-plus/icons-vue": "^2.3.1",
-    "@tinymce/tinymce-vue": "^6.3.0",
+    "@tinymce/tinymce-vue": "^5.1.1",
     "@types/dompurify": "^3.0.5",
     "axios": "^1.6.8",
     "dompurify": "^3.4.0",
     "echarts": "^6.0.0",
     "element-plus": "^2.6.1",
     "pinia": "^2.1.7",
-    "tinymce": "^8.4.0",
+    "tinymce": "^6.8.5",
     "vue": "^3.4.21",
     "vue-echarts": "^8.0.1",
     "vue-router": "^4.3.0"

@@ -81,7 +81,6 @@ const tinymceInit = {
   language: 'zh_CN',
   language_url: '/tinymce/langs/zh_CN.js',
   branding: false,
-  promotion: false,
   resize: true,
   paste_data_images: true,
   table_responsive_width: true,
