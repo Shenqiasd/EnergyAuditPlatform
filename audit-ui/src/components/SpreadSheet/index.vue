@@ -365,12 +365,47 @@ interface ConfigPrefillColDef {
   extraSources?: Array<{ table: string; field: string; filter?: Record<string, unknown> }>
 }
 
+/**
+ * Build a NEW Style object with the desired overrides applied on top of the
+ * existing cell style — without mutating the original. `sheet.getStyle()` can
+ * return a shared/default Style instance referenced by many cells; mutating
+ * it in place leaks style changes onto unrelated cells and (in some SpreadJS
+ * builds) triggers expensive internal invalidation that can manifest as a
+ * long synchronous freeze during prefill.
+ */
+function buildLockedStyle(
+  sheet: import('@/types/spreadjs').GCSpreadSheet,
+  row: number,
+  col: number,
+  backColor = '#F5F5F5',
+): unknown {
+  try {
+    const StyleCtor = window.GC?.Spread?.Sheets?.Style as undefined | (new () => { locked?: boolean; backColor?: string; clone?: () => unknown })
+    if (!StyleCtor) return null
+    const existing = sheet.getStyle(row, col) as null | { clone?: () => { locked?: boolean; backColor?: string } }
+    const style = (existing && typeof existing.clone === 'function')
+      ? existing.clone() as { locked?: boolean; backColor?: string }
+      : new StyleCtor()
+    style.locked = true
+    style.backColor = backColor
+    return style
+  } catch {
+    return null
+  }
+}
+
 function applyOneConfigPrefill(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tag: TplTagMapping,
   configData: ConfigPrefillData,
 ) {
-  if (!tag.targetTable || !tag.cellRange || !tag.columnMappings) return
+  const tagLabel = tag.tagName ?? '<unnamed>'
+  console.log(`[config-prefill] START "${tagLabel}"`)
+  console.time(`[config-prefill] "${tagLabel}" total`)
+  if (!tag.targetTable || !tag.cellRange || !tag.columnMappings) {
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
+    return
+  }
 
   // 1. Parse columnMappings JSON first so we can honour the optional `source`
   //    override before reading configData.
@@ -389,11 +424,15 @@ function applyOneConfigPrefill(
   try {
     config = JSON.parse(tag.columnMappings)
   } catch {
-    console.warn(`[config-prefill] invalid columnMappings JSON for tag "${tag.tagName}"`)
+    console.warn(`[config-prefill] invalid columnMappings JSON for tag "${tagLabel}"`)
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
     return
   }
   const columns = config.columns ?? []
-  if (!columns.length) return
+  if (!columns.length) {
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
+    return
+  }
   const isDropdownOnly = config.mode === 'dropdown_only'
 
   // 2. Resolve data source records. Prefer explicit `source` when provided,
@@ -410,12 +449,16 @@ function applyOneConfigPrefill(
     )
   }
   // For prefill mode, we need records to fill values; for dropdown_only, proceed even if empty
-  if (!records.length && !isDropdownOnly) return
+  if (!records.length && !isDropdownOnly) {
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
+    return
+  }
 
   // 4. Parse cellRange → startRow, startCol, maxRows
   const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
   if (!rangeMatch) {
-    console.warn(`[config-prefill] invalid cellRange "${tag.cellRange}" for tag "${tag.tagName}"`)
+    console.warn(`[config-prefill] invalid cellRange "${tag.cellRange}" for tag "${tagLabel}"`)
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
     return
   }
   const startRow = parseInt(rangeMatch[2]) - 1 // 0-based
@@ -426,7 +469,8 @@ function applyOneConfigPrefill(
   // 5. Resolve sheet
   const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
   if (!sheet) {
-    console.warn(`[config-prefill] sheet not found for tag "${tag.tagName}"`)
+    console.warn(`[config-prefill] sheet not found for tag "${tagLabel}"`)
+    console.timeEnd(`[config-prefill] "${tagLabel}" total`)
     return
   }
 
@@ -516,24 +560,22 @@ function applyOneConfigPrefill(
         }
       }
 
-      // Lock linkedTo columns — value is derived, user should not edit directly
+      // Lock linkedTo columns — value is derived, user should not edit directly.
+      // Use buildLockedStyle which CLONES the existing style before mutating,
+      // to avoid polluting shared/default Style objects referenced by other cells.
       if (colDef.linkedTo) {
-        try {
-          const style = sheet.getStyle(startRow + i, colIndex) || new (window.GC.Spread.Sheets.Style)()
-          style.locked = true
-          style.backColor = '#F5F5F5' // light gray to indicate read-only
-          sheet.setStyle(startRow + i, colIndex, style)
-        } catch { /* ignore styling errors */ }
+        const style = buildLockedStyle(sheet, startRow + i, colIndex)
+        if (style) {
+          try { sheet.setStyle(startRow + i, colIndex, style) } catch { /* ignore */ }
+        }
       }
 
       // Lock columns with locked: true — auto-generated, user should not edit
       if (colDef.locked && !colDef.linkedTo) {
-        try {
-          const style = sheet.getStyle(startRow + i, colIndex) || new (window.GC.Spread.Sheets.Style)()
-          style.locked = true
-          style.backColor = '#F5F5F5' // light gray to indicate read-only
-          sheet.setStyle(startRow + i, colIndex, style)
-        } catch { /* ignore styling errors */ }
+        const style = buildLockedStyle(sheet, startRow + i, colIndex)
+        if (style) {
+          try { sheet.setStyle(startRow + i, colIndex, style) } catch { /* ignore */ }
+        }
       }
 
       // Set dropdown validator (skip if dropdown: false or linkedTo or locked)
@@ -660,10 +702,11 @@ function applyOneConfigPrefill(
   }
 
   console.log(
-    `[config-prefill] "${tag.tagName}" [${isDropdownOnly ? 'dropdown_only' : 'prefill'}]: ` +
+    `[config-prefill] "${tagLabel}" [${isDropdownOnly ? 'dropdown_only' : 'prefill'}]: ` +
     `${rowsToFill} rows processed` + (isDropdownOnly ? '' : `, ${maxRows - rowsToFill} empty rows hidden`) +
     (linkedCols.length > 0 ? `, ${linkedCols.length} linked column(s)` : ''),
   )
+  console.timeEnd(`[config-prefill] "${tagLabel}" total`)
 }
 
 /**
