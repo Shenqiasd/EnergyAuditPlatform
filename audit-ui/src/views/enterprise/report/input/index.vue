@@ -147,7 +147,9 @@ async function handleSubmit() {
   }
   submitting.value = true
   try {
-    await spreadRef.value.save()
+    // P0: skip extraction during save — submit() will perform its own extraction,
+    // avoiding the duplicate extraction that caused 30s+ timeout
+    await spreadRef.value.save({ skipExtraction: true })
     const submissionId = spreadRef.value.getSubmissionId()
     const versionId = spreadRef.value.getVersionId()
     if (!submissionId || !versionId) {

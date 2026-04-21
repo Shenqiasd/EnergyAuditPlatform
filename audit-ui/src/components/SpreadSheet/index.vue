@@ -1545,7 +1545,7 @@ function stopHeartbeat() {
   }
 }
 
-async function save(): Promise<void> {
+async function save(options?: { skipExtraction?: boolean }): Promise<void> {
   if (!workbook || !publishedVersion) {
     throw new Error('工作簿尚未初始化，请稍后重试')
   }
@@ -1558,6 +1558,7 @@ async function save(): Promise<void> {
       submissionJson: json,
       templateVersion: publishedVersion.version ?? 1,
       templateVersionId: publishedVersion.id,
+      skipExtraction: options?.skipExtraction,
     })
     currentSubmission = saved
     emit('drafted', saved)

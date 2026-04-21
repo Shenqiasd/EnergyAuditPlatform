@@ -21,6 +21,9 @@ public class SaveDraftRequest {
     /** Optional: when provided, data extraction runs on save (best-effort). */
     private Long templateVersionId;
 
+    /** When true, skip data extraction during save (used by submit flow to avoid duplicate extraction). */
+    private Boolean skipExtraction;
+
     public Long getTemplateId() { return templateId; }
     public void setTemplateId(Long templateId) { this.templateId = templateId; }
 
@@ -35,4 +38,7 @@ public class SaveDraftRequest {
 
     public Long getTemplateVersionId() { return templateVersionId; }
     public void setTemplateVersionId(Long templateVersionId) { this.templateVersionId = templateVersionId; }
+
+    public Boolean getSkipExtraction() { return skipExtraction; }
+    public void setSkipExtraction(Boolean skipExtraction) { this.skipExtraction = skipExtraction; }
 }

@@ -270,12 +270,16 @@ public class TemplateController {
                 req.getSubmissionJson(), req.getTemplateVersion(),
                 req.getTemplateVersionId());
 
-        // Best-effort extraction in a separate transaction — failures never roll back the save
-        try {
-            submissionService.extractForDraft(saved.getId(), req.getTemplateVersionId());
-        } catch (Exception e) {
-            log.warn("Draft extraction failed (non-blocking) for submission {}: {}",
-                    saved.getId(), e.getMessage());
+        // Best-effort extraction in a separate transaction — failures never roll back the save.
+        // Skip extraction when the submit flow will perform its own extraction immediately after,
+        // avoiding the duplicate extraction that caused 30s+ timeout (P0 fix).
+        if (!Boolean.TRUE.equals(req.getSkipExtraction())) {
+            try {
+                submissionService.extractForDraft(saved.getId(), req.getTemplateVersionId());
+            } catch (Exception e) {
+                log.warn("Draft extraction failed (non-blocking) for submission {}: {}",
+                        saved.getId(), e.getMessage());
+            }
         }
 
         return R.ok(saved);
