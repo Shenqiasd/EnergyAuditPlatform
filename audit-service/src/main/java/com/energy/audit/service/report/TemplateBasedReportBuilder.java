@@ -43,7 +43,9 @@ import java.util.Base64;
  *   ID 18: 表9  → Sheet "9.重点设备测试数据"
  *   ID 19: 表16 → Sheet "16.节能潜力"
  *   ID 20: 表17 → Sheet "17.能源管理改进建议"  (live template renumbered from 18 → 17)
- *   ID 21: 表18 → Sheet "18.节能技改建议"       (live template renumbered from 19 → 18)
+ *   ID 21: 表18 → Sheet "18." (prefix-only anchor; live sheet is "18.节能技术改造建议汇总",
+ *          was "19.节能技术改造建议" in the original 0417 template; use the numeric prefix to
+ *          survive further topic-name drift)
  */
 public class TemplateBasedReportBuilder {
 
@@ -77,7 +79,10 @@ public class TemplateBasedReportBuilder {
         ANNOTATION_SHEET_MAP.put(18, "9.重点设备测试数据");
         ANNOTATION_SHEET_MAP.put(19, "16.节能潜力");
         ANNOTATION_SHEET_MAP.put(20, "17.能源管理改进建议");    // was 18 in the original 0417 template
-        ANNOTATION_SHEET_MAP.put(21, "18.节能技改建议");        // was 19 in the original 0417 template
+        // Use numeric prefix "18." instead of descriptive text: the live sheet name is
+        // "18.节能技术改造建议汇总" and a typo-prone descriptive value (e.g. dropping "术" or "造")
+        // would silently stop matching. Same defensive style as IDs 7 and 13 above.
+        ANNOTATION_SHEET_MAP.put(21, "18.");                    // was 19 in the original 0417 template
     }
 
     /** Additional sheet for annotation 11 (表4表5 → 2 tables) */
