@@ -84,11 +84,35 @@ public class TemplateBasedReportBuilder {
      * @param metadata             map with keys: "year", "enterpriseCode", "enterpriseName"
      * @return the filled document as a byte array (.docx)
      */
+    /** OLE2 magic bytes: 0xD0CF11E0A1B11AE1 — indicates .doc (not .docx) */
+    private static final byte[] OLE2_MAGIC = {(byte)0xD0, (byte)0xCF, (byte)0x11, (byte)0xE0};
+
+    /**
+     * Check if the given bytes represent an OLE2 (.doc) file rather than OOXML (.docx).
+     */
+    public static boolean isOle2Format(byte[] data) {
+        return data != null && data.length >= 4
+            && data[0] == OLE2_MAGIC[0] && data[1] == OLE2_MAGIC[1]
+            && data[2] == OLE2_MAGIC[2] && data[3] == OLE2_MAGIC[3];
+    }
+
     public static byte[] buildReport(InputStream templateInputStream,
                                      String submissionJson,
                                      byte[] flowChartImage,
                                      Map<String, String> metadata) throws Exception {
-        try (XWPFDocument doc = new XWPFDocument(templateInputStream)) {
+        // Buffer the stream so we can inspect magic bytes before handing to POI
+        byte[] templateBytes;
+        try (InputStream is = templateInputStream) {
+            templateBytes = is.readAllBytes();
+        }
+        // Detect OLE2 (.doc) format — XWPFDocument only supports OOXML (.docx)
+        if (isOle2Format(templateBytes)) {
+            throw new IllegalArgumentException(
+                "报告模板为旧版 .doc 格式（Office 97-2003），系统仅支持 .docx 格式（Office 2007+）。" +
+                "请用 Word 打开模板后「另存为」选择 .docx 格式，然后重新上传。");
+        }
+
+        try (XWPFDocument doc = new XWPFDocument(new ByteArrayInputStream(templateBytes))) {
 
             // Step 1: Find all comment anchor positions in the document body
             Map<Integer, Integer> commentPositions = findCommentPositions(doc);

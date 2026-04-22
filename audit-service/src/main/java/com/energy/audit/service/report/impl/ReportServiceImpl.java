@@ -321,7 +321,13 @@ public class ReportServiceImpl implements ReportService {
             throw new BusinessException("文件不能为空");
         }
         if (!fileName.toLowerCase().endsWith(".docx") && !fileName.toLowerCase().endsWith(".doc")) {
-            throw new BusinessException("仅支持 .docx 或 .doc 格式的模板文件");
+            throw new BusinessException("仅支持 .docx 格式的模板文件");
+        }
+        // Validate actual file content — reject OLE2 (.doc) even if extension says .docx
+        if (TemplateBasedReportBuilder.isOle2Format(fileBytes)) {
+            throw new BusinessException(
+                "上传的文件为旧版 .doc 格式（Office 97-2003），系统仅支持 .docx 格式（Office 2007+）。" +
+                "请用 Word 打开模板后「另存为」选择 .docx 格式，然后重新上传。");
         }
 
         try {
