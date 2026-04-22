@@ -320,7 +320,7 @@ public class ReportServiceImpl implements ReportService {
         if (fileBytes == null || fileBytes.length == 0) {
             throw new BusinessException("文件不能为空");
         }
-        if (!fileName.toLowerCase().endsWith(".docx") && !fileName.toLowerCase().endsWith(".doc")) {
+        if (!fileName.toLowerCase().endsWith(".docx")) {
             throw new BusinessException("仅支持 .docx 格式的模板文件");
         }
         // Validate actual file content — reject OLE2 (.doc) even if extension says .docx
