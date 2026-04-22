@@ -1,35 +1,49 @@
 -- =============================================================================
--- Migration 28: 能源流程图重构 v2 · PR #3 · 模板配置（已于 PR #5 修正真实布局）
+-- Migration 30: 修正 sql/28 首次执行时的 Sheet 11 布局错误假设
 --
--- 真实生产 Sheet 11 "11.能流图（二维表）" 布局（从 v31 template_json 核对）：
---   rowCount=12, columnCount=6, SpreadJS index=15
---   row 0  (A1:F1 合并): 标题 "能源流程图（二维表）"
---   row 1  (spreadsheet row 2): 表头
---          A=源单元 | B=目的单元 | C=能源/产品 | D=实物量 | E=折标量/价格（万元） | F=备注
---   row 2-11 (rows 3-12): 10 行数据区
+-- 背景：sql/28 第一版按 9 列 A5:I34 布局写入（含 seq_no / flow_stage 两列），
+-- 但生产 v31 模板的 Sheet 11 "11.能流图（二维表）" 实际为 6 列 A3:F12，无序号、
+-- 无环节列。首版 sql/28 已在 Railway 等环境执行，插入了 5 条列位错误的 mapping
+-- (sheet11_energy_flow_table / source_unit_dropdown / target_unit_dropdown /
+-- energy_product_dropdown / flow_stage_dropdown)。直接跑修正后的 sql/28 因
+-- WHERE NOT EXISTS 命中旧行会被跳过，必须先软删旧行。
 --
--- 抽取设计：
---   1) TABLE → de_energy_flow: col0→sourceUnit, col1→targetUnit, col2→energyProduct,
---      col3→physicalQuantity, col4→standardQuantity, col5→remark。
---      seq_no 和 flow_stage 不从单元格抽取（表里没对应列）；seq_no 留空，
---      flow_stage 由 EnergyFlowPostProcessor.deriveFlowStage() 按
---      source_unit=外购 / target_unit=产出 / bs_unit.unit_type 服务端推导。
---   2) 列 E "折标量/价格（万元）" 本质是计算列——C 命中 bs_energy → D*equivalent_value，
---      命中 bs_product → D*unit_price。模板里是空白单元；派生由
---      EnergyFlowPostProcessor.deriveStandardQuantity() 负责。
---      若用户手动填了 E，派生逻辑也会覆盖（user intent: 这是计算值）。
---   3) 源/目的/能源品种三个下拉在 A/B/C 列运行时注入，外购 prepend 到 A、产出 append 到 B。
---   4) 没有"环节"列 → 不插 sheet11_flow_stage_dropdown。
+-- 本迁移：
+--   1. 软删旧的 5 个 sheet11_* mapping（以 cell_range 模式精确定位）
+--   2. 软删 sheet11_flow_stage_dropdown（新布局不再需要）
+--   3. 重新执行 sql/28 的 INSERT 逻辑，插入修正版 4 条 mapping
+--      (TABLE + 3 个下拉；无 flow_stage_dropdown)
 --
--- Sheet 11.1 (能购入消费储存) 的 TABLE 映射软删除，v2 方案 X 不再填报。
---
--- 幂等策略：全部 INSERT ... SELECT WHERE NOT EXISTS；UPDATE 使用精确条件。
--- 旧执行过 sql/28 老版本（cell_range=A5:I34，9 列）的环境由 sql/30 清理。
+-- 幂等：软删带 cell_range 条件限定到旧布局；INSERT 用 WHERE NOT EXISTS 保障
+-- 多次执行安全。
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
--- 1. Sheet 11 表格 TABLE mapping → de_energy_flow (A3:F12)
+-- 1. 软删旧 5 条 mapping（按 cell_range 精确定位，避免误删修正后行）
 -- ---------------------------------------------------------------------------
+UPDATE tpl_tag_mapping
+SET deleted = 1, update_by = 'migration-30', update_time = NOW()
+WHERE deleted = 0
+  AND tag_name IN (
+      'sheet11_energy_flow_table',
+      'sheet11_source_unit_dropdown',
+      'sheet11_target_unit_dropdown',
+      'sheet11_energy_product_dropdown',
+      'sheet11_flow_stage_dropdown'
+  )
+  AND cell_range IN (
+      'A5:I34',   -- TABLE 旧范围
+      'B5:B34',   -- flow_stage_dropdown 旧范围
+      'C5:C34',   -- source_unit_dropdown 旧范围（错列）
+      'D5:D34',   -- target_unit_dropdown 旧范围（错列）
+      'E5:E34'    -- energy_product_dropdown 旧范围（错列）
+  );
+
+-- ---------------------------------------------------------------------------
+-- 2. 重新执行 sql/28 的 4 条 INSERT（幂等：旧行已软删，WHERE NOT EXISTS 通过）
+-- ---------------------------------------------------------------------------
+
+-- 2.1 sheet11_energy_flow_table → de_energy_flow (A3:F12)
 INSERT INTO tpl_tag_mapping (
     template_version_id, tag_name, field_name, target_table,
     sheet_index, sheet_name, cell_range,
@@ -51,7 +65,7 @@ SELECT
     '[{"col":0,"field":"sourceUnit","type":"string"},{"col":1,"field":"targetUnit","type":"string"},{"col":2,"field":"energyProduct","type":"string"},{"col":3,"field":"physicalQuantity","type":"decimal"},{"col":4,"field":"standardQuantity","type":"decimal"},{"col":5,"field":"remark","type":"string"}]',
     'string',
     0,
-    'migration-28',
+    'migration-30',
     NOW(),
     0
 FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
@@ -64,9 +78,7 @@ WHERE v.deleted = 0
         AND t.deleted = 0
   );
 
--- ---------------------------------------------------------------------------
--- 2a. 源单元下拉 (A 列) — bs_unit + "外购"（prepend）
--- ---------------------------------------------------------------------------
+-- 2.2 sheet11_source_unit_dropdown → bs_unit (A3:A12) + 外购 prepend
 INSERT INTO tpl_tag_mapping (
     template_version_id, tag_name, field_name, target_table,
     sheet_index, sheet_name, cell_range,
@@ -86,7 +98,7 @@ SELECT
     '{"mode":"dropdown_only","filter":{"deleted":0},"columns":[{"col":"A","field":"name","extraValues":["外购"],"extraPosition":"prepend"}]}',
     'string',
     0,
-    'migration-28',
+    'migration-30',
     NOW(),
     0
 FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
@@ -99,9 +111,7 @@ WHERE v.deleted = 0
         AND t.deleted = 0
   );
 
--- ---------------------------------------------------------------------------
--- 2b. 目的单元下拉 (B 列) — bs_unit + "产出"（append）
--- ---------------------------------------------------------------------------
+-- 2.3 sheet11_target_unit_dropdown → bs_unit (B3:B12) + 产出 append
 INSERT INTO tpl_tag_mapping (
     template_version_id, tag_name, field_name, target_table,
     sheet_index, sheet_name, cell_range,
@@ -121,7 +131,7 @@ SELECT
     '{"mode":"dropdown_only","filter":{"deleted":0},"columns":[{"col":"B","field":"name","extraValues":["产出"],"extraPosition":"append"}]}',
     'string',
     0,
-    'migration-28',
+    'migration-30',
     NOW(),
     0
 FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
@@ -134,12 +144,7 @@ WHERE v.deleted = 0
         AND t.deleted = 0
   );
 
--- ---------------------------------------------------------------------------
--- 2c. 能源/产品下拉 (C 列) — bs_energy + bs_product 合并源
---     注：SpreadJS CONFIG_PREFILL 的单个 tag 目前只能指向一张表。
---     这里先按 bs_energy 注入（能源类占多数）；产品名由用户手写或后续扩展
---     为联合来源（需要 SpreadSheet/index.vue 支持 multi-table）。
--- ---------------------------------------------------------------------------
+-- 2.4 sheet11_energy_product_dropdown → bs_energy (C3:C12)
 INSERT INTO tpl_tag_mapping (
     template_version_id, tag_name, field_name, target_table,
     sheet_index, sheet_name, cell_range,
@@ -159,7 +164,7 @@ SELECT
     '{"mode":"dropdown_only","filter":{"isActive":1},"columns":[{"col":"C","field":"name"}]}',
     'string',
     0,
-    'migration-28',
+    'migration-30',
     NOW(),
     0
 FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
@@ -171,16 +176,3 @@ WHERE v.deleted = 0
         AND t.tag_name = 'sheet11_energy_product_dropdown'
         AND t.deleted = 0
   );
-
--- ---------------------------------------------------------------------------
--- 3. 软删除 Sheet 11.1 → de_energy_balance 的 TABLE 映射
---    v2 方案 X：de_energy_balance 由 EnergyFlowPostProcessor 派生，不再填报。
---    CONFIG_PREFILL 保留不动（Sheet 隐藏由管理员在模板编辑器定）。
--- ---------------------------------------------------------------------------
-UPDATE tpl_tag_mapping
-SET deleted = 1,
-    update_by = 'migration-28',
-    update_time = NOW()
-WHERE target_table = 'de_energy_balance'
-  AND mapping_type = 'TABLE'
-  AND deleted = 0;

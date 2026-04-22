@@ -75,9 +75,17 @@ public class EnergyFlowPostProcessor {
         try {
             int translated = translateFlowStages(submissionId);
             int backfilled = backfillUnitIds(submissionId, enterpriseId);
+            // 执行顺序必须是 backfillUnitIds → deriveFlowStage：后者依赖 target_unit_id
+            // 反查 bs_unit.unit_type 决定环节归属；若颠倒顺序则大多数行会落到 ELSE 分支
+            // (unit_type NULL) 导致 flow_stage 保持空，前端图会漏掉加工/分配/终端环节的行。
+            int stageDerived = deriveFlowStage(submissionId);
+            // standard_quantity 派生独立于 flow_stage，仅依赖 physical_quantity 与
+            // bs_energy / bs_product 匹配；顺序无所谓，放在最后让 de_energy_balance
+            // 聚合能看到最新 standard_quantity（虽然当前 derive 用的是 physical_quantity）。
+            int quantityDerived = deriveStandardQuantity(submissionId, enterpriseId);
             int derived = deriveEnergyBalance(submissionId, enterpriseId, auditYear, operator);
-            log.info("EnergyFlowPostProcessor: submission {} — translated {} flow_stage labels, backfilled {} unit_ids, derived {} de_energy_balance rows",
-                    submissionId, translated, backfilled, derived);
+            log.info("EnergyFlowPostProcessor: submission {} — translated {} flow_stage labels, backfilled {} unit_ids, derived {} stages, {} standard_quantity, {} de_energy_balance rows",
+                    submissionId, translated, backfilled, stageDerived, quantityDerived, derived);
         } catch (Exception e) {
             // 派生失败不应阻塞主流程（Sheet 11 本体已入库），但必须让运维看到。
             log.error("EnergyFlowPostProcessor failed for submission {}: {}", submissionId, e.getMessage(), e);
@@ -166,6 +174,101 @@ public class EnergyFlowPostProcessor {
         int srcUpdated = safeUpdate(srcSql, params);
         int dstUpdated = safeUpdate(dstSql, params);
         return srcUpdated + dstUpdated;
+    }
+
+    /**
+     * 按照业务规则推导 {@code de_energy_flow.flow_stage}。
+     *
+     * <p>Sheet 11 "11.能流图（二维表）" 没有"环节"列，用户只填源/目的单元和能源/产品，
+     * 所以 flow_stage 必须由服务端从源/目的单元的语义反推：</p>
+     * <ul>
+     *   <li>{@code source_unit = "外购"} → {@code purchased}（购入储存，虚拟源节点）</li>
+     *   <li>{@code target_unit = "产出"} → {@code terminal}（终端使用，虚拟汇节点）</li>
+     *   <li>否则按 {@code target_unit_id} 指向的 bs_unit.unit_type 映射：
+     *       {@code 1=conversion / 2=distribution / 3=terminal}</li>
+     *   <li>都命不中则 {@code flow_stage} 保持原值（通常为空），前端图会跳过该行</li>
+     * </ul>
+     *
+     * <p><b>前置依赖</b>：必须在 {@link #backfillUnitIds} 之后调用，否则 target_unit_id
+     * 为 NULL，unit_type 反查不到，绝大多数非虚拟流向会落到 ELSE 分支无法分层。</p>
+     *
+     * <p><b>幂等条件</b>：只对 flow_stage 为 NULL 或空字符串的行做 UPDATE。已有值
+     * （例如历史数据、用户手工通过 API 补录过）不覆盖，避免把 {@link #translateFlowStages}
+     * 标准化完的英文值再次改写。</p>
+     *
+     * @return 更新的行数
+     */
+    int deriveFlowStage(Long submissionId) {
+        String sql =
+                "UPDATE de_energy_flow f "
+                        + "LEFT JOIN bs_unit tu "
+                        + "  ON tu.id = f.target_unit_id "
+                        + " AND tu.deleted = 0 "
+                        + "SET f.flow_stage = CASE "
+                        + "  WHEN f.source_unit = :purchaseSentinel THEN 'purchased' "
+                        + "  WHEN f.target_unit = :outputSentinel THEN 'terminal' "
+                        + "  WHEN tu.unit_type = 1 THEN 'conversion' "
+                        + "  WHEN tu.unit_type = 2 THEN 'distribution' "
+                        + "  WHEN tu.unit_type = 3 THEN 'terminal' "
+                        + "  ELSE f.flow_stage "
+                        + "END "
+                        + "WHERE f.submission_id = :submissionId "
+                        + "  AND f.deleted = 0 "
+                        + "  AND (f.flow_stage IS NULL OR f.flow_stage = '')";
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("submissionId", submissionId)
+                .addValue("purchaseSentinel", EXTERNAL_PURCHASE_SENTINEL)
+                .addValue("outputSentinel", OUTPUT_SENTINEL);
+        return safeUpdate(sql, params);
+    }
+
+    /**
+     * 推导列 E {@code standard_quantity}（折标量/价格（万元））。
+     *
+     * <p>业务规则（用户确认）：列 E 是计算列，由列 C "能源/产品" 的性质决定计算方式：</p>
+     * <ul>
+     *   <li>C 命中 {@code bs_energy.name}（能源）→ {@code physical_quantity × bs_energy.equivalent_value}
+     *       （实物量 × 折标系数/当量值）</li>
+     *   <li>C 命中 {@code bs_product.name}（产品，bs_energy 未命中时）→
+     *       {@code physical_quantity × bs_product.unit_price}（产量 × 单价）</li>
+     *   <li>两表都不命中 → 保持现值（通常 NULL）</li>
+     * </ul>
+     *
+     * <p>因为用户明确"这是计算值"，对已有值也覆盖；如果命中不到任何一边的系数则
+     * 不动原值，保留用户意图（例如手动填写的价格）。{@code physical_quantity} 为
+     * NULL 时跳过（无法乘）。</p>
+     *
+     * <p><b>匹配优先级</b>：bs_energy &gt; bs_product。同名时能源表胜出，与用户
+     * 描述 "如果是能源就是...；如果是产品就是..." 的顺序一致。</p>
+     *
+     * @return 更新的行数
+     */
+    int deriveStandardQuantity(Long submissionId, Long enterpriseId) {
+        String sql =
+                "UPDATE de_energy_flow f "
+                        + "LEFT JOIN bs_energy e "
+                        + "  ON e.name = f.energy_product "
+                        + " AND e.enterprise_id = f.enterprise_id "
+                        + " AND e.deleted = 0 "
+                        + "LEFT JOIN bs_product p "
+                        + "  ON p.name = f.energy_product "
+                        + " AND p.enterprise_id = f.enterprise_id "
+                        + " AND p.deleted = 0 "
+                        + "SET f.standard_quantity = CASE "
+                        + "  WHEN f.physical_quantity IS NULL THEN f.standard_quantity "
+                        + "  WHEN e.equivalent_value IS NOT NULL THEN f.physical_quantity * e.equivalent_value "
+                        + "  WHEN p.unit_price IS NOT NULL THEN f.physical_quantity * p.unit_price "
+                        + "  ELSE f.standard_quantity "
+                        + "END "
+                        + "WHERE f.submission_id = :submissionId "
+                        + "  AND f.enterprise_id = :enterpriseId "
+                        + "  AND f.deleted = 0 "
+                        + "  AND f.energy_product IS NOT NULL "
+                        + "  AND f.energy_product <> ''";
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("submissionId", submissionId)
+                .addValue("enterpriseId", enterpriseId);
+        return safeUpdate(sql, params);
     }
 
     /**
