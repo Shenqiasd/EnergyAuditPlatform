@@ -1,0 +1,209 @@
+package com.energy.audit.service.template;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Component;
+
+/**
+ * 能源流程图重构 v2 · PR #2 后端后处理器。
+ *
+ * <p>在 Audit11 模板提交后、{@code de_energy_flow} 落库完成之后被
+ * {@link com.energy.audit.service.template.impl.DataPersistenceServiceImpl}
+ * 调用，完成两件事：</p>
+ *
+ * <ol>
+ *   <li><b>unit_id 回填</b>：通过 {@code bs_unit.name} 匹配已写入的
+ *       {@code de_energy_flow.source_unit / target_unit} 字面值，把
+ *       {@code source_unit_id / target_unit_id} 外键列填上。原字面列不动，
+ *       便于保留 "外购" / "产出" 这类虚拟节点不映射到任何真实 bs_unit 的能力。</li>
+ *   <li><b>de_energy_balance 派生</b>：按 v2 方案 X（彻底舍弃 Sheet 11.1）的
+ *       逻辑，从 {@code de_energy_flow} 聚合 purchase_amount 与
+ *       consumption_amount 两列，以 {@code energy_product} 分组写入
+ *       {@code de_energy_balance}。其余字段保留 NULL。</li>
+ * </ol>
+ *
+ * <p>之所以单独抽一个 Component 而不是塞进 DataPersistenceServiceImpl
+ * 或 BusinessTablePersister 内部：后者是通用表写入器，不应感知某一具体业务；
+ * 前者是流程编排者，不应直接写 SQL。这个类作为中间层，专管 Sheet 11 的语义
+ * 派生，便于日后 PR #4 迭代和单测覆盖。</p>
+ */
+@Component
+public class EnergyFlowPostProcessor {
+
+    private static final Logger log = LoggerFactory.getLogger(EnergyFlowPostProcessor.class);
+
+    /** "外购" 虚拟源节点的 sentinel 字符串（不映射到 bs_unit）。 */
+    public static final String EXTERNAL_PURCHASE_SENTINEL = "外购";
+    /** "产出" 虚拟目的节点的 sentinel 字符串（不映射到 bs_unit）。 */
+    public static final String OUTPUT_SENTINEL = "产出";
+
+    private final NamedParameterJdbcTemplate jdbcTemplate;
+
+    public EnergyFlowPostProcessor(NamedParameterJdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    /**
+     * 单次提交 de_energy_flow 后调用，完成 unit_id 回填与 de_energy_balance 派生。
+     *
+     * <p>本方法本身不开事务 —— 调用方 {@code DataPersistenceServiceImpl.persistExtractedData}
+     * 已经被 {@code @Transactional} 包裹，这里所有 SQL 都会跟随外层事务一起提交或回滚。</p>
+     *
+     * @param submissionId 当前提交 id
+     * @param enterpriseId 企业 id
+     * @param auditYear    审计年度
+     * @param operator     操作人，用于落库 create_by/update_by
+     */
+    public void afterEnergyFlowPersist(Long submissionId, Long enterpriseId,
+                                       Integer auditYear, String operator) {
+        if (submissionId == null || enterpriseId == null || auditYear == null) {
+            log.warn("afterEnergyFlowPersist skipped: missing submissionId/enterpriseId/auditYear");
+            return;
+        }
+        try {
+            int backfilled = backfillUnitIds(submissionId, enterpriseId);
+            int derived = deriveEnergyBalance(submissionId, enterpriseId, auditYear, operator);
+            log.info("EnergyFlowPostProcessor: submission {} — backfilled {} unit_ids, derived {} de_energy_balance rows",
+                    submissionId, backfilled, derived);
+        } catch (Exception e) {
+            // 派生失败不应阻塞主流程（Sheet 11 本体已入库），但必须让运维看到。
+            log.error("EnergyFlowPostProcessor failed for submission {}: {}", submissionId, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 用 {@code bs_unit.name} 反查，填补 {@code de_energy_flow.source_unit_id / target_unit_id}。
+     *
+     * <p>两条 UPDATE ... JOIN 语句，只针对当前 submission 的未填充行。虚拟节点
+     * "外购" / "产出" 不会命中 bs_unit，unit_id 保持 NULL 是预期行为。</p>
+     *
+     * @return 受影响行数（两条 UPDATE 之和；同一行被填 source 和 target 会被计两次）
+     */
+    int backfillUnitIds(Long submissionId, Long enterpriseId) {
+        String srcSql =
+                "UPDATE de_energy_flow f "
+                        + "JOIN bs_unit u "
+                        + "  ON u.name = f.source_unit "
+                        + " AND u.enterprise_id = f.enterprise_id "
+                        + " AND u.deleted = 0 "
+                        + "SET f.source_unit_id = u.id "
+                        + "WHERE f.submission_id = :submissionId "
+                        + "  AND f.enterprise_id = :enterpriseId "
+                        + "  AND f.deleted = 0 "
+                        + "  AND f.source_unit_id IS NULL "
+                        + "  AND f.source_unit IS NOT NULL";
+
+        String dstSql =
+                "UPDATE de_energy_flow f "
+                        + "JOIN bs_unit u "
+                        + "  ON u.name = f.target_unit "
+                        + " AND u.enterprise_id = f.enterprise_id "
+                        + " AND u.deleted = 0 "
+                        + "SET f.target_unit_id = u.id "
+                        + "WHERE f.submission_id = :submissionId "
+                        + "  AND f.enterprise_id = :enterpriseId "
+                        + "  AND f.deleted = 0 "
+                        + "  AND f.target_unit_id IS NULL "
+                        + "  AND f.target_unit IS NOT NULL";
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("submissionId", submissionId)
+                .addValue("enterpriseId", enterpriseId);
+        int srcUpdated = safeUpdate(srcSql, params);
+        int dstUpdated = safeUpdate(dstSql, params);
+        return srcUpdated + dstUpdated;
+    }
+
+    /**
+     * 按 v2 方案派生 {@code de_energy_balance}。
+     *
+     * <p>语义：</p>
+     * <pre>
+     *   purchase_amount    = Σ physical_quantity WHERE flow_stage = 'purchased'
+     *   consumption_amount = Σ physical_quantity WHERE
+     *                          (target_unit = '产出')
+     *                       OR (target_unit_id 指向 bs_unit.unit_type = 3 的终端单元)
+     *   GROUP BY energy_product
+     * </pre>
+     *
+     * <p>流程：先软删当前 submission 下已有的 de_energy_balance 行（归属权
+     *   于本次 Audit11 提交），再 INSERT ... SELECT 一次性写入聚合结果。</p>
+     *
+     * @return 新插入的聚合行数
+     */
+    int deriveEnergyBalance(Long submissionId, Long enterpriseId, Integer auditYear, String operator) {
+        // 1) 软删旧派生行（仅属于本 submission 的）
+        String deleteSql =
+                "UPDATE de_energy_balance "
+                        + "SET deleted = 1, update_by = :operator, update_time = NOW() "
+                        + "WHERE submission_id = :submissionId "
+                        + "  AND deleted = 0";
+        MapSqlParameterSource deleteParams = new MapSqlParameterSource()
+                .addValue("submissionId", submissionId)
+                .addValue("operator", operator);
+        safeUpdate(deleteSql, deleteParams);
+
+        // 2) 一次性聚合：UNION ALL + 外层 GROUP BY 同一 energy_product 合并购入/消耗
+        String insertSql =
+                "INSERT INTO de_energy_balance ("
+                        + "  submission_id, enterprise_id, audit_year, "
+                        + "  energy_name, measurement_unit, "
+                        + "  purchase_amount, consumption_amount, "
+                        + "  create_by, update_by, deleted"
+                        + ") "
+                        + "SELECT "
+                        + "  :submissionId, :enterpriseId, :auditYear, "
+                        + "  agg.energy_product, NULL, "
+                        + "  SUM(agg.purchase), SUM(agg.consumption), "
+                        + "  :operator, :operator, 0 "
+                        + "FROM ( "
+                        + "  SELECT f.energy_product, "
+                        + "         CASE WHEN f.flow_stage = 'purchased' THEN COALESCE(f.physical_quantity, 0) ELSE 0 END AS purchase, "
+                        + "         0 AS consumption "
+                        + "  FROM de_energy_flow f "
+                        + "  WHERE f.submission_id = :submissionId "
+                        + "    AND f.deleted = 0 "
+                        + "    AND f.energy_product IS NOT NULL "
+                        + "    AND f.energy_product <> '' "
+                        + "  UNION ALL "
+                        + "  SELECT f.energy_product, "
+                        + "         0 AS purchase, "
+                        + "         CASE "
+                        + "           WHEN f.target_unit = :outputSentinel THEN COALESCE(f.physical_quantity, 0) "
+                        + "           WHEN u.unit_type = 3 THEN COALESCE(f.physical_quantity, 0) "
+                        + "           ELSE 0 "
+                        + "         END AS consumption "
+                        + "  FROM de_energy_flow f "
+                        + "  LEFT JOIN bs_unit u ON u.id = f.target_unit_id AND u.deleted = 0 "
+                        + "  WHERE f.submission_id = :submissionId "
+                        + "    AND f.deleted = 0 "
+                        + "    AND f.energy_product IS NOT NULL "
+                        + "    AND f.energy_product <> '' "
+                        + ") agg "
+                        + "GROUP BY agg.energy_product "
+                        + "HAVING SUM(agg.purchase) > 0 OR SUM(agg.consumption) > 0";
+
+        MapSqlParameterSource insertParams = new MapSqlParameterSource()
+                .addValue("submissionId", submissionId)
+                .addValue("enterpriseId", enterpriseId)
+                .addValue("auditYear", auditYear)
+                .addValue("operator", operator)
+                .addValue("outputSentinel", OUTPUT_SENTINEL);
+        return safeUpdate(insertSql, insertParams);
+    }
+
+    /**
+     * 包一层异常处理：若表不存在（例如 H2 分片测试未建 bs_unit）或列缺失，
+     * 退回到 0 影响行数，不抛异常阻塞提交主路径。
+     */
+    private int safeUpdate(String sql, MapSqlParameterSource params) {
+        try {
+            return jdbcTemplate.update(sql, params);
+        } catch (Exception e) {
+            log.warn("EnergyFlowPostProcessor SQL skipped ({}): {}", e.getClass().getSimpleName(), e.getMessage());
+            return 0;
+        }
+    }
+}

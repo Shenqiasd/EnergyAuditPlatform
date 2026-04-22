@@ -10,6 +10,7 @@ import com.energy.audit.model.entity.template.TplTagMapping;
 import com.energy.audit.service.enterprise.EnterpriseSettingService;
 import com.energy.audit.service.template.BusinessTablePersister;
 import com.energy.audit.service.template.DataPersistenceService;
+import com.energy.audit.service.template.EnergyFlowPostProcessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,17 +40,20 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
     private final BusinessTablePersister businessTablePersister;
     private final EnterpriseSettingService enterpriseSettingService;
     private final ObjectMapper objectMapper;
+    private final EnergyFlowPostProcessor energyFlowPostProcessor;
 
     public DataPersistenceServiceImpl(DeSubmissionFieldMapper fieldMapper,
                                        DeSubmissionTableMapper tableMapper,
                                        BusinessTablePersister businessTablePersister,
                                        EnterpriseSettingService enterpriseSettingService,
-                                       ObjectMapper objectMapper) {
+                                       ObjectMapper objectMapper,
+                                       EnergyFlowPostProcessor energyFlowPostProcessor) {
         this.fieldMapper = fieldMapper;
         this.tableMapper = tableMapper;
         this.businessTablePersister = businessTablePersister;
         this.enterpriseSettingService = enterpriseSettingService;
         this.objectMapper = objectMapper;
+        this.energyFlowPostProcessor = energyFlowPostProcessor;
     }
 
     @Override
@@ -173,6 +177,14 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
         if (!fallbackTableRows.isEmpty()) {
             tableMapper.batchInsert(fallbackTableRows);
             log.info("Persisted {} table rows to generic storage for submission {}", fallbackTableRows.size(), submissionId);
+        }
+
+        // v2 · PR #2: 如果本次提交有 Sheet 11 能源流程图数据落库到 de_energy_flow，
+        // 则立刻回填 unit_id 外键并从中派生 de_energy_balance，废弃原 Sheet 11.1 填报。
+        boolean touchedFlow = clearedBusinessTables.stream()
+                .anyMatch(t -> "de_energy_flow".equalsIgnoreCase(t));
+        if (touchedFlow) {
+            energyFlowPostProcessor.afterEnergyFlowPersist(submissionId, enterpriseId, auditYear, operator);
         }
     }
 
