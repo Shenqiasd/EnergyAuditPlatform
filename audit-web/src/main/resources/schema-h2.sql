@@ -1397,7 +1397,9 @@ CREATE TABLE IF NOT EXISTS ar_report (
 CREATE TABLE IF NOT EXISTS ar_report_template (
     id                     BIGINT        NOT NULL AUTO_INCREMENT,
     template_name          VARCHAR(128)  NOT NULL,
-    template_file_path     VARCHAR(512)  NOT NULL,
+    template_file_path     VARCHAR(512),
+    template_file_data     BLOB,
+    original_file_name     VARCHAR(255),
     version                INT           DEFAULT 1,
     status                 TINYINT       DEFAULT 0,
     create_by              VARCHAR(64),

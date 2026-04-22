@@ -17,6 +17,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -129,9 +130,10 @@ public class ReportServiceImpl implements ReportService {
         if (template == null) {
             throw new BusinessException("未找到可用的报告模板，请联系管理员上传模板");
         }
-        String templatePath = template.getTemplateFilePath();
-        if (templatePath == null || !Files.exists(Paths.get(templatePath))) {
-            throw new BusinessException("报告模板文件不存在: " + templatePath);
+        // Resolve template InputStream: prefer filesystem (fast), fallback to DB BLOB (survives container restarts)
+        InputStream templateStream = resolveTemplateStream(template);
+        if (templateStream == null) {
+            throw new BusinessException("报告模板文件不存在且数据库中无模板数据，请重新上传模板");
         }
 
         // 3. Create/update report record and COMMIT in a short transaction.
@@ -184,7 +186,7 @@ public class ReportServiceImpl implements ReportService {
             metadata.put("enterpriseName", enterpriseName);
 
             byte[] docxBytes;
-            try (InputStream templateIs = new FileInputStream(templatePath)) {
+            try (InputStream templateIs = templateStream) {
                 docxBytes = TemplateBasedReportBuilder.buildReport(
                     templateIs, submissionJson, flowChartImage, metadata);
             }
@@ -323,6 +325,7 @@ public class ReportServiceImpl implements ReportService {
         }
 
         try {
+            // Also write to filesystem as a local cache (may not survive container restart)
             Path dirPath = Paths.get(uploadDir, "templates").toAbsolutePath().normalize();
             Files.createDirectories(dirPath);
 
@@ -343,6 +346,8 @@ public class ReportServiceImpl implements ReportService {
             ArReportTemplate template = new ArReportTemplate();
             template.setTemplateName(templateName != null && !templateName.isEmpty() ? templateName : fileName);
             template.setTemplateFilePath(filePath.toString());
+            template.setTemplateFileData(fileBytes);  // Store in DB for persistence across deploys
+            template.setOriginalFileName(fileName);
             template.setVersion(maxVersion + 1);
             template.setStatus(0); // draft by default
             template.setCreateBy(username);
@@ -430,6 +435,35 @@ public class ReportServiceImpl implements ReportService {
             return null;
         }
         return reportTemplateMapper.selectById(templateId);
+    }
+
+    /**
+     * Resolve template as an InputStream.  Priority:
+     * 1. Filesystem path (fast, if file still exists — e.g. same container that uploaded it)
+     * 2. DB BLOB as ByteArrayInputStream (no temp file, no disk leak)
+     */
+    private InputStream resolveTemplateStream(ArReportTemplate template) {
+        // 1. Try filesystem first
+        String fsPath = template.getTemplateFilePath();
+        if (fsPath != null && Files.exists(Paths.get(fsPath))) {
+            try {
+                log.info("[ReportService] Loading template from filesystem: {}", fsPath);
+                return new FileInputStream(fsPath);
+            } catch (IOException e) {
+                log.warn("[ReportService] Filesystem path exists but failed to open: {}", fsPath, e);
+                // Fall through to BLOB
+            }
+        }
+
+        // 2. Fallback: stream directly from DB BLOB (no temp file needed)
+        byte[] data = template.getTemplateFileData();
+        if (data != null && data.length > 0) {
+            log.info("[ReportService] Loading template from DB BLOB ({} bytes)", data.length);
+            return new ByteArrayInputStream(data);
+        }
+
+        log.warn("[ReportService] Template id={} has no file on disk and no BLOB in DB", template.getId());
+        return null;
     }
 
     // ====== Phase 3: Report Review Workflow (auditor side) ======
