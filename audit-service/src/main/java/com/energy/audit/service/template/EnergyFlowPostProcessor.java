@@ -139,6 +139,15 @@ public class EnergyFlowPostProcessor {
      * <p>两条 UPDATE ... JOIN 语句，只针对当前 submission 的未填充行。虚拟节点
      * "外购" / "产出" 不会命中 bs_unit，unit_id 保持 NULL 是预期行为。</p>
      *
+     * <p><b>不走 {@link #safeUpdate}</b>：本步的 {@code target_unit_id} 是
+     * {@link #deriveFlowStage} 反查 {@code bs_unit.unit_type} 推导环节的唯一前置。
+     * 若此处静默失败（列缺失/表不存在等），target_unit_id 全部保持 NULL，
+     * deriveFlowStage 的 CASE 只能命中虚拟节点分支（外购→purchased / 产出→terminal），
+     * 其余所有真实单元流向的 flow_stage 保持为空，前端图会漏掉加工/分配/终端绝大多数节点；
+     * 同时下游 {@link #deriveEnergyBalance} 的聚合也会错，purchase_amount 全部派生为 0。
+     * 异常直接上抛给 {@link #afterEnergyFlowPersist} 的外层 try/catch，短路 derive，
+     * 宁可不派生也不产生错误数据（Devin Review PR #157 指出）。</p>
+     *
      * @return 受影响行数（两条 UPDATE 之和；同一行被填 source 和 target 会被计两次）
      */
     int backfillUnitIds(Long submissionId, Long enterpriseId) {
@@ -171,8 +180,9 @@ public class EnergyFlowPostProcessor {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("submissionId", submissionId)
                 .addValue("enterpriseId", enterpriseId);
-        int srcUpdated = safeUpdate(srcSql, params);
-        int dstUpdated = safeUpdate(dstSql, params);
+        // NOTE: intentionally NOT using safeUpdate — see javadoc.
+        int srcUpdated = jdbcTemplate.update(srcSql, params);
+        int dstUpdated = jdbcTemplate.update(dstSql, params);
         return srcUpdated + dstUpdated;
     }
 
@@ -374,10 +384,18 @@ public class EnergyFlowPostProcessor {
     }
 
     /**
-     * 包一层异常处理：若表不存在（例如 H2 分片测试未建 bs_unit）或列缺失，
-     * 退回到 0 影响行数，不抛异常阻塞提交主路径。仅用于 backfillUnitIds 这类
-     * 无相互依赖的 UPDATE —— 派生 de_energy_balance 的 delete/insert 对必须
-     * 走 {@link #nestedTxTemplate} 保证原子性。
+     * 包一层异常处理：若表不存在（例如 H2 分片测试未建 bs_energy / bs_product）或列缺失，
+     * 退回到 0 影响行数，不抛异常阻塞提交主路径。
+     *
+     * <p><b>仅限用于没有任何下游依赖、失败也不会污染其他派生数据的 UPDATE</b>。
+     * 当前仅 {@link #deriveStandardQuantity} 使用：该步失败只会导致
+     * {@code standard_quantity} 留空，下游 {@link #deriveEnergyBalance} 聚合用的
+     * 是 {@code physical_quantity}，不受影响。</p>
+     *
+     * <p><b>反例</b>：{@link #backfillUnitIds} 和 {@link #translateFlowStages} / {@link #deriveFlowStage}
+     * 不能走 safeUpdate —— 它们都是 {@link #deriveEnergyBalance} 的前置条件，
+     * 静默失败会让派生行写入错误数据。派生 de_energy_balance 的 delete/insert 对
+     * 必须走 {@link #nestedTxTemplate} 保证原子性。</p>
      */
     private int safeUpdate(String sql, MapSqlParameterSource params) {
         try {
