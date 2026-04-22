@@ -99,6 +99,12 @@ public class EnergyFlowPostProcessor {
      *
      * <p>已是英文值或空值的行不受影响（IN 匹配严格等于中文标签）。</p>
      *
+     * <p><b>不走 {@link #safeUpdate}</b>：本步失败会让下游 {@link #deriveEnergyBalance}
+     * 读到中文标签，聚合 {@code flow_stage = 'purchased'} 的 SQL 就全部落空，
+     * {@code purchase_amount} 会被错误地派生为 0。异常直接抛给
+     * {@link #afterEnergyFlowPersist} 顶层 try/catch —— 它会记录错误并短路 derive，
+     * 保证不会产生错误派生数据（老行保持不动，由下次成功的提交覆盖）。</p>
+     *
      * @return 标准化过的行数
      */
     int translateFlowStages(Long submissionId) {
@@ -115,7 +121,8 @@ public class EnergyFlowPostProcessor {
                         + "  AND deleted = 0 "
                         + "  AND flow_stage IN ('购入储存','加工转换','分配输送','终端使用')";
         MapSqlParameterSource params = new MapSqlParameterSource().addValue("submissionId", submissionId);
-        return safeUpdate(sql, params);
+        // NOTE: intentionally NOT using safeUpdate — see javadoc.
+        return jdbcTemplate.update(sql, params);
     }
 
     /**

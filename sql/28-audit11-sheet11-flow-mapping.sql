@@ -61,9 +61,9 @@ SELECT
     'migration-28',
     NOW(),
     0
-FROM tpl_template_version v
+FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
 WHERE v.deleted = 0
-  AND v.template_name LIKE '%能碳审计%'
+  AND tpl.template_name LIKE '%能碳审计%'
   AND NOT EXISTS (
       SELECT 1 FROM tpl_tag_mapping t
       WHERE t.template_version_id = v.id
@@ -96,9 +96,9 @@ SELECT
     'migration-28',
     NOW(),
     0
-FROM tpl_template_version v
+FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
 WHERE v.deleted = 0
-  AND v.template_name LIKE '%能碳审计%'
+  AND tpl.template_name LIKE '%能碳审计%'
   AND NOT EXISTS (
       SELECT 1 FROM tpl_tag_mapping t
       WHERE t.template_version_id = v.id
@@ -131,9 +131,9 @@ SELECT
     'migration-28',
     NOW(),
     0
-FROM tpl_template_version v
+FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
 WHERE v.deleted = 0
-  AND v.template_name LIKE '%能碳审计%'
+  AND tpl.template_name LIKE '%能碳审计%'
   AND NOT EXISTS (
       SELECT 1 FROM tpl_tag_mapping t
       WHERE t.template_version_id = v.id
@@ -166,9 +166,9 @@ SELECT
     'migration-28',
     NOW(),
     0
-FROM tpl_template_version v
+FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
 WHERE v.deleted = 0
-  AND v.template_name LIKE '%能碳审计%'
+  AND tpl.template_name LIKE '%能碳审计%'
   AND NOT EXISTS (
       SELECT 1 FROM tpl_tag_mapping t
       WHERE t.template_version_id = v.id
@@ -204,9 +204,9 @@ SELECT
     'migration-28',
     NOW(),
     0
-FROM tpl_template_version v
+FROM tpl_template_version v JOIN tpl_template tpl ON tpl.id = v.template_id AND tpl.deleted = 0
 WHERE v.deleted = 0
-  AND v.template_name LIKE '%能碳审计%'
+  AND tpl.template_name LIKE '%能碳审计%'
   AND NOT EXISTS (
       SELECT 1 FROM tpl_tag_mapping t
       WHERE t.template_version_id = v.id
