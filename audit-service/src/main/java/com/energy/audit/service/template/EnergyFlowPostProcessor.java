@@ -5,6 +5,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 能源流程图重构 v2 · PR #2 后端后处理器。
@@ -40,9 +43,16 @@ public class EnergyFlowPostProcessor {
     public static final String OUTPUT_SENTINEL = "产出";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final TransactionTemplate nestedTxTemplate;
 
-    public EnergyFlowPostProcessor(NamedParameterJdbcTemplate jdbcTemplate) {
+    public EnergyFlowPostProcessor(NamedParameterJdbcTemplate jdbcTemplate,
+                                   PlatformTransactionManager transactionManager) {
         this.jdbcTemplate = jdbcTemplate;
+        // NESTED 传播 → JDBC Savepoint。用于把 de_energy_balance 的
+        // "软删旧行 + 插入新聚合" 包成原子子事务：失败时只回滚这两步，不影响
+        // 外层 de_energy_flow 的入库提交。
+        this.nestedTxTemplate = new TransactionTemplate(transactionManager);
+        this.nestedTxTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
     }
 
     /**
@@ -143,7 +153,6 @@ public class EnergyFlowPostProcessor {
         MapSqlParameterSource deleteParams = new MapSqlParameterSource()
                 .addValue("submissionId", submissionId)
                 .addValue("operator", operator);
-        safeUpdate(deleteSql, deleteParams);
 
         // 2) 一次性聚合：UNION ALL + 外层 GROUP BY 同一 energy_product 合并购入/消耗
         String insertSql =
@@ -191,12 +200,30 @@ public class EnergyFlowPostProcessor {
                 .addValue("auditYear", auditYear)
                 .addValue("operator", operator)
                 .addValue("outputSentinel", OUTPUT_SENTINEL);
-        return safeUpdate(insertSql, insertParams);
+
+        // 关键：delete + insert 必须在同一个 savepoint 子事务内执行。
+        // 如果 insert 失败（比如列缺失、类型不匹配），savepoint 会把 delete
+        // 一起回滚，老的 de_energy_balance 行不会丢失；外层 de_energy_flow 入库
+        // 也不会被波及。过去这里用 safeUpdate 各吞异常，delete 成功而 insert 失败
+        // 会造成派生数据永久丢失 (Devin Review 指出)。
+        try {
+            Integer inserted = nestedTxTemplate.execute(status -> {
+                jdbcTemplate.update(deleteSql, deleteParams);
+                return jdbcTemplate.update(insertSql, insertParams);
+            });
+            return inserted == null ? 0 : inserted;
+        } catch (Exception e) {
+            // savepoint 已回滚 → 老行仍在 deleted=0 状态，新行未写入；对主流程无影响。
+            log.warn("deriveEnergyBalance rolled back ({}): {}", e.getClass().getSimpleName(), e.getMessage());
+            return 0;
+        }
     }
 
     /**
      * 包一层异常处理：若表不存在（例如 H2 分片测试未建 bs_unit）或列缺失，
-     * 退回到 0 影响行数，不抛异常阻塞提交主路径。
+     * 退回到 0 影响行数，不抛异常阻塞提交主路径。仅用于 backfillUnitIds 这类
+     * 无相互依赖的 UPDATE —— 派生 de_energy_balance 的 delete/insert 对必须
+     * 走 {@link #nestedTxTemplate} 保证原子性。
      */
     private int safeUpdate(String sql, MapSqlParameterSource params) {
         try {
