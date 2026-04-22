@@ -131,10 +131,14 @@ const colLeft = computed<number[]>(() => {
 
 const colCenter = computed<number[]>(() => colLeft.value.map((x, i) => x + COL_W[i] / 2))
 
-const channelX = computed<number[]>(() => {
-  // channel between column i and i+1 (3 channels total)
-  return [0, 1, 2].map(i => colLeft.value[i] + COL_W[i] + COL_GAP / 2)
-})
+// channelX[i] = x-position of the vertical routing channel immediately to the
+// right of column i (0-based). We have 4 columns → 4 channels; the last one
+// (index 3) is a virtual channel to the right of column 4, used by same-layer
+// edges (e.g. 终端使用 → 产出) that would otherwise overflow the 3-channel
+// array and produce NaN SVG paths.
+const channelX = computed<number[]>(() =>
+  [0, 1, 2, 3].map(i => colLeft.value[i] + COL_W[i] + (i < 3 ? COL_GAP / 2 : CANVAS_PAD_X / 2))
+)
 
 // ------------------------------------------------------------
 // Layering logic — decides which column a unit name belongs to.
@@ -316,11 +320,14 @@ function buildDiagram(flows: EnergyFlowItem[]): Built {
 
   // Channel slot allocation — multiple edges sharing the same column gap get different X offsets.
   const channelBuckets: Map<number, typeof aggList> = new Map()
+  const maxChIdxAlloc = 3 // channelX length - 1
   for (const e of aggList) {
     const span = e.dst.layer - e.src.layer
-    if (span <= 0) continue
-    // We place the vertical segment in the channel immediately after the source column.
-    const cIdx = e.src.layer - 1
+    let cIdx: number
+    if (span >= 2) cIdx = e.dst.layer - 2
+    else if (span === 1) cIdx = e.src.layer - 1
+    else cIdx = Math.min(Math.max(e.src.layer - 1, e.dst.layer - 1), maxChIdxAlloc)
+    cIdx = Math.min(Math.max(cIdx, 0), maxChIdxAlloc)
     const arr = channelBuckets.get(cIdx) ?? []
     arr.push(e)
     channelBuckets.set(cIdx, arr)
@@ -348,12 +355,23 @@ function buildDiagram(flows: EnergyFlowItem[]): Built {
     const ty = portY(e.dst, inIdx, ins.length, 'left')
     const sx = nodeRightX(e.src)
     const tx = nodeLeftX(e.dst)
-    // Vertical segment x = channel after source column + offset.
-    const baseCh = channelX.value[e.src.layer - 1]
     const off = channelOffsetMap.get(edgeKey(e.src.id, e.dst.id, e.energyProduct)) ?? 0
-    // If edge spans multiple columns, push channel further right (use the channel just before dst).
     const span = e.dst.layer - e.src.layer
-    const midX = span >= 2 ? channelX.value[e.dst.layer - 2] + off : baseCh + off
+    // Pick the vertical routing channel safely for all spans (including
+    // same-layer and backward edges). channelX has 4 slots (one after each
+    // column); we clamp the index so layer-4 → layer-4 edges use the virtual
+    // right-of-col-4 channel instead of producing NaN.
+    const maxIdx = channelX.value.length - 1
+    let chIdx: number
+    if (span >= 2) {
+      chIdx = e.dst.layer - 2                    // forward long-hop: channel just before dst column
+    } else if (span === 1) {
+      chIdx = e.src.layer - 1                    // forward adjacent: channel right after src column
+    } else {
+      chIdx = Math.min(Math.max(e.src.layer - 1, e.dst.layer - 1), maxIdx) // same-col or backward
+    }
+    chIdx = Math.min(Math.max(chIdx, 0), maxIdx)
+    const midX = channelX.value[chIdx] + off
 
     // Z-shape polyline: (sx,sy) → (midX,sy) → (midX,ty) → (tx,ty)
     const path = `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`
