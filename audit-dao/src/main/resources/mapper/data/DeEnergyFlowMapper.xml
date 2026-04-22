@@ -10,7 +10,9 @@
         <result column="flow_stage" property="flowStage"/>
         <result column="seq_no" property="seqNo"/>
         <result column="source_unit" property="sourceUnit"/>
+        <result column="source_unit_id" property="sourceUnitId"/>
         <result column="target_unit" property="targetUnit"/>
+        <result column="target_unit_id" property="targetUnitId"/>
         <result column="energy_product" property="energyProduct"/>
         <result column="physical_quantity" property="physicalQuantity"/>
         <result column="standard_quantity" property="standardQuantity"/>
@@ -24,7 +26,8 @@
 
     <sql id="Base_Column_List">
         id, submission_id, enterprise_id, audit_year, flow_stage, seq_no,
-        source_unit, target_unit, energy_product, physical_quantity, standard_quantity,
+        source_unit, source_unit_id, target_unit, target_unit_id,
+        energy_product, physical_quantity, standard_quantity,
         remark, create_by, create_time, update_by, update_time, deleted
     </sql>
 
@@ -40,11 +43,13 @@
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO de_energy_flow (
             submission_id, enterprise_id, audit_year, flow_stage, seq_no,
-            source_unit, target_unit, energy_product, physical_quantity, standard_quantity,
+            source_unit, source_unit_id, target_unit, target_unit_id,
+            energy_product, physical_quantity, standard_quantity,
             remark, create_by, update_by
         ) VALUES (
             #{submissionId}, #{enterpriseId}, #{auditYear}, #{flowStage}, #{seqNo},
-            #{sourceUnit}, #{targetUnit}, #{energyProduct}, #{physicalQuantity}, #{standardQuantity},
+            #{sourceUnit}, #{sourceUnitId}, #{targetUnit}, #{targetUnitId},
+            #{energyProduct}, #{physicalQuantity}, #{standardQuantity},
             #{remark}, #{createBy}, #{updateBy}
         )
     </insert>

@@ -20,7 +20,9 @@ public class DeEnergyFlow extends BaseEntity {
     private String flowStage;
     private Integer seqNo;
     private String sourceUnit;
+    private Long sourceUnitId;
     private String targetUnit;
+    private Long targetUnitId;
     private String energyProduct;
     private BigDecimal physicalQuantity;
     private BigDecimal standardQuantity;

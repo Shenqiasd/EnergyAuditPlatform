@@ -7,7 +7,11 @@ export interface EnergyFlowItem {
   flowStage: string
   seqNo?: number
   sourceUnit: string
+  /** v2 PR #2: bs_unit.id 外键（可空；虚拟节点"外购"/"产出"无对应记录时保持 null）。 */
+  sourceUnitId?: number | null
   targetUnit: string
+  /** v2 PR #2: bs_unit.id 外键（可空）。 */
+  targetUnitId?: number | null
   energyProduct: string
   physicalQuantity: number
   standardQuantity: number

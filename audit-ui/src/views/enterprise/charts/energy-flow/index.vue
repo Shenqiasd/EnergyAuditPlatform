@@ -1,42 +1,45 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import FlowEditor from '@/components/FlowEditor/index.vue'
-import type { EnergyBalanceItem } from '@/components/FlowEditor/index.vue'
+import EnergyFlowDiagram4Stage from '@/components/EnergyFlowDiagram4Stage/index.vue'
 import { getEnergyFlowList } from '@/api/energyFlow'
 import type { EnergyFlowItem } from '@/api/energyFlow'
-import { queryExtractedTable } from '@/api/extracted-data'
+import { getUnitList, getEnergyList } from '@/api/setting'
+import type { BsUnit, BsEnergy } from '@/api/setting'
 
 const currentYear = new Date().getFullYear()
 const auditYear = ref(currentYear)
 const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i)
 const flowData = ref<EnergyFlowItem[]>([])
-const balanceData = ref<EnergyBalanceItem[]>([])
+const units = ref<BsUnit[]>([])
+const energies = ref<BsEnergy[]>([])
 const loading = ref(false)
-const flowEditorRef = ref<InstanceType<typeof FlowEditor>>()
+const diagramRef = ref<InstanceType<typeof EnergyFlowDiagram4Stage>>()
 
 async function loadData() {
   loading.value = true
   try {
-    const [flows, balanceResult] = await Promise.all([
+    const [flows, unitRes, energyRes] = await Promise.all([
       getEnergyFlowList(auditYear.value).catch(() => [] as EnergyFlowItem[]),
-      queryExtractedTable('de_energy_balance', { auditYear: auditYear.value, pageSize: 100 })
-        .catch(() => ({ rows: [] as Record<string, unknown>[], total: 0 })),
+      getUnitList({ pageSize: 500 }).catch(() => ({ rows: [] as BsUnit[], total: 0 })),
+      getEnergyList({ pageSize: 500 }).catch(() => ({ rows: [] as BsEnergy[], total: 0 })),
     ])
     flowData.value = flows
-    balanceData.value = (balanceResult.rows || []) as unknown as EnergyBalanceItem[]
+    units.value = unitRes.rows || []
+    energies.value = energyRes.rows || []
   } catch {
     flowData.value = []
-    balanceData.value = []
+    units.value = []
+    energies.value = []
   } finally {
     loading.value = false
   }
 }
 
 async function handleExportPng() {
-  if (!flowEditorRef.value) return
+  if (!diagramRef.value) return
   try {
-    const dataUri = await flowEditorRef.value.exportPng()
+    const dataUri = await diagramRef.value.exportPng()
     if (!dataUri) {
       ElMessage.warning('导出失败，图表为空')
       return
@@ -52,7 +55,7 @@ async function handleExportPng() {
 }
 
 function handleFitView() {
-  flowEditorRef.value?.fitView()
+  diagramRef.value?.fitView()
 }
 
 onMounted(() => {
@@ -63,7 +66,7 @@ onMounted(() => {
 <template>
   <div class="energy-flow-page">
     <div class="page-header">
-      <h2>能源流向图 (C6)</h2>
+      <h2>能源流程图 (C6)</h2>
       <div class="header-actions">
         <el-select v-model="auditYear" placeholder="审计年度" style="width: 120px" @change="loadData">
           <el-option v-for="y in yearOptions" :key="y" :label="y + '年'" :value="y" />
@@ -74,7 +77,12 @@ onMounted(() => {
       </div>
     </div>
     <div class="flow-wrapper" v-loading="loading">
-      <FlowEditor ref="flowEditorRef" :flow-data="flowData" :balance-data="balanceData" />
+      <EnergyFlowDiagram4Stage
+        ref="diagramRef"
+        :flows="flowData"
+        :units="units"
+        :energies="energies"
+      />
     </div>
   </div>
 </template>
@@ -109,5 +117,7 @@ onMounted(() => {
 .flow-wrapper {
   flex: 1;
   min-height: 0;
+  border: 1px solid #e6e6e6;
+  border-radius: 4px;
 }
 </style>

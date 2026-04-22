@@ -437,6 +437,12 @@ interface ConfigPrefillColDef {
    *  Example: { "masterCol": "A", "lookupField": "name" } */
   linkedTo?: { masterCol: string; lookupField: string }
   extraSources?: Array<{ table: string; field: string; filter?: Record<string, unknown> }>
+  /** Synthetic string values to inject into the dropdown list (e.g. "外购" / "产出" virtual nodes
+   *  in Sheet 11 能源流程图). These are NOT records in any table — they are literal sentinels
+   *  that the downstream business logic recognizes. See EnergyFlowPostProcessor. */
+  extraValues?: string[]
+  /** Where to inject extraValues relative to the table-sourced values. Default "prepend". */
+  extraPosition?: 'prepend' | 'append'
 }
 
 /**
@@ -613,6 +619,21 @@ function applyOneConfigPrefill(
           const val = rec[src.field] != null ? String(rec[src.field]) : ''
           if (val !== '' && !seen.has(val)) { seen.add(val); values.push(val) }
         }
+      }
+    }
+    // Inject synthetic sentinel values (e.g. "外购" / "产出" in Sheet 11 能源流程图).
+    // These do not exist in any table — they are literal strings the frontend diagram
+    // and EnergyFlowPostProcessor recognize as virtual source / sink nodes.
+    if (colDef.extraValues?.length) {
+      const position = colDef.extraPosition ?? 'prepend'
+      const toAdd: string[] = []
+      for (const raw of colDef.extraValues) {
+        const val = raw != null ? String(raw) : ''
+        if (val !== '' && !seen.has(val)) { seen.add(val); toAdd.push(val) }
+      }
+      if (toAdd.length) {
+        if (position === 'append') values.push(...toAdd)
+        else values.unshift(...toAdd)
       }
     }
     if (values.length > 0) {

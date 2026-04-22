@@ -51,6 +51,7 @@ declare module 'vue' {
     ElTimelineItem: typeof import('element-plus/es')['ElTimelineItem']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElUpload: typeof import('element-plus/es')['ElUpload']
+    EnergyFlowDiagram4Stage: typeof import('./components/EnergyFlowDiagram4Stage/index.vue')['default']
     FlowEditor: typeof import('./components/FlowEditor/index.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
