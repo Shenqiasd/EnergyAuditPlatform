@@ -35,32 +35,81 @@ public class SpreadJSJsonParser {
                 return List.of();
             }
 
-            // Try exact match first, then prefix match (startsWith) to avoid false positives
-            // e.g., "1.企业概况" should NOT match "11.企业概况详细"
+            // 1) Exact-name match (cheap, exact path lookup)
             JsonNode sheetNode = sheets.path(sheetName);
-            if (sheetNode.isMissingNode()) {
-                // Prefix match: find sheet whose name starts with the search string, or vice versa
-                Iterator<Map.Entry<String, JsonNode>> fields = sheets.fields();
-                while (fields.hasNext()) {
-                    Map.Entry<String, JsonNode> entry = fields.next();
-                    if (entry.getKey().startsWith(sheetName) || sheetName.startsWith(entry.getKey())) {
-                        sheetNode = entry.getValue();
-                        log.info("[SpreadJSParser] Prefix matched sheet '{}' for query '{}'", entry.getKey(), sheetName);
-                        break;
+            if (!sheetNode.isMissingNode()) {
+                return parseSheetNode(sheetNode);
+            }
+
+            // 2) Normalized prefix match. The live SpreadJS template sometimes has "15,温室..."
+            //    (Chinese comma) while the report builder configures "15.温室...". Treat all of
+            //    ,，。 as equivalent to '.', strip quotes/brackets/whitespace, then compare.
+            //    Using prefix-match in BOTH directions lets a short config value like "21."
+            //    match a full sheet name like "21.“十五五”期间节能目标".
+            String target = normalizeSheetName(sheetName);
+            if (target.isEmpty()) {
+                log.warn("[SpreadJSParser] Empty sheet name after normalization: '{}'", sheetName);
+                return List.of();
+            }
+
+            JsonNode bestMatch = null;
+            String bestMatchKey = null;
+            Iterator<Map.Entry<String, JsonNode>> fields = sheets.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                String candidate = normalizeSheetName(entry.getKey());
+                if (candidate.equals(target)
+                        || candidate.startsWith(target)
+                        || target.startsWith(candidate)) {
+                    // Prefer the one whose normalized form is closest in length to the target
+                    if (bestMatch == null
+                            || Math.abs(candidate.length() - target.length())
+                               < Math.abs(normalizeSheetName(bestMatchKey).length() - target.length())) {
+                        bestMatch = entry.getValue();
+                        bestMatchKey = entry.getKey();
                     }
                 }
             }
 
-            if (sheetNode.isMissingNode()) {
-                log.warn("[SpreadJSParser] Sheet '{}' not found in submission_json", sheetName);
-                return List.of();
+            if (bestMatch != null) {
+                log.info("[SpreadJSParser] Normalized match: '{}' -> sheet '{}'", sheetName, bestMatchKey);
+                return parseSheetNode(bestMatch);
             }
 
-            return parseSheetNode(sheetNode);
+            log.warn("[SpreadJSParser] Sheet '{}' not found in submission_json (normalized='{}')",
+                    sheetName, target);
+            return List.of();
         } catch (Exception e) {
             log.error("[SpreadJSParser] Failed to parse submission_json for sheet '{}'", sheetName, e);
             return List.of();
         }
+    }
+
+    /**
+     * Normalize a sheet name so "15.温室气体", "15,温室气体排放汇总", and
+     * "15、温室气体" all collapse to a common prefix form. Public for unit testing.
+     */
+    public static String normalizeSheetName(String name) {
+        if (name == null) return "";
+        StringBuilder sb = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            // Unify separators that commonly drift: ,，、。 → .
+            if (c == '，' || c == ',' || c == '、' || c == '。') {
+                sb.append('.');
+                continue;
+            }
+            // Strip quotes/brackets/whitespace that don't carry semantic meaning
+            if (c == '“' || c == '”' || c == '"' || c == '\''
+                    || c == '‘' || c == '’'
+                    || c == '（' || c == '）' || c == '(' || c == ')'
+                    || c == '【' || c == '】' || c == '[' || c == ']'
+                    || Character.isWhitespace(c)) {
+                continue;
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     /**

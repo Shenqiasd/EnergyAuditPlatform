@@ -16,29 +16,34 @@ import java.util.Base64;
  * Template-based report builder that reads a Word (.docx) template with batch annotations (批注),
  * finds each annotation position, and inserts SpreadJS sheet data as Word tables or images.
  *
- * Annotation mapping (from the 0417.doc template):
+ * Sheet name matching is normalized: comma/fullwidth-dot/quotes/whitespace are treated as
+ * equivalent, so "15,温室气体..." in the live SpreadJS template still matches "15.温室气体" here.
+ *
+ * Annotation mapping (aligned with the current on-line SpreadJS 2026-04 template):
  *   ID 0: 报告年份 (text replacement)
  *   ID 1: 企业唯一编号 (text replacement)
  *   ID 2: 企业名称 (text replacement)
- *   ID 3: 表1 → Sheet "1.企业概况"
+ *   ID 3: 表1  → Sheet "1.企业概况"
  *   ID 4: 表13 → Sheet "13.企业产品能源成本表"
- *   ID 5: 表15的企业碳排放汇总表 → Sheet "15.温室气体排放排放汇总"
+ *   ID 5: 表15 → Sheet "15.温室气体排放"
  *   ID 6: 表12 → Sheet "12.单位产品能耗数据"
- *   ID 7: 表21 → Sheet "21.十五五期间节能目标"
- *   ID 8: 表2 → Sheet "2.主要技术指标"
- *   ID 9: 表8 → Sheet "8.重点用能设备能效对标"
+ *   ID 7: 表21 → Sheet "21."（“十五五”期间节能目标）
+ *   ID 8: 表2  → Sheet "2.主要技术指标"
+ *   ID 9: 表7  → Sheet "7.重点用能设备能效对标"  (live template renumbered from 8 → 7)
  *   ID 10: 能源流向图 → Image insert (AntV X6 screenshot)
- *   ID 11: 表4表5 → Sheet "4.能源计量器具汇总" + Sheet "5.能源计量器具配备率"
- *   ID 12: 表15逐一输出 → Sheet "15.温室气体排放排放汇总" (detailed rows)
- *   ID 13: 平衡表 → Sheet "11.1 能源购入、消费、存储"
- *   ID 14: 表7 → Sheet "7.能源管理制度"
- *   ID 15: 表10 → Sheet "10.淘汰产品、设备和装置等目录"
- *   ID 16: 表13 → Sheet "13.企业产品能源成本表" (duplicate)
- *   ID 17: 表14 → Sheet "14.节能量计算数据"
- *   ID 18: 表9 → Sheet "9.重点设备测试数据"
- *   ID 19: 表16 → Sheet "16.节能潜力明细"
- *   ID 20: 表18 → Sheet "18.能源管理改进建议"
- *   ID 21: 表18 → Sheet "19.节能技术改造建议汇总" (annotation text says 表18 but maps to table 19)
+ *   ID 11: 表4+表5 → Sheet "4.能源计量器具汇总" + Sheet "5.能源计量器具配备率"
+ *   ID 12: 表15逐一输出 → Sheet "15.温室气体排放"
+ *   ID 13: 平衡表 → Sheet "11.1"（能源购入、消费、存储）
+ *   ID 14: 表6 → Sheet "6.能源管理制度"  (live template renumbered from 7 → 6)
+ *   ID 15: 表10 → Sheet "10.淘汰"
+ *   ID 16: 表13 → Sheet "13.企业产品能源成本表" (duplicate of ID 4; currently orphaned in the
+ *          template — the batch annotation exists in comments.xml but has no body anchor, so it
+ *          is silently skipped here. Document sanitize step in Word + re-upload fixes this.)
+ *   ID 17: 表14 → Sheet "14.节能量计算"
+ *   ID 18: 表9  → Sheet "9.重点设备测试数据"
+ *   ID 19: 表16 → Sheet "16.节能潜力"
+ *   ID 20: 表17 → Sheet "17.能源管理改进建议"  (live template renumbered from 18 → 17)
+ *   ID 21: 表18 → Sheet "18.节能技改建议"       (live template renumbered from 19 → 18)
  */
 public class TemplateBasedReportBuilder {
 
@@ -50,26 +55,29 @@ public class TemplateBasedReportBuilder {
         // Text replacements (handled specially)
         // ID 0 → year, ID 1 → enterprise code, ID 2 → enterprise name
 
-        // Table inserts: annotation ID → SpreadJS sheet name (partial match)
+        // Table inserts: annotation ID → SpreadJS sheet name prefix.
+        // The values below are matched against submission sheet names after normalization
+        // (see SpreadJSJsonParser#extractSheetData), so comma/dot/quote/whitespace differences
+        // do not matter — only the leading "<number>.<topic>" prefix does.
         ANNOTATION_SHEET_MAP.put(3, "1.企业概况");
         ANNOTATION_SHEET_MAP.put(4, "13.企业产品能源成本表");
         ANNOTATION_SHEET_MAP.put(5, "15.温室气体排放");
         ANNOTATION_SHEET_MAP.put(6, "12.单位产品能耗数据");
-        ANNOTATION_SHEET_MAP.put(7, "21.");  // 十五五期间节能目标
+        ANNOTATION_SHEET_MAP.put(7, "21.");                   // 十五五期间节能目标
         ANNOTATION_SHEET_MAP.put(8, "2.主要技术指标");
-        ANNOTATION_SHEET_MAP.put(9, "8.重点用能设备能效对标");
+        ANNOTATION_SHEET_MAP.put(9, "7.重点用能设备能效对标");  // was 8 in the original 0417 template
         // ID 10 = energy flow diagram (image)
-        ANNOTATION_SHEET_MAP.put(11, "4.能源计量器具汇总");  // + 表5
-        ANNOTATION_SHEET_MAP.put(12, "15.温室气体排放");      // detailed
-        ANNOTATION_SHEET_MAP.put(13, "11.1");                 // 能源购入、消费、存储
-        ANNOTATION_SHEET_MAP.put(14, "7.能源管理制度");
-        ANNOTATION_SHEET_MAP.put(15, "10.淘汰");              // 淘汰产品、设备和装置等目录
-        ANNOTATION_SHEET_MAP.put(16, "13.企业产品能源成本表"); // duplicate of ID 4
+        ANNOTATION_SHEET_MAP.put(11, "4.能源计量器具汇总");    // + 表5 (see ANNOTATION_11_EXTRA_SHEET)
+        ANNOTATION_SHEET_MAP.put(12, "15.温室气体排放");
+        ANNOTATION_SHEET_MAP.put(13, "11.1");                   // 能源购入、消费、存储
+        ANNOTATION_SHEET_MAP.put(14, "6.能源管理制度");         // was 7 in the original 0417 template
+        ANNOTATION_SHEET_MAP.put(15, "10.淘汰");
+        ANNOTATION_SHEET_MAP.put(16, "13.企业产品能源成本表");  // duplicate of ID 4, often orphaned
         ANNOTATION_SHEET_MAP.put(17, "14.节能量计算");
         ANNOTATION_SHEET_MAP.put(18, "9.重点设备测试数据");
         ANNOTATION_SHEET_MAP.put(19, "16.节能潜力");
-        ANNOTATION_SHEET_MAP.put(20, "18.能源管理改进建议");
-        ANNOTATION_SHEET_MAP.put(21, "19.节能技术改造建议");
+        ANNOTATION_SHEET_MAP.put(20, "17.能源管理改进建议");    // was 18 in the original 0417 template
+        ANNOTATION_SHEET_MAP.put(21, "18.节能技改建议");        // was 19 in the original 0417 template
     }
 
     /** Additional sheet for annotation 11 (表4表5 → 2 tables) */
@@ -116,21 +124,44 @@ public class TemplateBasedReportBuilder {
 
             // Step 1: Find all comment anchor positions in the document body
             Map<Integer, Integer> commentPositions = findCommentPositions(doc);
-            log.info("[ReportBuilder] Found {} comment positions in template", commentPositions.size());
+            int expectedTables = 0;
+            for (Integer id : commentPositions.keySet()) {
+                if (id == null) continue;
+                if (id == 11) expectedTables += 2;            // annotation 11 inserts two tables
+                else if (id >= 3 && id <= 21 && id != 10) expectedTables += 1;
+            }
+            boolean expectImage = commentPositions.containsKey(10) && flowChartImage != null
+                    && flowChartImage.length > 0;
+            log.info("[ReportBuilder] Found {} comment anchor(s); expected inserts: {} table(s), {} image(s)",
+                    commentPositions.size(), expectedTables, expectImage ? 1 : 0);
 
-            // Step 2: Process annotations in reverse body-index order (to avoid position shifting)
-            // Sort by body index (not comment ID) because comment IDs don't follow document order
+            // Step 2: Process annotations in reverse body-index order (to avoid position shifting).
+            // Sort by body index (not comment ID) because comment IDs don't follow document order.
             List<Map.Entry<Integer, Integer>> sortedEntries = new ArrayList<>(commentPositions.entrySet());
             sortedEntries.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
 
+            int[] counters = new int[] {0, 0, 0, 0}; // tablesInserted, imagesInserted, textsReplaced, failures
             for (var entry : sortedEntries) {
                 int annotationId = entry.getKey();
                 int bodyIndex = entry.getValue();
                 try {
-                    processAnnotation(doc, annotationId, bodyIndex, submissionJson, flowChartImage, metadata);
+                    processAnnotation(doc, annotationId, bodyIndex, submissionJson, flowChartImage,
+                            metadata, counters);
                 } catch (Exception e) {
-                    log.warn("[ReportBuilder] Failed to process annotation ID={}: {}", annotationId, e.getMessage());
+                    counters[3]++;
+                    log.warn("[ReportBuilder] Failed to process annotation ID={}: {}", annotationId, e.getMessage(), e);
                 }
+            }
+
+            log.info("[ReportBuilder] Done: tables inserted={}/{}, images inserted={}/{}, texts replaced={}, failures={}",
+                    counters[0], expectedTables,
+                    counters[1], expectImage ? 1 : 0,
+                    counters[2], counters[3]);
+
+            if (expectedTables > 0 && counters[0] == 0) {
+                log.warn("[ReportBuilder] No tables were inserted despite {} annotation anchor(s). " +
+                        "Most likely cause: ANNOTATION_SHEET_MAP is out of sync with the current SpreadJS template, " +
+                        "or sheet names in the submission could not be matched.", expectedTables);
             }
 
             // Step 3: Remove all comments from the document
@@ -195,30 +226,41 @@ public class TemplateBasedReportBuilder {
 
     /**
      * Process a single annotation: insert table, text, or image.
+     * counters = [tablesInserted, imagesInserted, textsReplaced, failures]
      */
     private static void processAnnotation(XWPFDocument doc, int annotationId, int bodyIndex,
                                            String submissionJson, byte[] flowChartImage,
-                                           Map<String, String> metadata) throws Exception {
+                                           Map<String, String> metadata, int[] counters) throws Exception {
         switch (annotationId) {
-            case 0 -> replaceAnnotatedText(doc, bodyIndex, metadata.getOrDefault("year", "202X"));
-            case 1 -> replaceAnnotatedText(doc, bodyIndex, metadata.getOrDefault("enterpriseCode", ""));
-            case 2 -> replaceAnnotatedText(doc, bodyIndex, metadata.getOrDefault("enterpriseName", ""));
+            case 0 -> {
+                if (replaceAnnotatedText(doc, bodyIndex, metadata.getOrDefault("year", "202X"))) counters[2]++;
+            }
+            case 1 -> {
+                if (replaceAnnotatedText(doc, bodyIndex, metadata.getOrDefault("enterpriseCode", ""))) counters[2]++;
+            }
+            case 2 -> {
+                if (replaceAnnotatedText(doc, bodyIndex, metadata.getOrDefault("enterpriseName", ""))) counters[2]++;
+            }
             case 10 -> {
                 if (flowChartImage != null && flowChartImage.length > 0) {
-                    insertImageAfter(doc, bodyIndex, flowChartImage);
+                    if (insertImageAfter(doc, bodyIndex, flowChartImage)) counters[1]++;
+                    else counters[3]++;
                 }
             }
             case 11 -> {
                 // Special: insert 2 tables (表4 + 表5)
                 String sheetName1 = ANNOTATION_SHEET_MAP.get(11);
                 String sheetName2 = ANNOTATION_11_EXTRA_SHEET;
-                insertSheetAsTable(doc, bodyIndex, submissionJson, sheetName2);
-                insertSheetAsTable(doc, bodyIndex, submissionJson, sheetName1);
+                if (insertSheetAsTable(doc, bodyIndex, submissionJson, sheetName2)) counters[0]++;
+                else counters[3]++;
+                if (insertSheetAsTable(doc, bodyIndex, submissionJson, sheetName1)) counters[0]++;
+                else counters[3]++;
             }
             default -> {
                 String sheetName = ANNOTATION_SHEET_MAP.get(annotationId);
                 if (sheetName != null) {
-                    insertSheetAsTable(doc, bodyIndex, submissionJson, sheetName);
+                    if (insertSheetAsTable(doc, bodyIndex, submissionJson, sheetName)) counters[0]++;
+                    else counters[3]++;
                 }
             }
         }
@@ -227,12 +269,13 @@ public class TemplateBasedReportBuilder {
     /**
      * Replace the text in the paragraph at bodyIndex with new text.
      * Used for text annotations (year, code, enterprise name).
+     * @return true if a replacement actually happened.
      */
-    private static void replaceAnnotatedText(XWPFDocument doc, int bodyIndex, String newText) {
+    private static boolean replaceAnnotatedText(XWPFDocument doc, int bodyIndex, String newText) {
         try {
             CTBody body = doc.getDocument().getBody();
             org.w3c.dom.NodeList children = body.getDomNode().getChildNodes();
-            if (bodyIndex >= children.getLength()) return;
+            if (bodyIndex >= children.getLength()) return false;
 
             // Find the paragraph and replace placeholder text
             List<XWPFParagraph> paragraphs = doc.getParagraphs();
@@ -248,34 +291,38 @@ public class TemplateBasedReportBuilder {
             int paraIndex = paraCount - 1;
             if (paraIndex >= 0 && paraIndex < paragraphs.size()) {
                 XWPFParagraph para = paragraphs.get(paraIndex);
-                String originalText = para.getText();
                 // Replace X placeholders in the text
                 for (XWPFRun run : para.getRuns()) {
                     String text = run.getText(0);
                     if (text != null && (text.contains("X") || text.contains("x") || text.contains("XXX"))) {
                         run.setText(newText, 0);
-                        return;
+                        return true;
                     }
                 }
                 // If no placeholder found, set the first run
                 if (!para.getRuns().isEmpty()) {
                     para.getRuns().get(0).setText(newText, 0);
+                    return true;
                 }
             }
         } catch (Exception e) {
             log.warn("[ReportBuilder] Failed to replace text at bodyIndex={}: {}", bodyIndex, e.getMessage());
         }
+        return false;
     }
 
     /**
      * Insert a SpreadJS sheet as a Word table after the annotation position.
+     * @return true if a table was actually created and added to the document.
      */
-    private static void insertSheetAsTable(XWPFDocument doc, int bodyIndex,
-                                            String submissionJson, String sheetName) {
+    private static boolean insertSheetAsTable(XWPFDocument doc, int bodyIndex,
+                                              String submissionJson, String sheetName) {
         List<List<String>> sheetData = SpreadJSJsonParser.extractSheetData(submissionJson, sheetName);
         if (sheetData.isEmpty()) {
-            log.info("[ReportBuilder] No data for sheet '{}', skipping", sheetName);
-            return;
+            log.warn("[ReportBuilder] No data found for sheet prefix '{}' — the live submission does not contain " +
+                    "a sheet matching this name. Check ANNOTATION_SHEET_MAP against the current SpreadJS template.",
+                    sheetName);
+            return false;
         }
 
         // Filter out completely empty rows
@@ -289,42 +336,54 @@ public class TemplateBasedReportBuilder {
 
         if (filteredData.isEmpty()) {
             log.info("[ReportBuilder] All rows empty for sheet '{}', skipping", sheetName);
-            return;
+            return false;
         }
 
         // Determine column count (max across all rows)
         int colCount = filteredData.stream().mapToInt(List::size).max().orElse(0);
-        if (colCount == 0) return;
+        if (colCount == 0) return false;
 
         // Cap columns at 15 to avoid extremely wide tables
         colCount = Math.min(colCount, 15);
 
-        // Create the Word table
+        // Create the Word table. doc.createTable(...) appends it at the end of the body;
+        // moveTableAfterBodyIndex relocates it next to the annotation anchor.
         XWPFTable table = doc.createTable(filteredData.size(), colCount);
-        styleTable(table, colCount);
+        try {
+            styleTable(table, colCount);
 
-        // Fill data
-        for (int r = 0; r < filteredData.size(); r++) {
-            XWPFTableRow tableRow = table.getRow(r);
-            List<String> dataRow = filteredData.get(r);
-            boolean isHeaderRow = (r == 0); // First row as header
-            for (int c = 0; c < colCount; c++) {
-                String value = c < dataRow.size() ? dataRow.get(c) : "";
-                setCellText(tableRow.getCell(c), value, isHeaderRow);
+            // Fill data
+            for (int r = 0; r < filteredData.size(); r++) {
+                XWPFTableRow tableRow = table.getRow(r);
+                List<String> dataRow = filteredData.get(r);
+                boolean isHeaderRow = (r == 0); // First row as header
+                for (int c = 0; c < colCount; c++) {
+                    String value = c < dataRow.size() ? dataRow.get(c) : "";
+                    setCellText(tableRow.getCell(c), value, isHeaderRow);
+                }
             }
+        } catch (Exception e) {
+            // Styling/fill failed — the table is still attached at the end of the body,
+            // which is ugly but better than a silently lost table.
+            log.warn("[ReportBuilder] Failed to fill/style table for sheet '{}': {}",
+                    sheetName, e.getMessage(), e);
+            return true; // table was created, so it counts
         }
 
-        // Move the table to the correct position (after the annotation paragraph)
+        // Move the table to the correct position (after the annotation paragraph).
+        // If the move fails, the table stays appended at end-of-body — not ideal but not lost.
         moveTableAfterBodyIndex(doc, table, bodyIndex);
 
-        log.info("[ReportBuilder] Inserted table for sheet '{}': {}rows × {}cols",
-            sheetName, filteredData.size(), colCount);
+        log.info("[ReportBuilder] Inserted table for sheet '{}': {} rows × {} cols",
+                sheetName, filteredData.size(), colCount);
+        return true;
     }
 
     /**
      * Insert an image after the annotation position.
+     * @return true if the image was successfully embedded.
      */
-    private static void insertImageAfter(XWPFDocument doc, int bodyIndex, byte[] imageBytes) {
+    private static boolean insertImageAfter(XWPFDocument doc, int bodyIndex, byte[] imageBytes) {
         try {
             // Create a new paragraph for the image
             XWPFParagraph imagePara = doc.createParagraph();
@@ -350,35 +409,50 @@ public class TemplateBasedReportBuilder {
                 widthEmu, heightEmu);
 
             log.info("[ReportBuilder] Inserted energy flow diagram image ({}x{})", widthPx, heightPx);
+            return true;
         } catch (Exception e) {
-            log.warn("[ReportBuilder] Failed to insert image: {}", e.getMessage());
+            log.warn("[ReportBuilder] Failed to insert image: {}", e.getMessage(), e);
+            return false;
         }
     }
 
     /**
      * Move a table to be positioned after a specific body element index.
      * Since POI appends tables at the end by default, we need to move it.
+     *
+     * Defensive: pre-computes the insertion reference node BEFORE detaching the table so that,
+     * if anything goes wrong, the table stays where it is (end of body) instead of being lost.
      */
     private static void moveTableAfterBodyIndex(XWPFDocument doc, XWPFTable table, int targetIndex) {
+        CTBody body = doc.getDocument().getBody();
+        org.w3c.dom.Node bodyNode = body.getDomNode();
+        org.w3c.dom.Node tblNode = table.getCTTbl().getDomNode();
+
         try {
-            CTBody body = doc.getDocument().getBody();
-            CTTbl tbl = table.getCTTbl();
+            // Find the element-level child that corresponds to targetIndex. findCommentPositions
+            // walks getChildNodes() (which includes any text/comment nodes), so targetIndex here
+            // refers to the raw child-list index — use the same indexing to stay consistent.
+            org.w3c.dom.NodeList children = bodyNode.getChildNodes();
+            org.w3c.dom.Node refNode = null;
+            if (targetIndex >= 0 && targetIndex + 1 < children.getLength()) {
+                refNode = children.item(targetIndex + 1);
+            }
 
-            // The table was appended at the end. We need to move it.
-            // Remove it from current position
-            body.getDomNode().removeChild(tbl.getDomNode());
+            // Same-parent safety: if refNode is the same as tblNode (shouldn't normally happen),
+            // there's nothing to do.
+            if (refNode == tblNode) return;
 
-            // Find the target position and insert after it
-            org.w3c.dom.NodeList children = body.getDomNode().getChildNodes();
-            if (targetIndex < children.getLength() - 1) {
-                org.w3c.dom.Node refNode = children.item(targetIndex + 1);
-                body.getDomNode().insertBefore(tbl.getDomNode(), refNode);
+            if (refNode != null) {
+                // insertBefore + existing child = move in DOM (W3C DOM spec) — atomic, no detach needed.
+                bodyNode.insertBefore(tblNode, refNode);
             } else {
-                body.getDomNode().appendChild(tbl.getDomNode());
+                // targetIndex is already at or past end — just make sure tbl is the last real child.
+                bodyNode.appendChild(tblNode);
             }
         } catch (Exception e) {
-            log.warn("[ReportBuilder] Failed to move table to position {}: {}", targetIndex, e.getMessage());
-            // Table stays at end — not ideal but functional
+            log.warn("[ReportBuilder] Failed to move table to position {} (table stays at end of body): {}",
+                    targetIndex, e.getMessage(), e);
+            // Table stays wherever POI appended it — not ideal but not lost
         }
     }
 
