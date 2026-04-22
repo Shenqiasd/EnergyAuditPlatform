@@ -1,0 +1,33 @@
+-- =============================================================================
+-- Migration 31: 修正 de_energy_flow / de_energy_balance 字符集排序规则
+--
+-- 问题:
+--   Railway MySQL 8 默认 collation 是 utf8mb4_0900_ai_ci，而项目里其它业务表
+--   (bs_unit / bs_energy / bs_product / de_energy_balance 等) 显式用
+--   utf8mb4_general_ci。de_energy_flow 早期建表时没带 COLLATE 声明，落到了
+--   默认的 utf8mb4_0900_ai_ci。
+--
+--   v2 PR #152 的 EnergyFlowPostProcessor.backfillUnitIds 要跑:
+--     UPDATE de_energy_flow f
+--     JOIN   bs_unit u ON u.name = f.source_unit ...
+--
+--   两侧字符串 collation 不同 -> MySQL 抛
+--     ERROR 1267: Illegal mix of collations
+--       (utf8mb4_general_ci, IMPLICIT) and (utf8mb4_0900_ai_ci, IMPLICIT)
+--       for operation '='
+--
+--   PR #159 之后 backfillUnitIds 不再吞异常,直接上抛,afterEnergyFlowPersist
+--   被顶层 catch 短路,下游 deriveFlowStage / deriveStandardQuantity /
+--   deriveEnergyBalance 全部不执行,submitted 数据看起来派生失败 (全 NULL)。
+--
+-- 修复:
+--   把 de_energy_flow 和 de_energy_balance 统一 CONVERT 到 utf8mb4_general_ci,
+--   与字典表对齐。对已有数据不做改动,仅改 collation 元信息 + 列字符编码。
+--
+--   幂等: MySQL CONVERT TO 对已是同 collation 的表是 no-op。
+--
+-- 风险: LOW — 两张表在新装/老环境都是业务数据表,collation 重建不破坏数据。
+-- =============================================================================
+
+ALTER TABLE de_energy_flow    CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE de_energy_balance CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
