@@ -8,6 +8,7 @@ export interface EnergyCatalog {
   id?: number
   name: string
   category?: string
+  attribution?: string
   measurementUnit?: string
   equivalentValue?: number
   equalValue?: number

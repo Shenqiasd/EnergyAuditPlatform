@@ -118,6 +118,16 @@ onMounted(loadData)
     <el-table v-loading="loading" :data="tableData" border stripe>
       <el-table-column prop="name" label="品种名称" min-width="140" />
       <el-table-column prop="category" label="品类" width="120" />
+      <el-table-column prop="attribution" label="归属" width="110">
+        <template #default="{ row }">
+          <el-tag
+            :type="row.attribution === '化石燃料' ? 'warning' : row.attribution === '非化石燃料' ? 'success' : 'info'"
+            size="small"
+          >
+            {{ row.attribution ?? '—' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="measurementUnit" label="计量单位" width="100" />
       <el-table-column prop="equivalentValue" label="折标系数(当量值)" width="140" />
       <el-table-column prop="equalValue" label="折标系数(等价值)" width="140" />
@@ -156,6 +166,12 @@ onMounted(loadData)
         </el-form-item>
         <el-form-item label="品类">
           <el-input v-model="form.category" placeholder="如：煤炭、油品、天然气" />
+        </el-form-item>
+        <el-form-item label="归属">
+          <el-radio-group v-model="form.attribution">
+            <el-radio value="化石燃料">化石燃料</el-radio>
+            <el-radio value="非化石燃料">非化石燃料</el-radio>
+          </el-radio-group>
         </el-form-item>
         <el-form-item label="计量单位">
           <el-input v-model="form.measurementUnit" placeholder="如：吨、立方米" />
