@@ -22,21 +22,29 @@ const routes: RouteRecordRaw[] = [
     redirect: '/enterprise/dashboard',
     meta: { requiresAuth: true, portal: 'enterprise', userType: 3 },
     children: [
-      { path: 'dashboard', name: 'EnterpriseDashboard', component: () => import('@/views/enterprise/dashboard/index.vue'), meta: { title: '工作台' } },
-      // Settings 3.x
+      { path: 'dashboard', name: 'EnterpriseDashboard', component: () => import('@/views/enterprise/dashboard/index.vue'), meta: { title: '概览' } },
+      // Settings
       { path: 'settings/company', name: 'CompanySettings', component: () => import('@/views/enterprise/settings/company/index.vue'), meta: { title: '企业信息' } },
       { path: 'settings/energy', name: 'EnergySettings', component: () => import('@/views/enterprise/settings/energy/index.vue'), meta: { title: '能源品种' } },
       { path: 'settings/unit', name: 'UnitSettings', component: () => import('@/views/enterprise/settings/unit/index.vue'), meta: { title: '用能单元' } },
       { path: 'settings/product', name: 'ProductSettings', component: () => import('@/views/enterprise/settings/product/index.vue'), meta: { title: '产品设置' } },
-      // Data overview
+      // Data entry (renamed from report/input)
+      { path: 'data-entry', name: 'DataEntry', component: () => import('@/views/enterprise/report/input/index.vue'), meta: { title: '数据录入' } },
+      // Legacy redirects → data-entry
+      { path: 'report/input', redirect: '/enterprise/data-entry' },
+      { path: 'template-filling', redirect: '/enterprise/data-entry' },
+      { path: 'report-filling', redirect: '/enterprise/data-entry' },
+      // Data overview (kept, accessible via direct URL)
       { path: 'data/overview', name: 'DataOverview', component: () => import('@/views/enterprise/data/overview/index.vue'), meta: { title: '抽取数据总览' } },
-      // Charts 5.x
+      // Charts
       { path: 'charts/standard', name: 'ChartsStandard', component: () => import('@/views/enterprise/charts/standard/index.vue'), meta: { title: '规定图表' } },
       { path: 'charts/energy-flow', name: 'ChartsEnergyFlow', component: () => import('@/views/enterprise/charts/energy-flow/index.vue'), meta: { title: '能源流向图' } },
-      { path: 'charts/report-assist', name: 'ChartsReportAssist', component: () => import('@/views/enterprise/charts/report-assist/index.vue'), meta: { title: '报告辅助图表' } },
-      // Report 6.x
-      { path: 'report/input', name: 'ReportInput', component: () => import('@/views/enterprise/report/input/index.vue'), meta: { title: '报告信息录入' } },
-      { path: 'report/generate', name: 'ReportGenerate', component: () => import('@/views/enterprise/report/generate/index.vue'), meta: { title: '在线生成报告' } },
+      { path: 'charts/report-assist', name: 'ChartsReportAssist', component: () => import('@/views/enterprise/charts/report-assist/index.vue'), meta: { title: '辅助图表' } },
+      // Audit report (new routes)
+      { path: 'audit-report/generate', name: 'AuditReportGenerate', component: () => import('@/views/enterprise/audit-report/generate/index.vue'), meta: { title: '在线生成报告' } },
+      { path: 'audit-report/upload', name: 'AuditReportUpload', component: () => import('@/views/enterprise/audit-report/upload/index.vue'), meta: { title: '上传报告' } },
+      // Legacy report routes (kept for backward compat)
+      { path: 'report/generate', name: 'ReportGenerate', component: () => import('@/views/enterprise/report/generate/index.vue'), meta: { title: '填报进度' } },
       { path: 'report/edit', name: 'ReportEdit', component: () => import('@/views/enterprise/report/edit/index.vue'), meta: { title: '在线编辑报告' } },
       { path: 'report/upload', name: 'ReportUpload', component: () => import('@/views/enterprise/report/upload/index.vue'), meta: { title: '上传最终报告' } },
       { path: 'report/detail', name: 'ReportDetail', component: () => import('@/views/enterprise/report/detail/index.vue'), meta: { title: '报告详情' } },

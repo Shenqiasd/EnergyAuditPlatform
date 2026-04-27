@@ -2,7 +2,10 @@ export interface MenuItem {
   key: string
   icon: string
   title: string
-  path: string
+  path?: string
+  children?: MenuItem[]
+  disabled?: boolean
+  tooltip?: string
   badge?: string | number
 }
 
@@ -10,6 +13,38 @@ export interface MenuSection {
   section: string
   items: MenuItem[]
 }
+
+/* ── Enterprise portal: tree-based menu (GRA-32) ─────────────── */
+
+export const enterpriseMenuItems: MenuItem[] = [
+  { key: 'dashboard', icon: '🏠', title: '概览', path: '/enterprise/dashboard' },
+  {
+    key: 'settings', icon: '⚙️', title: '基本设置',
+    children: [
+      { key: 'company',  icon: '🏢', title: '企业信息', path: '/enterprise/settings/company' },
+      { key: 'energy',   icon: '⚡', title: '能源品种', path: '/enterprise/settings/energy' },
+      { key: 'unit',     icon: '🔧', title: '用能单元', path: '/enterprise/settings/unit' },
+      { key: 'product',  icon: '📦', title: '产品设置', path: '/enterprise/settings/product' },
+    ],
+  },
+  { key: 'data-entry', icon: '✏️', title: '数据录入', path: '/enterprise/data-entry' },
+  {
+    key: 'charts', icon: '📊', title: '图表输出',
+    children: [
+      { key: 'standard-charts', icon: '📉', title: '规定图表', path: '/enterprise/charts/standard' },
+      { key: 'assist-charts',   icon: '📊', title: '辅助图表', path: '/enterprise/charts/report-assist' },
+    ],
+  },
+  {
+    key: 'audit-report', icon: '📄', title: '审计报告',
+    children: [
+      { key: 'report-generate', icon: '📝', title: '在线生成报告', path: '/enterprise/audit-report/generate', disabled: true, tooltip: '功能即将上线' },
+      { key: 'report-upload',   icon: '📤', title: '上传报告',     path: '/enterprise/audit-report/upload' },
+    ],
+  },
+]
+
+/* ── Legacy section-based menus (kept for backward compat with enterpriseMenus reference) ── */
 
 export const enterpriseMenus: MenuSection[] = [
   {
@@ -19,7 +54,7 @@ export const enterpriseMenus: MenuSection[] = [
     ],
   },
   {
-    section: '基础设置',
+    section: '基本设置',
     items: [
       { key: 'company',  icon: '🏢', title: '企业信息', path: '/enterprise/settings/company' },
       { key: 'energy',   icon: '⚡', title: '能源品种', path: '/enterprise/settings/energy' },
@@ -28,27 +63,23 @@ export const enterpriseMenus: MenuSection[] = [
     ],
   },
   {
-    section: '数据填报',
+    section: '数据录入',
     items: [
-      { key: 'report-input',    icon: '✏️', title: '模板填报',     path: '/enterprise/report/input' },
-      { key: 'report-generate', icon: '📄', title: '填报进度',     path: '/enterprise/report/generate' },
-      { key: 'data-overview',   icon: '📊', title: '抽取数据总览', path: '/enterprise/data/overview' },
+      { key: 'data-entry', icon: '✏️', title: '数据录入', path: '/enterprise/data-entry' },
     ],
   },
   {
-    section: '图表分析',
+    section: '图表输出',
     items: [
-      { key: 'standard-charts', icon: '📉', title: '规定图表',     path: '/enterprise/charts/standard' },
-      { key: 'energy-flow',     icon: '🔀', title: '能源流向图',   path: '/enterprise/charts/energy-flow' },
-      { key: 'report-assist',   icon: '📊', title: '报告辅助图表', path: '/enterprise/charts/report-assist' },
+      { key: 'standard-charts', icon: '📉', title: '规定图表', path: '/enterprise/charts/standard' },
+      { key: 'assist-charts',   icon: '📊', title: '辅助图表', path: '/enterprise/charts/report-assist' },
     ],
   },
   {
-    section: '报告管理',
+    section: '审计报告',
     items: [
-      { key: 'report-edit',   icon: '📝', title: '在线编辑报告', path: '/enterprise/report/edit' },
-      { key: 'report-upload', icon: '📤', title: '上传最终报告', path: '/enterprise/report/upload' },
-      { key: 'report-detail', icon: '👁️', title: '报告详情',     path: '/enterprise/report/detail' },
+      { key: 'report-generate', icon: '📝', title: '在线生成报告', path: '/enterprise/audit-report/generate', disabled: true, tooltip: '功能即将上线' },
+      { key: 'report-upload',   icon: '📤', title: '上传报告',     path: '/enterprise/audit-report/upload' },
     ],
   },
 ]

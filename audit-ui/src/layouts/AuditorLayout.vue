@@ -32,8 +32,8 @@ function logout() { userStore.logout(); router.push('/login') }
             v-for="item in group.items"
             :key="item.key"
             class="sidebar__item"
-            :class="{ 'is-active': isActive(item.path) }"
-            @click="navigate(item.path)"
+            :class="{ 'is-active': item.path && isActive(item.path) }"
+            @click="item.path && navigate(item.path)"
           >
             <span class="sidebar__item-dot"></span>
             <span class="sidebar__item-icon">{{ item.icon }}</span>

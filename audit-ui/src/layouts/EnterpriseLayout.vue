@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { enterpriseMenus } from '@/config/menus'
+import { enterpriseMenuItems } from '@/config/menus'
+import type { MenuItem } from '@/config/menus'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,12 +16,41 @@ const avatarText = computed(() => {
   return name.length >= 2 ? name.slice(0, 1) + '企' : name.slice(0, 1)
 })
 
+/* ── Collapsible group state ── */
+const expandedKeys = ref<Set<string>>(new Set(['settings', 'charts', 'audit-report']))
+
+function toggleGroup(key: string) {
+  const next = new Set(expandedKeys.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedKeys.value = next
+}
+
+function isGroupActive(item: MenuItem): boolean {
+  if (!item.children) return false
+  return item.children.some(c => c.path && (route.path === c.path || route.path.startsWith(c.path + '/')))
+}
+
 function isActive(path: string): boolean {
   return route.path === path || route.path.startsWith(path + '/')
 }
 
 function navigate(path: string) {
   router.push(path)
+}
+
+function handleItemClick(item: MenuItem) {
+  if (item.disabled) return
+  if (item.children) {
+    toggleGroup(item.key)
+  } else if (item.path) {
+    navigate(item.path)
+  }
+}
+
+function handleChildClick(child: MenuItem) {
+  if (child.disabled) return
+  if (child.path) navigate(child.path)
 }
 
 function logout() {
@@ -42,20 +72,60 @@ function logout() {
       </div>
 
       <nav class="sidebar__menu">
-        <template v-for="group in enterpriseMenus" :key="group.section">
-          <div class="sidebar__section">{{ group.section }}</div>
+        <template v-for="item in enterpriseMenuItems" :key="item.key">
+          <!-- Standalone item (no children) -->
           <div
-            v-for="item in group.items"
-            :key="item.key"
+            v-if="!item.children"
             class="sidebar__item"
-            :class="{ 'is-active': isActive(item.path) }"
-            @click="navigate(item.path)"
+            :class="{ 'is-active': item.path && isActive(item.path) }"
+            @click="handleItemClick(item)"
           >
             <span class="sidebar__item-dot"></span>
             <span class="sidebar__item-icon">{{ item.icon }}</span>
             <span class="sidebar__item-text">{{ item.title }}</span>
-            <span v-if="item.badge" class="sidebar__item-badge">{{ item.badge }}</span>
           </div>
+
+          <!-- Group item (has children) -->
+          <template v-else>
+            <div
+              class="sidebar__group-header"
+              :class="{ 'is-group-active': isGroupActive(item) }"
+              @click="handleItemClick(item)"
+            >
+              <span class="sidebar__item-icon">{{ item.icon }}</span>
+              <span class="sidebar__item-text">{{ item.title }}</span>
+              <span class="sidebar__group-arrow" :class="{ 'is-expanded': expandedKeys.has(item.key) }">
+                &#9656;
+              </span>
+            </div>
+
+            <transition name="menu-slide">
+              <div v-show="expandedKeys.has(item.key)" class="sidebar__group-children">
+                <template v-for="child in item.children" :key="child.key">
+                  <el-tooltip
+                    :disabled="!child.disabled || !child.tooltip"
+                    :content="child.tooltip ?? ''"
+                    placement="right"
+                    :show-after="200"
+                  >
+                    <div
+                      class="sidebar__item sidebar__child-item"
+                      :class="{
+                        'is-active': !child.disabled && child.path && isActive(child.path),
+                        'is-disabled': child.disabled,
+                      }"
+                      @click="handleChildClick(child)"
+                    >
+                      <span class="sidebar__item-dot"></span>
+                      <span class="sidebar__item-icon">{{ child.icon }}</span>
+                      <span class="sidebar__item-text">{{ child.title }}</span>
+                      <span v-if="child.badge" class="sidebar__item-badge">{{ child.badge }}</span>
+                    </div>
+                  </el-tooltip>
+                </template>
+              </div>
+            </transition>
+          </template>
         </template>
       </nav>
 
@@ -147,5 +217,71 @@ function logout() {
 .layout-main {
   flex: 1;
   overflow-y: auto;
+}
+
+/* ── Group header ── */
+.sidebar__group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  margin: 1px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13.5px;
+  color: $sidebar-text;
+  transition: $transition;
+  user-select: none;
+
+  &:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
+
+  &.is-group-active {
+    color: rgba(255, 255, 255, 0.85);
+  }
+}
+
+.sidebar__group-arrow {
+  margin-left: auto;
+  font-size: 11px;
+  transition: transform 0.2s ease;
+  color: rgba(255, 255, 255, 0.25);
+
+  &.is-expanded {
+    transform: rotate(90deg);
+  }
+}
+
+.sidebar__group-children {
+  overflow: hidden;
+}
+
+.sidebar__child-item {
+  padding-left: 28px !important;
+
+  &.is-disabled {
+    color: #666 !important;
+    cursor: not-allowed !important;
+    pointer-events: auto; /* allow tooltip hover */
+
+    &:hover {
+      background: transparent !important;
+      color: #666 !important;
+    }
+
+    .sidebar__item-dot { display: none; }
+  }
+}
+
+/* ── Transition ── */
+.menu-slide-enter-active,
+.menu-slide-leave-active {
+  transition: all 0.2s ease;
+  max-height: 300px;
+}
+
+.menu-slide-enter-from,
+.menu-slide-leave-to {
+  max-height: 0;
+  opacity: 0;
 }
 </style>
