@@ -103,28 +103,25 @@ function logout() {
               <div v-show="expandedKeys.has(item.key)" class="sidebar__group-children">
                 <template v-for="child in item.children" :key="child.key">
                   <el-tooltip
-                    v-if="child.disabled && child.tooltip"
-                    :content="child.tooltip"
+                    :disabled="!child.disabled || !child.tooltip"
+                    :content="child.tooltip ?? ''"
                     placement="right"
                     :show-after="200"
                   >
-                    <div class="sidebar__item sidebar__child-item is-disabled">
+                    <div
+                      class="sidebar__item sidebar__child-item"
+                      :class="{
+                        'is-active': !child.disabled && child.path && isActive(child.path),
+                        'is-disabled': child.disabled,
+                      }"
+                      @click="handleChildClick(child)"
+                    >
                       <span class="sidebar__item-dot"></span>
                       <span class="sidebar__item-icon">{{ child.icon }}</span>
                       <span class="sidebar__item-text">{{ child.title }}</span>
+                      <span v-if="child.badge" class="sidebar__item-badge">{{ child.badge }}</span>
                     </div>
                   </el-tooltip>
-                  <div
-                    v-else
-                    class="sidebar__item sidebar__child-item"
-                    :class="{ 'is-active': child.path && isActive(child.path) }"
-                    @click="handleChildClick(child)"
-                  >
-                    <span class="sidebar__item-dot"></span>
-                    <span class="sidebar__item-icon">{{ child.icon }}</span>
-                    <span class="sidebar__item-text">{{ child.title }}</span>
-                    <span v-if="child.badge" class="sidebar__item-badge">{{ child.badge }}</span>
-                  </div>
                 </template>
               </div>
             </transition>
