@@ -2,6 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { getEnterpriseSetting } from '@/api/enterpriseSetting'
 import type { EnterpriseSetting } from '@/api/enterpriseSetting'
+import { getById as getEnterpriseById } from '@/api/enterprise'
+import type { Enterprise } from '@/api/enterprise'
 import { queryExtractedTable } from '@/api/extracted-data'
 import { useUserStore } from '@/stores/user'
 import InfoRow from '../components/InfoRow.vue'
@@ -13,6 +15,7 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const info = ref<EnterpriseSetting>({})
+const enterprise = ref<Enterprise | null>(null)
 const productRows = ref<Record<string, unknown>[]>([])
 const productLoading = ref(false)
 
@@ -39,11 +42,14 @@ const productColumns: RegColumn[] = [
 onMounted(async () => {
   loading.value = true
   try {
-    const [setting, productData] = await Promise.all([
+    const enterpriseId = userStore.userInfo?.enterpriseId
+    const [setting, productData, ent] = await Promise.all([
       getEnterpriseSetting().catch(() => null),
       queryExtractedTable('de_product_unit_consumption', { pageSize: 200 }).catch(() => ({ rows: [], total: 0 })),
+      enterpriseId ? getEnterpriseById(enterpriseId).catch(() => null) : Promise.resolve(null),
     ])
     if (setting) info.value = setting
+    if (ent) enterprise.value = ent
     productRows.value = productData.rows || []
   } finally {
     loading.value = false
@@ -62,8 +68,8 @@ function certLabel(val: unknown): string {
 
     <div class="info-table">
       <InfoRow :items="[
-        { label: '单位名称', value: userStore.userInfo?.enterpriseName },
-        { label: '统一社会信用代码', value: info.adminDivisionCode },
+        { label: '单位名称', value: userStore.userInfo?.enterpriseName || enterprise?.enterpriseName },
+        { label: '统一社会信用代码', value: enterprise?.creditCode || info.adminDivisionCode },
       ]" />
       <InfoRow :items="[
         { label: '所属区县/集团', value: info.groupName || info.region },

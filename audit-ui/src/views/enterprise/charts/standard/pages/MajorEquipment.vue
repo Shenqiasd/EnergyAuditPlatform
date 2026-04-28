@@ -12,15 +12,15 @@ const tableError = ref('')
 
 const columns: RegColumn[] = [
   { prop: 'seqNo', label: '序号', width: 60 },
-  { prop: 'equipmentName', label: '设备名称', minWidth: 120 },
+  { prop: 'deviceName', label: '设备名称', minWidth: 120 },
   { prop: 'category', label: '分类', minWidth: 80 },
   { prop: 'model', label: '型号', minWidth: 100 },
   { prop: 'capacity', label: '容量', minWidth: 80 },
   { prop: 'quantity', label: '数量', width: 70 },
-  { prop: 'overview', label: '设备概况', minWidth: 140 },
-  { prop: 'obsoleteStatus', label: '淘汰更新情况', minWidth: 120 },
-  { prop: 'location', label: '安装使用场所', minWidth: 120 },
-  { prop: 'annualRunHours', label: '年运行时间（小时）', minWidth: 140 },
+  { prop: 'deviceOverview', label: '设备概况', minWidth: 140 },
+  { prop: 'obsoleteUpdateInfo', label: '淘汰更新情况', minWidth: 120 },
+  { prop: 'installLocation', label: '安装使用场所', minWidth: 120 },
+  { prop: 'annualRuntimeHours', label: '年运行时间（小时）', minWidth: 140 },
   { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 
@@ -28,7 +28,7 @@ const filteredRows = computed(() => {
   if (!searchKeyword.value) return allRows.value
   const kw = searchKeyword.value.toLowerCase()
   return allRows.value.filter((r) => {
-    const name = String(r.equipmentName || '').toLowerCase()
+    const name = String(r.deviceName || '').toLowerCase()
     return name.includes(kw)
   })
 })
