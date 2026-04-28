@@ -2,6 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { getEnterpriseSetting } from '@/api/enterpriseSetting'
 import type { EnterpriseSetting } from '@/api/enterpriseSetting'
+import { getById as getEnterpriseById } from '@/api/enterprise'
+import type { Enterprise } from '@/api/enterprise'
 import { queryExtractedTable } from '@/api/extracted-data'
 import { useUserStore } from '@/stores/user'
 import InfoRow from '../components/InfoRow.vue'
@@ -12,6 +14,7 @@ import type { RegColumn } from '../components/RegulationTable.vue'
 const userStore = useUserStore()
 const loading = ref(false)
 const info = ref<EnterpriseSetting>({})
+const enterprise = ref<Enterprise | null>(null)
 const indicatorRows = ref<Record<string, unknown>[]>([])
 const tableLoading = ref(false)
 const tableError = ref('')
@@ -27,14 +30,17 @@ onMounted(async () => {
   loading.value = true
   tableLoading.value = true
   try {
-    const [setting, tableData] = await Promise.all([
+    const enterpriseId = userStore.userInfo?.enterpriseId
+    const [setting, tableData, ent] = await Promise.all([
       getEnterpriseSetting().catch(() => null),
       queryExtractedTable('de_tech_indicator', { pageSize: 200 }).catch((e: Error) => {
         tableError.value = e.message?.includes('404') ? '数据表尚未对接' : ''
         return { rows: [], total: 0 }
       }),
+      enterpriseId ? getEnterpriseById(enterpriseId).catch(() => null) : Promise.resolve(null),
     ])
     if (setting) info.value = setting
+    if (ent) enterprise.value = ent
     indicatorRows.value = tableData.rows || []
   } finally {
     loading.value = false
@@ -49,8 +55,8 @@ onMounted(async () => {
 
     <div class="info-table">
       <InfoRow :items="[
-        { label: '单位名称', value: userStore.userInfo?.enterpriseName },
-        { label: '法人代码', value: info.adminDivisionCode },
+        { label: '单位名称', value: userStore.userInfo?.enterpriseName || enterprise?.enterpriseName },
+        { label: '法人代码', value: enterprise?.creditCode || info.adminDivisionCode },
       ]" />
       <InfoRow :items="[
         { label: '节能主管领导姓名/职务', value: [info.energyLeaderName, info.energyLeaderTitle].filter(Boolean).join(' / ') || '—' },

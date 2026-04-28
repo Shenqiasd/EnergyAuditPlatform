@@ -3,9 +3,11 @@ package com.energy.audit.service.system.impl;
 import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.common.util.JwtUtils;
 import com.energy.audit.common.util.SecurityUtils;
+import com.energy.audit.dao.mapper.enterprise.EntEnterpriseMapper;
 import com.energy.audit.dao.mapper.system.SysUserMapper;
 import com.energy.audit.model.dto.ChangePasswordDTO;
 import com.energy.audit.model.dto.LoginDTO;
+import com.energy.audit.model.entity.enterprise.EntEnterprise;
 import com.energy.audit.model.entity.system.SysUser;
 import com.energy.audit.model.vo.LoginVO;
 import com.energy.audit.model.vo.UserInfoVO;
@@ -24,6 +26,7 @@ public class AuthServiceImpl implements AuthService {
     private static final BCryptPasswordEncoder ENCODER = new BCryptPasswordEncoder();
 
     private final SysUserMapper userMapper;
+    private final EntEnterpriseMapper enterpriseMapper;
     private final CacheManager cacheManager;
 
     @Value("${jwt.secret}")
@@ -32,8 +35,9 @@ public class AuthServiceImpl implements AuthService {
     @Value("${jwt.expiration}")
     private long jwtExpiration;
 
-    public AuthServiceImpl(SysUserMapper userMapper, CacheManager cacheManager) {
+    public AuthServiceImpl(SysUserMapper userMapper, EntEnterpriseMapper enterpriseMapper, CacheManager cacheManager) {
         this.userMapper = userMapper;
+        this.enterpriseMapper = enterpriseMapper;
         this.cacheManager = cacheManager;
     }
 
@@ -77,6 +81,12 @@ public class AuthServiceImpl implements AuthService {
         vo.setRealName(user.getRealName());
         vo.setUserType(user.getUserType());
         vo.setEnterpriseId(user.getEnterpriseId());
+        if (user.getEnterpriseId() != null) {
+            EntEnterprise ent = enterpriseMapper.selectById(user.getEnterpriseId());
+            if (ent != null) {
+                vo.setEnterpriseName(ent.getEnterpriseName());
+            }
+        }
         vo.setPasswordChanged(user.getPasswordChanged() != null && user.getPasswordChanged() == 1);
 
         log.info("User {} logged in successfully, type={}", user.getUsername(), user.getUserType());
@@ -112,6 +122,12 @@ public class AuthServiceImpl implements AuthService {
         vo.setEmail(user.getEmail());
         vo.setUserType(user.getUserType());
         vo.setEnterpriseId(user.getEnterpriseId());
+        if (user.getEnterpriseId() != null) {
+            EntEnterprise ent = enterpriseMapper.selectById(user.getEnterpriseId());
+            if (ent != null) {
+                vo.setEnterpriseName(ent.getEnterpriseName());
+            }
+        }
         vo.setPasswordChanged(user.getPasswordChanged() != null && user.getPasswordChanged() == 1);
         vo.setAuditYear(java.time.LocalDate.now().getYear());
         return vo;
