@@ -132,6 +132,8 @@ CALL ensure_column('de_five_year_target', 'energy_equiv_actual2025',
     'DECIMAL(18,4) DEFAULT NULL COMMENT ''2025年综合能耗当量值'' AFTER energy_equal_target2030');
 CALL ensure_column('de_five_year_target', 'energy_equiv_target2030',
     'DECIMAL(18,4) DEFAULT NULL COMMENT ''2030年目标综合能耗当量值'' AFTER energy_equiv_actual2025');
+CALL ensure_column('de_five_year_target', 'product_output',
+    'DECIMAL(18,4) DEFAULT NULL COMMENT ''产品产量'' AFTER energy_equiv_target2030');
 CALL ensure_column('de_five_year_target', 'product_name',
     'VARCHAR(128) DEFAULT NULL COMMENT ''产品名称'' AFTER decline_rate');
 CALL ensure_column('de_five_year_target', 'indicator_name',
@@ -282,7 +284,7 @@ FROM (
     UNION ALL SELECT 'PEAK_YEAR','peakYear','de_carbon_peak_info','NUMBER',20,'20.碳达峰信息',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C3:企业碳排放达峰年'
     UNION ALL SELECT 'PEAK_EMISSION','peakEmission','de_carbon_peak_info','NUMBER',20,'20.碳达峰信息',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C4:达峰碳排放量'
     UNION ALL SELECT '表20_产品碳峰','de_five_year_target','de_five_year_target','STRING',20,'20.碳达峰信息','A18:F19','TABLE','CELL_RANGE',0,NULL,
-           '[{"col":0,"field":"year_label","label":"产品类别","type":"STRING"},{"col":1,"field":"product_name","label":"产品产量","type":"NUMBER"},{"col":2,"field":"gross_output","label":"产品产值（万元）","type":"NUMBER"},{"col":3,"field":"emission","label":"排放量（吨CO2）","type":"NUMBER"},{"col":4,"field":"unit_strength","label":"单位产值碳排放强度","type":"NUMBER"},{"col":5,"field":"intensity_drop","label":"产品碳排放强度","type":"NUMBER"}]','产品表实际为 A18:F19；section_type 需后续默认值/业务处理'
+           '[{"col":0,"field":"year_label","label":"产品类别","type":"STRING"},{"col":1,"field":"product_output","label":"产品产量","type":"NUMBER"},{"col":2,"field":"gross_output","label":"产品产值（万元）","type":"NUMBER"},{"col":3,"field":"emission","label":"排放量（吨CO2）","type":"NUMBER"},{"col":4,"field":"unit_strength","label":"单位产值碳排放强度","type":"NUMBER"},{"col":5,"field":"intensity_drop","label":"产品碳排放强度","type":"NUMBER"}]','产品表实际为 A18:F19；section_type 需后续默认值/业务处理'
     UNION ALL SELECT '表20_年度目标','de_five_year_target','de_five_year_target','STRING',20,'20.碳达峰信息','A11:H14','TABLE','CELL_RANGE',0,NULL,
            '[{"col":0,"field":"target_name","label":"目标名称","type":"STRING"},{"col":1,"field":"measurement_unit","label":"计量单位","type":"STRING"},{"col":2,"field":"y2025","label":"2025年","type":"NUMBER"},{"col":3,"field":"y2026","label":"2026年","type":"NUMBER"},{"col":4,"field":"y2027","label":"2027年","type":"NUMBER"},{"col":5,"field":"y2028","label":"2028年","type":"NUMBER"},{"col":6,"field":"y2029","label":"2029年","type":"NUMBER"},{"col":7,"field":"y2030","label":"2030年","type":"NUMBER"}]','实际含 2025 现状列，方案漏列'
     -- Sheet 21
@@ -293,7 +295,7 @@ FROM (
     UNION ALL SELECT 'TGT_2030_ENERGY_EQUIV','energyEqualTarget2030','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'G4:2030年目标综合能耗等价值'
     UNION ALL SELECT 'TGT_2030_ENERGY_CURR','energyEquivTarget2030','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'G5:2030年目标综合能耗当量值'
     UNION ALL SELECT '表21_产品单耗','de_five_year_target','de_five_year_target','STRING',21,'21.“十五五”期间节能目标','A7:I9','TABLE','CELL_RANGE',0,NULL,
-           '[{"col":0,"field":"product_name","label":"2025产品名称","type":"STRING"},{"col":1,"field":"indicator_name","label":"2025单耗指标名","type":"STRING"},{"col":2,"field":"actual_value","label":"2025单耗指标值","type":"NUMBER"},{"col":3,"field":"indicator_value","label":"2025单耗实际值","type":"NUMBER"},{"col":4,"field":"target_name","label":"2030产品名称","type":"STRING"},{"col":5,"field":"year_label","label":"2030单耗指标名","type":"STRING"},{"col":6,"field":"y2030","label":"2030单耗指标值","type":"NUMBER"},{"col":7,"field":"unit_energy_equal","label":"2030单耗实际值","type":"NUMBER"},{"col":8,"field":"decline_rate","label":"单耗指标下降率%","type":"NUMBER"}]',NULL
+           '[{"col":0,"field":"product_name","label":"2025产品名称","type":"STRING"},{"col":1,"field":"indicator_name","label":"2025单耗指标名","type":"STRING"},{"col":2,"field":"indicator_value","label":"2025单耗指标值","type":"NUMBER"},{"col":3,"field":"actual_value","label":"2025单耗实际值","type":"NUMBER"},{"col":4,"field":"target_name","label":"2030产品名称","type":"STRING"},{"col":5,"field":"year_label","label":"2030单耗指标名","type":"STRING"},{"col":6,"field":"y2030","label":"2030单耗指标值","type":"NUMBER"},{"col":7,"field":"unit_energy_equal","label":"2030单耗实际值","type":"NUMBER"},{"col":8,"field":"decline_rate","label":"单耗指标下降率%","type":"NUMBER"}]',NULL
     UNION ALL SELECT '表21_年度节能','de_five_year_target','de_five_year_target','STRING',21,'21.“十五五”期间节能目标','A12:G16','TABLE','CELL_RANGE',0,NULL,
            '[{"col":0,"field":"target_name","label":"目标名称","type":"STRING"},{"col":1,"field":"measurement_unit","label":"计量单位","type":"STRING"},{"col":2,"field":"y2026","label":"2026年","type":"NUMBER"},{"col":3,"field":"y2027","label":"2027年","type":"NUMBER"},{"col":4,"field":"y2028","label":"2028年","type":"NUMBER"},{"col":5,"field":"y2029","label":"2029年","type":"NUMBER"},{"col":6,"field":"y2030","label":"2030年","type":"NUMBER"}]',NULL
     -- CONFIG_PREFILL / dropdowns
