@@ -230,7 +230,7 @@ onMounted(loadData)
       </template>
     </el-dialog>
 
-    <el-dialog v-model="importDialogVisible" title="从全局品类库导入" width="640px">
+    <el-dialog v-model="importDialogVisible" title="从全局品类库导入" width="920px">
       <el-table
         v-loading="catalogLoading"
         :data="catalogList"
@@ -243,6 +243,9 @@ onMounted(loadData)
         <el-table-column prop="measurementUnit" label="单位" width="90" />
         <el-table-column prop="equivalentValue" label="当量值" width="90" />
         <el-table-column prop="equalValue" label="等价值" width="90" />
+        <el-table-column prop="lowHeatValue" label="低位发热量" width="110" />
+        <el-table-column prop="carbonContent" label="含碳量" width="90" />
+        <el-table-column prop="oxidationRate" label="氧化率" width="90" />
       </el-table>
       <template #footer>
         <el-button @click="importDialogVisible = false">取消</el-button>
