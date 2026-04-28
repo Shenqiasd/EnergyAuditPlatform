@@ -76,6 +76,10 @@ async function runPrerequisiteCheck(): Promise<boolean> {
     }
     return true
   } catch (e: any) {
+    // ElMessageBox.alert rejects if user presses Escape / close button — treat as cancel
+    if (e === 'close' || e === 'cancel') {
+      return false
+    }
     ElMessage.error('前置校验失败：' + (e?.message ?? '未知错误'))
     return false
   }
