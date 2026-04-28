@@ -23,6 +23,7 @@ const columns: RegColumn[] = [
       { prop: 'testDate', label: '测试日期', minWidth: 100 },
     ],
   },
+  { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 
 onMounted(async () => {
@@ -41,7 +42,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <SectionTitle title="表13：设备测试报告主要指标汇总表" />
+    <SectionTitle title="表12：设备测试报告主要指标汇总表" />
     <el-alert v-if="tableError" :title="tableError" type="warning" show-icon :closable="false" style="margin-bottom: 12px" />
     <RegulationTable
       :columns="columns"

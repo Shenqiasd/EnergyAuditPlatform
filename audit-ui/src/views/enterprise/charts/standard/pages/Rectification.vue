@@ -18,6 +18,8 @@ const columns: RegColumn[] = [
   { prop: 'responsiblePerson', label: '责任人', minWidth: 80 },
   { prop: 'estimatedCost', label: '整改预计费用（万元）', minWidth: 160 },
   { prop: 'annualSaving', label: '年节能量（吨标准煤）', minWidth: 150 },
+  { prop: 'annualCarbonReduction', label: '年降碳量（吨二氧化碳）', minWidth: 160 },
+  { prop: 'annualEconomicBenefit', label: '年经济效益（万元）', minWidth: 140 },
 ]
 
 onMounted(async () => {
@@ -36,7 +38,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <SectionTitle title="表17：节能整改措施表" />
+    <SectionTitle title="表16：节能整改措施表" />
     <el-alert v-if="tableError" :title="tableError" type="warning" show-icon :closable="false" style="margin-bottom: 12px" />
     <RegulationTable
       :columns="columns"

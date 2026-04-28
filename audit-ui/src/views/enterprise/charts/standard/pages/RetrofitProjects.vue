@@ -14,10 +14,13 @@ const columns: RegColumn[] = [
   { prop: 'projectName', label: '项目名称', minWidth: 150 },
   { prop: 'projectType', label: '项目类型', minWidth: 100 },
   { prop: 'mainContent', label: '主要内容', minWidth: 200 },
-  { prop: 'investment', label: '投资（万元）', minWidth: 110 },
+  { prop: 'investment', label: '投资（万）', minWidth: 100 },
   { prop: 'annualSaving', label: '年节能量（吨标煤）', minWidth: 140 },
   { prop: 'paybackPeriod', label: '投资回收期（年）', minWidth: 130 },
   { prop: 'completionDate', label: '完成时间', minWidth: 110 },
+  { prop: 'actualSaving', label: '实际节能量（吨标煤）', minWidth: 150 },
+  { prop: 'isContractManagement', label: '是否合同能源管理模式', minWidth: 160 },
+  { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 
 onMounted(async () => {
@@ -36,7 +39,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <SectionTitle title="表3：上一轮已实施的节能技改项目表" />
+    <SectionTitle title="表2：上一轮已实施的节能技改项目表" />
     <el-alert v-if="tableError" :title="tableError" type="warning" show-icon :closable="false" style="margin-bottom: 12px" />
     <RegulationTable
       :columns="columns"

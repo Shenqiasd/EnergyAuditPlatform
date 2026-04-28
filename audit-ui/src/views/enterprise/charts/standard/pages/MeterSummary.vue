@@ -18,12 +18,12 @@ const columns: RegColumn[] = [
   { prop: 'meterName', label: '计量表名称', minWidth: 120 },
   { prop: 'ratio', label: '倍率', width: 80 },
   { prop: 'grade', label: '级别', width: 80 },
-  { prop: 'measuringRange', label: '量程', minWidth: 100 },
-  { prop: 'installLocation', label: '安装位置', minWidth: 120 },
-  { prop: 'measuredMedium', label: '被测介质', minWidth: 100 },
-  { prop: 'verificationDate', label: '检定日期', minWidth: 100 },
-  { prop: 'validUntil', label: '有效期至', minWidth: 100 },
-  { prop: 'verificationResult', label: '检定结论', minWidth: 100 },
+  { prop: 'energyAttribute', label: '能源属性', minWidth: 100 },
+  { prop: 'measuringRange', label: '测量范围', minWidth: 100 },
+  { prop: 'department', label: '所属部门', minWidth: 100 },
+  { prop: 'accuracyGrade', label: '准确度等级', minWidth: 100 },
+  { prop: 'installLocation', label: '安装地点或计量区域', minWidth: 140 },
+  { prop: 'status', label: '状态', minWidth: 80 },
   { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 

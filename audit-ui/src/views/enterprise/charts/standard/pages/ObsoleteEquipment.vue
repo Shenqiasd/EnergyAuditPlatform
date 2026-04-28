@@ -35,7 +35,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <SectionTitle title="表11：淘汰产品、设备、装置、工艺和生产能力目录表" />
+    <SectionTitle title="表10：淘汰产品、设备、装置、工艺和生产能力目录表" />
     <el-alert v-if="tableError" :title="tableError" type="warning" show-icon :closable="false" style="margin-bottom: 12px" />
     <RegulationTable
       :columns="columns"

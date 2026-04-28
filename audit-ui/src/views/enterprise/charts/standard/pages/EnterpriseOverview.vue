@@ -16,14 +16,27 @@ const loading = ref(false)
 const info = ref<EnterpriseSetting>({})
 const enterprise = ref<Enterprise | null>(null)
 const indicatorRows = ref<Record<string, unknown>[]>([])
+const energyRows = ref<Record<string, unknown>[]>([])
 const tableLoading = ref(false)
 const tableError = ref('')
 
 const indicatorColumns: RegColumn[] = [
+  { prop: 'code', label: '代码', width: 60 },
   { prop: 'itemName', label: '项目名称', minWidth: 200 },
-  { prop: 'auditYearValue', label: '审计年', minWidth: 120 },
-  { prop: 'lastYearValue', label: '上年度', minWidth: 120 },
-  { prop: 'changeRate', label: '增减（%）', minWidth: 100 },
+  { prop: 'unit', label: '计量单位', minWidth: 100 },
+  { prop: 'auditYearValue', label: '今年', minWidth: 120 },
+  { prop: 'lastYearValue', label: '去年', minWidth: 120 },
+  { prop: 'changeRate', label: '增减%', minWidth: 100 },
+]
+
+const energyColumns: RegColumn[] = [
+  { prop: 'code', label: '代码', width: 60 },
+  { prop: 'itemName', label: '项目名称', minWidth: 200 },
+  { prop: 'unit', label: '计量单位', minWidth: 100 },
+  { prop: 'auditYearValue', label: '今年', minWidth: 120 },
+  { prop: 'lastYearValue', label: '去年', minWidth: 120 },
+  { prop: 'changeRate', label: '增减%', minWidth: 100 },
+  { prop: 'excludingRawMaterial', label: '扣除原材料后', minWidth: 120 },
 ]
 
 onMounted(async () => {
@@ -41,7 +54,12 @@ onMounted(async () => {
     ])
     if (setting) info.value = setting
     if (ent) enterprise.value = ent
-    indicatorRows.value = tableData.rows || []
+    const allRows = tableData.rows || []
+    indicatorRows.value = allRows.filter((r: Record<string, unknown>) => r.section !== 'energy')
+    energyRows.value = allRows.filter((r: Record<string, unknown>) => r.section === 'energy')
+    if (!energyRows.value.length && !indicatorRows.value.length) {
+      indicatorRows.value = allRows
+    }
   } finally {
     loading.value = false
     tableLoading.value = false
@@ -51,7 +69,7 @@ onMounted(async () => {
 
 <template>
   <div v-loading="loading">
-    <SectionTitle title="表2：企业概况及主要技术指标一览表" />
+    <SectionTitle title="表3：企业概况及主要技术指标一览表" />
 
     <div class="info-table">
       <InfoRow :items="[
@@ -68,11 +86,11 @@ onMounted(async () => {
       ]" />
       <InfoRow :items="[
         { label: '兼职管理人数', value: undefined },
-        { label: '十四五期间节能目标名称', value: undefined },
+        { label: '&quot;十五五&quot;期间节能目标名称', value: undefined },
       ]" />
       <InfoRow :items="[
-        { label: '十四五期间节能目标值', value: undefined },
-        { label: '十四五期间节能目标下达部门', value: info.superiorDepartment },
+        { label: '&quot;十五五&quot;期间节能目标值', value: undefined },
+        { label: '&quot;十五五&quot;期间节能目标下达部门', value: info.superiorDepartment },
       ]" />
     </div>
 
@@ -83,6 +101,16 @@ onMounted(async () => {
       :data="indicatorRows"
       :loading="tableLoading"
       export-filename="企业概况及主要技术指标"
+      title=""
+    />
+
+    <SectionTitle v-if="energyRows.length" title="综合能耗指标" />
+    <RegulationTable
+      v-if="energyRows.length"
+      :columns="energyColumns"
+      :data="energyRows"
+      :loading="tableLoading"
+      export-filename="综合能耗指标"
       title=""
     />
   </div>

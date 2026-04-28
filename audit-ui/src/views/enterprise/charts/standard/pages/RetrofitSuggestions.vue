@@ -16,8 +16,9 @@ const columns: RegColumn[] = [
   { prop: 'mainContent', label: '主要内容', minWidth: 200 },
   { prop: 'investment', label: '投资（万元）', minWidth: 110 },
   { prop: 'annualSaving', label: '年节能量（吨标煤）', minWidth: 140 },
-  { prop: 'annualCarbonReduction', label: '年减碳量（吨CO₂）', minWidth: 140 },
+  { prop: 'annualCarbonReduction', label: '年减碳量（吨二氧化碳）', minWidth: 150 },
   { prop: 'paybackPeriod', label: '投资回收期（年）', minWidth: 130 },
+  { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 
 onMounted(async () => {
@@ -36,7 +37,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <SectionTitle title="表16：节能技术改造建议汇总表" />
+    <SectionTitle title="表15：节能技术改造建议汇总表" />
     <el-alert v-if="tableError" :title="tableError" type="warning" show-icon :closable="false" style="margin-bottom: 12px" />
     <RegulationTable
       :columns="columns"

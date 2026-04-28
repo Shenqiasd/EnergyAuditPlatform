@@ -34,7 +34,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <SectionTitle title="表12：企业产品能源成本表" />
+    <SectionTitle title="表11：企业产品能源成本表" />
     <el-alert v-if="tableError" :title="tableError" type="warning" show-icon :closable="false" style="margin-bottom: 12px" />
     <RegulationTable
       :columns="columns"

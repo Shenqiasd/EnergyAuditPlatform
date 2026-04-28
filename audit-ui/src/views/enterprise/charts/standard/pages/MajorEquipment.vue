@@ -21,6 +21,7 @@ const columns: RegColumn[] = [
   { prop: 'obsoleteUpdateInfo', label: '淘汰更新情况', minWidth: 120 },
   { prop: 'installLocation', label: '安装使用场所', minWidth: 120 },
   { prop: 'annualRuntimeHours', label: '年运行时间（小时）', minWidth: 140 },
+  { prop: 'benchmarkLevel', label: '设备对标情况（能效等级）', minWidth: 160 },
   { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 

@@ -6,23 +6,22 @@ const route = useRoute()
 
 const navItems = [
   { label: '1. 用能单位基本情况', name: 'StandardBasicInfo' },
-  { label: '2. 企业概况及主要技术指标一览表', name: 'StandardEnterpriseOverview' },
-  { label: '3. 上一轮已实施的节能技改项目表', name: 'StandardRetrofitProjects' },
+  { label: '2. 上一轮已实施的节能技改项目表', name: 'StandardRetrofitProjects' },
+  { label: '3. 企业概况及主要技术指标一览表', name: 'StandardEnterpriseOverview' },
   { label: '4. 主要用能设备汇总表', name: 'StandardMajorEquipment' },
   { label: '5. 能源流程图', name: 'StandardEnergyFlow' },
   { label: '6. 能源计量器具汇总表', name: 'StandardMeterSummary' },
   { label: '7. 能源计量器具配备率表', name: 'StandardMeterRate' },
   { label: '8. 温室气体排放表', name: 'StandardGhgEmission' },
   { label: '9. 能源消费平衡综合表', name: 'StandardEnergyBalance' },
-  { label: '10. 重点用能设备能效对标表', name: 'StandardEquipmentBenchmark' },
-  { label: '11. 淘汰产品、设备、装置、工艺和生产能力目录表', name: 'StandardObsoleteEquipment' },
-  { label: '12. 企业产品能源成本表', name: 'StandardProductEnergyCost' },
-  { label: '13. 设备测试报告主要指标汇总表', name: 'StandardTestIndicators' },
-  { label: '14. 节能潜力明细表', name: 'StandardSavingPotential' },
-  { label: '15. 能源管理改进建议表', name: 'StandardMgmtSuggestions' },
-  { label: '16. 节能技术改造建议汇总表', name: 'StandardRetrofitSuggestions' },
-  { label: '17. 节能整改措施表', name: 'StandardRectification' },
-  { label: '18. 十五五期间节能目标', name: 'StandardFiveYearTarget' },
+  { label: '10. 淘汰产品、设备、装置、工艺和生产能力目录表', name: 'StandardObsoleteEquipment' },
+  { label: '11. 企业产品能源成本表', name: 'StandardProductEnergyCost' },
+  { label: '12. 设备测试报告主要指标汇总表', name: 'StandardTestIndicators' },
+  { label: '13. 节能潜力明细表', name: 'StandardSavingPotential' },
+  { label: '14. 能源管理改进建议表', name: 'StandardMgmtSuggestions' },
+  { label: '15. 节能技术改造建议汇总表', name: 'StandardRetrofitSuggestions' },
+  { label: '16. 节能整改措施表', name: 'StandardRectification' },
+  { label: '17. "十五五"期间节能目标', name: 'StandardFiveYearTarget' },
 ]
 
 const currentName = computed(() => route.name as string)

@@ -7,18 +7,43 @@ import type { RegColumn } from '../components/RegulationTable.vue'
 
 const loading = ref(false)
 const summaryRows = ref<Record<string, unknown>[]>([])
+const productRows = ref<Record<string, unknown>[]>([])
 const annualRows = ref<Record<string, unknown>[]>([])
 const tableError = ref('')
 
 const summaryColumns: RegColumn[] = [
-  { prop: 'itemName', label: '项目', minWidth: 200 },
-  { prop: 'actual2025', label: '2025年实际', minWidth: 120 },
-  { prop: 'target2030', label: '2030年目标', minWidth: 120 },
-  { prop: 'changeRate', label: '增减（%）', minWidth: 100 },
+  {
+    prop: '_actual2025', label: '2025年实际', children: [
+      { prop: 'actual2025Output', label: '产量', minWidth: 100 },
+      { prop: 'actual2025EnergyEquivalent', label: '综合能耗（吨标煤）-等价值', minWidth: 160 },
+      { prop: 'actual2025EnergyCalorific', label: '综合能耗（吨标煤）-当量值', minWidth: 160 },
+      { prop: 'actual2025UnitConsumption', label: '产品综合能耗（吨标煤/万元）', minWidth: 180 },
+    ],
+  },
+  {
+    prop: '_target2030', label: '2030年目标', children: [
+      { prop: 'target2030Output', label: '产量', minWidth: 100 },
+      { prop: 'target2030EnergyEquivalent', label: '综合能耗（吨标煤）-等价值', minWidth: 160 },
+      { prop: 'target2030EnergyCalorific', label: '综合能耗（吨标煤）-当量值', minWidth: 160 },
+      { prop: 'target2030UnitConsumption', label: '产品综合能耗（吨标煤/万元）', minWidth: 180 },
+    ],
+  },
+  { prop: 'declineRate', label: '万元产值综合能耗下降率（%）', minWidth: 200 },
+]
+
+const productColumns: RegColumn[] = [
+  { prop: 'productName', label: '产品名称', minWidth: 120 },
+  { prop: 'indicatorName', label: '单耗指标名称', minWidth: 150 },
+  { prop: 'indicatorValue', label: '单耗指标值', minWidth: 100 },
+  { prop: 'targetProductName', label: '目标产品名称', minWidth: 120 },
+  { prop: 'targetIndicatorName', label: '目标单耗指标名称', minWidth: 150 },
+  { prop: 'targetIndicatorValue', label: '目标单耗指标值', minWidth: 100 },
+  { prop: 'indicatorDeclineRate', label: '单耗指标下降率（%）', minWidth: 150 },
 ]
 
 const annualColumns: RegColumn[] = [
-  { prop: 'itemName', label: '项目', minWidth: 200 },
+  { prop: 'targetName', label: '目标名称', minWidth: 200 },
+  { prop: 'unit', label: '计量单位', minWidth: 100 },
   { prop: 'y2026', label: '2026年', minWidth: 100 },
   { prop: 'y2027', label: '2027年', minWidth: 100 },
   { prop: 'y2028', label: '2028年', minWidth: 100 },
@@ -34,9 +59,10 @@ onMounted(async () => {
       return { rows: [], total: 0 }
     })
     const allRows = data.rows || []
-    summaryRows.value = allRows.filter((r: Record<string, unknown>) => r.rowType === 'summary' || r.actual2025 !== undefined)
+    summaryRows.value = allRows.filter((r: Record<string, unknown>) => r.rowType === 'summary')
+    productRows.value = allRows.filter((r: Record<string, unknown>) => r.rowType === 'product')
     annualRows.value = allRows.filter((r: Record<string, unknown>) => r.rowType === 'annual' || r.y2026 !== undefined)
-    if (!summaryRows.value.length && !annualRows.value.length) {
+    if (!summaryRows.value.length && !annualRows.value.length && !productRows.value.length) {
       summaryRows.value = allRows
     }
   } finally {
@@ -47,7 +73,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <SectionTitle title="表18：十五五期间节能目标" />
+    <SectionTitle :title="'表17：\u201c十五五\u201d期间节能目标'" />
     <el-alert v-if="tableError" :title="tableError" type="warning" show-icon :closable="false" style="margin-bottom: 12px" />
 
     <RegulationTable
@@ -56,6 +82,15 @@ onMounted(async () => {
       :loading="loading"
       export-filename="十五五节能目标-总览"
       title="2025年实际 vs 2030年目标"
+    />
+
+    <RegulationTable
+      v-if="productRows.length"
+      :columns="productColumns"
+      :data="productRows"
+      :loading="loading"
+      export-filename="十五五节能目标-产品单耗"
+      title="产品单耗指标"
     />
 
     <RegulationTable
