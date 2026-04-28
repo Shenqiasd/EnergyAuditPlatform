@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -92,6 +93,83 @@ public class EnterpriseSettingController {
         // Remove null values to keep response clean
         map.values().removeIf(v -> v == null);
         return R.ok(map);
+    }
+
+    /**
+     * Checks whether all prerequisite tables are completed before allowing
+     * data entry or chart export.
+     * Returns a map with:
+     *   - passed: boolean (true if all prerequisites met)
+     *   - errors: list of error messages for unmet prerequisites
+     */
+    @Operation(summary = "Check prerequisite completion for data entry / chart export")
+    @GetMapping("/prerequisite-check")
+    public R<Map<String, Object>> checkPrerequisites() {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        List<String> errors = new ArrayList<>();
+
+        // 1. Enterprise basic information — all fields except remark must be filled
+        EntEnterpriseSetting setting = settingService.get(enterpriseId);
+        if (setting == null) {
+            errors.add("企业基本信息未填写");
+        } else {
+            List<String> missing = checkRequiredSettingFields(setting);
+            if (!missing.isEmpty()) {
+                errors.add("企业基本信息以下字段未填写：" + String.join("、", missing));
+            }
+        }
+
+        // 2. Energy types — at least 1 record
+        BsEnergy energyQuery = new BsEnergy();
+        energyQuery.setEnterpriseId(enterpriseId);
+        List<BsEnergy> energies = energySettingService.list(energyQuery);
+        if (energies == null || energies.isEmpty()) {
+            errors.add("能源品种至少需要配置1条记录");
+        }
+
+        // 3. Units — at least 1 record
+        BsUnit unitQuery = new BsUnit();
+        unitQuery.setEnterpriseId(enterpriseId);
+        List<BsUnit> units = unitSettingService.list(unitQuery);
+        if (units == null || units.isEmpty()) {
+            errors.add("用能单元至少需要配置1条记录");
+        }
+
+        // 4. Products — at least 1 record
+        BsProduct productQuery = new BsProduct();
+        productQuery.setEnterpriseId(enterpriseId);
+        List<BsProduct> products = productSettingService.list(productQuery);
+        if (products == null || products.isEmpty()) {
+            errors.add("产品信息至少需要配置1条记录");
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("passed", errors.isEmpty());
+        result.put("errors", errors);
+        return R.ok(result);
+    }
+
+    /**
+     * Check required fields on EntEnterpriseSetting.
+     * All fields except remark are considered required.
+     */
+    private List<String> checkRequiredSettingFields(EntEnterpriseSetting s) {
+        List<String> missing = new ArrayList<>();
+        if (isBlank(s.getRegion())) missing.add("所属地区");
+        if (isBlank(s.getIndustryName())) missing.add("行业分类");
+        if (isBlank(s.getUnitNature())) missing.add("单位类型");
+        if (isBlank(s.getLegalRepresentative())) missing.add("法定代表人");
+        if (isBlank(s.getLegalPhone())) missing.add("法定代表人电话");
+        if (isBlank(s.getEnterpriseAddress())) missing.add("单位地址");
+        if (isBlank(s.getPostalCode())) missing.add("邮政编码");
+        if (isBlank(s.getEnergyLeaderName())) missing.add("节能领导姓名");
+        if (isBlank(s.getEnergyManagerName())) missing.add("能源管理负责人");
+        if (isBlank(s.getEnergyManagerMobile())) missing.add("能源管理负责人手机");
+        return missing;
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
     }
 
     /**
