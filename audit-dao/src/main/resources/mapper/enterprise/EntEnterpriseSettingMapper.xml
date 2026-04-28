@@ -43,6 +43,11 @@
         <result column="industry_code"             property="industryCode"/>
         <result column="superior_department"       property="superiorDepartment"/>
         <result column="energy_enterprise_type"    property="energyEnterpriseType"/>
+        <result column="energy_usage_type"         property="energyUsageType"/>
+        <result column="energy_leader_title"        property="energyLeaderTitle"/>
+        <result column="energy_dept_name"           property="energyDeptName"/>
+        <result column="energy_audit_contact_name"  property="energyAuditContactName"/>
+        <result column="energy_audit_contact_phone" property="energyAuditContactPhone"/>
         <result column="remark"                    property="remark"/>
         <result column="create_by"                 property="createBy"/>
         <result column="create_time"               property="createTime"/>
@@ -72,6 +77,8 @@
             enterprise_contact, enterprise_mobile,
             compiler_contact, compiler_name, compiler_mobile, compiler_email,
             industry_category, industry_code, superior_department, energy_enterprise_type,
+            energy_usage_type, energy_leader_title, energy_dept_name,
+            energy_audit_contact_name, energy_audit_contact_phone,
             remark, create_by, create_time, update_by, update_time, deleted
         ) VALUES (
             #{enterpriseId},
@@ -85,6 +92,8 @@
             #{enterpriseContact}, #{enterpriseMobile},
             #{compilerContact}, #{compilerName}, #{compilerMobile}, #{compilerEmail},
             #{industryCategory}, #{industryCode}, #{superiorDepartment}, #{energyEnterpriseType},
+            #{energyUsageType}, #{energyLeaderTitle}, #{energyDeptName},
+            #{energyAuditContactName}, #{energyAuditContactPhone},
             #{remark}, #{createBy}, NOW(), #{updateBy}, NOW(), 0
         )
         ON DUPLICATE KEY UPDATE
@@ -125,6 +134,11 @@
             industry_code            = VALUES(industry_code),
             superior_department      = VALUES(superior_department),
             energy_enterprise_type   = VALUES(energy_enterprise_type),
+            energy_usage_type        = VALUES(energy_usage_type),
+            energy_leader_title      = VALUES(energy_leader_title),
+            energy_dept_name         = VALUES(energy_dept_name),
+            energy_audit_contact_name  = VALUES(energy_audit_contact_name),
+            energy_audit_contact_phone = VALUES(energy_audit_contact_phone),
             remark                   = VALUES(remark),
             update_by                = VALUES(update_by),
             update_time              = NOW(),

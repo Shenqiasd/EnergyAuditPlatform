@@ -153,8 +153,23 @@ public class EntEnterpriseSetting extends BaseEntity {
     /** 上级主管部门 */
     private String superiorDepartment;
 
-    /** 用能企业类型 */
+    /** 用能企业类型 (legacy) */
     private String energyEnterpriseType;
+
+    /** 用能企业类型 */
+    private String energyUsageType;
+
+    /** 单位主管节能领导职务 */
+    private String energyLeaderTitle;
+
+    /** 节能主管部门名称 */
+    private String energyDeptName;
+
+    /** 能源审计联系人姓名 */
+    private String energyAuditContactName;
+
+    /** 能源审计联系人电话 */
+    private String energyAuditContactPhone;
 
     /** 备注 */
     private String remark;

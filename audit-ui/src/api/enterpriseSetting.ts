@@ -54,6 +54,11 @@ export interface EnterpriseSetting {
   industryCode?: string
   superiorDepartment?: string
   energyEnterpriseType?: string
+  energyUsageType?: string
+  energyLeaderTitle?: string
+  energyDeptName?: string
+  energyAuditContactName?: string
+  energyAuditContactPhone?: string
   remark?: string
 }
 

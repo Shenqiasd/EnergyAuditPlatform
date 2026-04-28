@@ -1,14 +1,54 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getEnterpriseSetting, upsertEnterpriseSetting, type EnterpriseSetting } from '@/api/enterpriseSetting'
 import { INDUSTRY_CLASSIFICATION, buildIndustryLookup, type IndustryNode } from '@/config/industry-classification'
+import {
+  REGION_OPTIONS,
+  FIELD_OPTIONS,
+  UNIT_TYPE_OPTIONS,
+  ENERGY_USAGE_TYPE_OPTIONS,
+  SUPERIOR_DEPT_GROUPS
+} from '@/config/enterprise-options'
 
 const saving = ref(false)
 const loading = ref(false)
 
 const formRef = ref()
 const form = ref<Partial<EnterpriseSetting>>({})
+
+// ── Validation rules ──
+const rules = computed(() => ({
+  region:                 [{ required: true, message: '请选择所属地区', trigger: 'change' }],
+  industryField:          [{ required: true, message: '请选择所属领域', trigger: 'change' }],
+  unitNature:             [{ required: true, message: '请选择单位类型', trigger: 'change' }],
+  energyUsageType:        [{ required: true, message: '请选择用能企业类型', trigger: 'change' }],
+  registeredDate:         [{ required: true, message: '请选择单位注册日期', trigger: 'change' }],
+  registeredCapital:      [{ required: true, message: '请输入注册资本', trigger: 'blur' }],
+  legalRepresentative:    [{ required: true, message: '请输入法定代表人姓名', trigger: 'blur' }],
+  legalPhone:             [{ required: true, message: '请输入联系电话', trigger: 'blur' }],
+  superiorDepartment:     [{ required: true, message: '请选择上级主管部门', trigger: 'change' }],
+  enterpriseAddress:      [{ required: true, message: '请输入单位地址', trigger: 'blur' }],
+  postalCode:             [{ required: true, message: '请输入邮政编码', trigger: 'blur' }],
+  enterpriseEmail:        [{ required: true, message: '请输入电子邮箱', trigger: 'blur' }],
+  energyMgmtOrg:          [{ required: true, message: '请输入能源管理机构名称', trigger: 'blur' }],
+  energyLeaderName:       [{ required: true, message: '请输入单位主管节能领导姓名', trigger: 'blur' }],
+  energyLeaderPhone:      [{ required: true, message: '请输入单位主管节能领导电话', trigger: 'blur' }],
+  energyLeaderTitle:      [{ required: true, message: '请输入单位主管节能领导职务', trigger: 'blur' }],
+  energyDeptName:         [{ required: true, message: '请输入节能主管部门名称', trigger: 'blur' }],
+  energyManagerName:      [{ required: true, message: '请输入能源管理负责人姓名', trigger: 'blur' }],
+  energyManagerMobile:    [{ required: true, message: '请输入能源管理负责人电话', trigger: 'blur' }],
+  energyAuditContactName: [{ required: true, message: '请输入能源审计联系人姓名', trigger: 'blur' }],
+  energyAuditContactPhone:[{ required: true, message: '请输入能源审计联系人电话', trigger: 'blur' }],
+  compilerContact:        [{ required: true, message: '请输入能源审计报告编制单位', trigger: 'blur' }],
+  compilerName:           [{ required: true, message: '请输入编制单位联系人姓名', trigger: 'blur' }],
+  compilerMobile:         [{ required: true, message: '请输入编制单位联系人电话', trigger: 'blur' }],
+  compilerEmail:          [{ required: true, message: '请输入编制单位联系人邮箱', trigger: 'blur' }],
+  energyCert:             [{ required: true, message: '请选择是否通过认证', trigger: 'change' }],
+  certPassDate:           form.value.energyCert === 1 ? [{ required: true, message: '请选择通过日期', trigger: 'change' }] : [],
+  certAuthority:          form.value.energyCert === 1 ? [{ required: true, message: '请输入认证机构', trigger: 'blur' }] : [],
+  hasEnergyCenter:        [{ required: true, message: '请选择是否建设能源管理中心', trigger: 'change' }],
+}))
 
 // ── Industry cascading selector ──
 const industryLookup = buildIndustryLookup()
@@ -77,19 +117,23 @@ onMounted(loadData)
       <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
     </div>
 
-    <el-form ref="formRef" :model="form" label-width="160px" class="setting-form">
+    <el-form ref="formRef" :model="form" :rules="rules" label-width="180px" class="setting-form">
 
-      <!-- ── 地区 / 行业 ── -->
-      <el-divider content-position="left">地区与行业</el-divider>
+      <!-- ══════ 大类-基本信息 ══════ -->
+      <el-divider content-position="left">基本信息</el-divider>
       <el-row :gutter="24">
         <el-col :span="12">
-          <el-form-item label="所属地区">
-            <el-input v-model="form.region" placeholder="如：浦东新区" />
+          <el-form-item label="所属地区" prop="region">
+            <el-select v-model="form.region" placeholder="请选择所属地区" style="width:100%" filterable>
+              <el-option v-for="item in REGION_OPTIONS" :key="item" :label="item" :value="item" />
+            </el-select>
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="所属领域">
-            <el-input v-model="form.industryField" placeholder="如：工业" />
+          <el-form-item label="所属领域" prop="industryField">
+            <el-select v-model="form.industryField" placeholder="请选择所属领域" style="width:100%">
+              <el-option v-for="item in FIELD_OPTIONS" :key="item" :label="item" :value="item" />
+            </el-select>
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -107,75 +151,60 @@ onMounted(loadData)
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="单位类型">
-            <el-input v-model="form.unitNature" placeholder="如：港、澳、台商投资企业" />
+          <el-form-item label="单位类型" prop="unitNature">
+            <el-select v-model="form.unitNature" placeholder="请选择单位类型" style="width:100%" filterable>
+              <el-option v-for="item in UNIT_TYPE_OPTIONS" :key="item" :label="item" :value="item" />
+            </el-select>
           </el-form-item>
         </el-col>
-      </el-row>
-
-      <!-- ── 工商注册 ── -->
-      <el-divider content-position="left">工商注册</el-divider>
-      <el-row :gutter="24">
         <el-col :span="12">
-          <el-form-item label="单位注册日期">
+          <el-form-item label="用能企业类型" prop="energyUsageType">
+            <el-select v-model="form.energyUsageType" placeholder="请选择用能企业类型" style="width:100%">
+              <el-option v-for="item in ENERGY_USAGE_TYPE_OPTIONS" :key="item" :label="item" :value="item" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="单位注册日期" prop="registeredDate">
             <el-date-picker v-model="form.registeredDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" style="width:100%" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="注册资本（万元）">
+          <el-form-item label="注册资本（万元）" prop="registeredCapital">
             <el-input-number v-model="form.registeredCapital" :min="0" :precision="2" style="width:100%" />
           </el-form-item>
         </el-col>
-      </el-row>
-
-      <!-- ── 法人代表 ── -->
-      <el-divider content-position="left">法人代表</el-divider>
-      <el-row :gutter="24">
         <el-col :span="12">
-          <el-form-item label="法定代表人姓名">
+          <el-form-item label="法定代表人姓名" prop="legalRepresentative">
             <el-input v-model="form.legalRepresentative" placeholder="请输入法定代表人姓名" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="联系电话（区号）">
+          <el-form-item label="联系电话（区号）" prop="legalPhone">
             <el-input v-model="form.legalPhone" placeholder="如：021-57501888-2679" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="是否央企">
-            <el-radio-group v-model="form.isCentralEnterprise">
-              <el-radio :value="1">是</el-radio>
-              <el-radio :value="0">否</el-radio>
-            </el-radio-group>
+          <el-form-item label="上级主管部门" prop="superiorDepartment">
+            <el-select v-model="form.superiorDepartment" placeholder="请选择上级主管部门" style="width:100%" filterable>
+              <el-option-group v-for="group in SUPERIOR_DEPT_GROUPS" :key="group.label" :label="group.label">
+                <el-option v-for="item in group.options" :key="item" :label="item" :value="item" />
+              </el-option-group>
+            </el-select>
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="所属集团名称">
-            <el-input v-model="form.groupName" placeholder="请输入集团名称" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <!-- ── 地址 / 通讯 ── -->
-      <el-divider content-position="left">地址与通讯</el-divider>
-      <el-row :gutter="24">
-        <el-col :span="12">
-          <el-form-item label="单位地址">
+          <el-form-item label="单位地址" prop="enterpriseAddress">
             <el-input v-model="form.enterpriseAddress" placeholder="请输入单位地址" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="邮政编码">
+          <el-form-item label="邮政编码" prop="postalCode">
             <el-input v-model="form.postalCode" placeholder="请输入邮政编码" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="行政区划代码">
-            <el-input v-model="form.adminDivisionCode" placeholder="如：310115" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="电子邮箱">
+          <el-form-item label="电子邮箱" prop="enterpriseEmail">
             <el-input v-model="form.enterpriseEmail" placeholder="请输入邮箱" />
           </el-form-item>
         </el-col>
@@ -186,51 +215,76 @@ onMounted(loadData)
         </el-col>
       </el-row>
 
-      <!-- ── 能源管理 ── -->
+      <!-- ══════ 大类-能源管理 ══════ -->
       <el-divider content-position="left">能源管理</el-divider>
       <el-row :gutter="24">
         <el-col :span="12">
-          <el-form-item label="能源管理机构名称">
+          <el-form-item label="能源管理机构名称" prop="energyMgmtOrg">
             <el-input v-model="form.energyMgmtOrg" placeholder="如：节能降耗管理委员会" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="节能领导姓名">
+          <el-form-item label="单位主管节能领导姓名" prop="energyLeaderName">
             <el-input v-model="form.energyLeaderName" placeholder="请输入姓名" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="节能领导电话">
+          <el-form-item label="单位主管节能领导电话" prop="energyLeaderPhone">
             <el-input v-model="form.energyLeaderPhone" placeholder="请输入联系电话" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="能源管理负责人">
+          <el-form-item label="单位主管节能领导职务" prop="energyLeaderTitle">
+            <el-input v-model="form.energyLeaderTitle" placeholder="请输入职务" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="节能主管部门名称" prop="energyDeptName">
+            <el-input v-model="form.energyDeptName" placeholder="请输入部门名称" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="能源管理负责人姓名" prop="energyManagerName">
             <el-input v-model="form.energyManagerName" placeholder="请输入姓名" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="负责人手机">
-            <el-input v-model="form.energyManagerMobile" placeholder="请输入手机号" />
+          <el-form-item label="能源管理负责人电话" prop="energyManagerMobile">
+            <el-input v-model="form.energyManagerMobile" placeholder="请输入电话" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="能源管理师证号">
-            <el-input v-model="form.energyManagerCert" placeholder="请输入证号" />
+          <el-form-item label="能源审计联系人姓名" prop="energyAuditContactName">
+            <el-input v-model="form.energyAuditContactName" placeholder="请输入姓名" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="能源部门负责人电话">
-            <el-input v-model="form.energyDeptLeaderPhone" placeholder="请输入联系电话" />
+          <el-form-item label="能源审计联系人电话" prop="energyAuditContactPhone">
+            <el-input v-model="form.energyAuditContactPhone" placeholder="请输入电话" />
           </el-form-item>
         </el-col>
-      </el-row>
-
-      <!-- ── 能源认证 ── -->
-      <el-divider content-position="left">能源认证</el-divider>
-      <el-row :gutter="24">
         <el-col :span="12">
-          <el-form-item label="是否通过能源管理体系认证">
+          <el-form-item label="能源审计报告编制单位" prop="compilerContact">
+            <el-input v-model="form.compilerContact" placeholder="请输入编制单位名称" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="编制单位联系人姓名" prop="compilerName">
+            <el-input v-model="form.compilerName" placeholder="请输入姓名" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="编制单位联系人电话" prop="compilerMobile">
+            <el-input v-model="form.compilerMobile" placeholder="请输入电话" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="编制单位联系人邮箱" prop="compilerEmail">
+            <el-input v-model="form.compilerEmail" placeholder="请输入邮箱" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="是否通过能源管理体系认证" prop="energyCert">
             <el-radio-group v-model="form.energyCert">
               <el-radio :value="1">是</el-radio>
               <el-radio :value="0">否</el-radio>
@@ -238,56 +292,21 @@ onMounted(loadData)
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="认证通过日期">
+          <el-form-item label="通过日期" prop="certPassDate">
             <el-date-picker v-model="form.certPassDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" style="width:100%" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="认证机构">
+          <el-form-item label="认证机构" prop="certAuthority">
             <el-input v-model="form.certAuthority" placeholder="请输入认证机构名称" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="是否建设能源管理中心">
+          <el-form-item label="是否建设能源管理中心" prop="hasEnergyCenter">
             <el-radio-group v-model="form.hasEnergyCenter">
               <el-radio :value="1">是</el-radio>
               <el-radio :value="0">否</el-radio>
             </el-radio-group>
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <!-- ── 其他信息 ── -->
-      <el-divider content-position="left">其他信息</el-divider>
-      <el-row :gutter="24">
-        <el-col :span="12">
-          <el-form-item label="企业联系人">
-            <el-input v-model="form.enterpriseContact" placeholder="请输入联系人姓名" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="企业联系手机">
-            <el-input v-model="form.enterpriseMobile" placeholder="请输入手机号" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="编制人联系人">
-            <el-input v-model="form.compilerContact" placeholder="请输入联系人" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="编制人姓名">
-            <el-input v-model="form.compilerName" placeholder="请输入姓名" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="编制人手机">
-            <el-input v-model="form.compilerMobile" placeholder="请输入手机号" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="编制人邮箱">
-            <el-input v-model="form.compilerEmail" placeholder="请输入邮箱" />
           </el-form-item>
         </el-col>
       </el-row>
