@@ -1314,19 +1314,18 @@ function validateRequiredFields(): string[] {
   const tags = cachedTags // populated during applyDataEntryProtection
 
   for (const tag of tags) {
-    if (tag.required !== 1) continue
     const mappingType = tag.mappingType ?? 'SCALAR'
 
     if (mappingType === 'SCALAR') {
-      const empty = isScalarCellEmpty(workbook, tag)
-      if (empty) {
+      if (tag.required === 1 && isScalarCellEmpty(workbook, tag)) {
         errors.push(`"${tag.fieldName ?? tag.tagName}" 为必填字段，请填写`)
       }
     } else if (mappingType === 'TABLE' || mappingType === 'EQUIPMENT_BENCHMARK') {
-      const empty = isTableEmpty(workbook, tag)
-      if (empty) {
+      if (tag.required === 1 && isTableEmpty(workbook, tag)) {
         errors.push(`"${tag.tagName ?? tag.targetTable}" 至少需要填写1行数据`)
       }
+      const rowErrors = validateTableRowRequired(workbook, tag)
+      errors.push(...rowErrors)
     }
   }
   return errors
@@ -1461,6 +1460,96 @@ function isTableEmpty(
     if (rowHasData) return false
   }
   return true
+}
+
+function colIndexToLetter(index: number): string {
+  let result = ''
+  let i = index + 1
+  while (i > 0) {
+    i--
+    result = String.fromCharCode(65 + (i % 26)) + result
+    i = Math.floor(i / 26)
+  }
+  return result
+}
+
+/**
+ * Validate row-level required fields for TABLE tags.
+ * Rule: if a row has ANY non-empty cell, then all columns marked required
+ * in columnMappings must also be non-empty.
+ * Returns array of error messages (empty = all valid).
+ *
+ * Skips EQUIPMENT_BENCHMARK tags whose columnMappings use the
+ * commonColumns/typeColumns structure (not yet supported for row-level required).
+ */
+function validateTableRowRequired(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tag: TplTagMapping,
+): string[] {
+  const errors: string[] = []
+  if (!tag.cellRange || !tag.columnMappings) return errors
+
+  const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
+  if (!rangeMatch) return errors
+
+  const startRow = parseInt(rangeMatch[2]) - 1
+  const endRow = parseInt(rangeMatch[4]) - 1
+  const startCol = letterToColIndex(rangeMatch[1])
+
+  const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+  if (!sheet) return errors
+
+  let colDefs: Array<{ col: string | number; field: string; required?: boolean }>
+  try {
+    const parsed = JSON.parse(tag.columnMappings)
+    colDefs = parsed.columns || parsed
+    if (!Array.isArray(colDefs)) return errors
+  } catch {
+    return errors
+  }
+
+  const resolveColIdx = (colDef: { col: string | number }) => {
+    if (typeof colDef.col === 'string' && /^[A-Za-z]+$/.test(colDef.col)) {
+      return letterToColIndex(colDef.col.toUpperCase())
+    }
+    return startCol + Number(colDef.col)
+  }
+
+  const requiredCols = colDefs
+    .filter(c => c.required === true)
+    .map(c => {
+      const colIdx = resolveColIdx(c)
+      return { colIndex: colIdx, label: `${colIndexToLetter(colIdx)}列` }
+    })
+
+  if (requiredCols.length === 0) return errors
+
+  const endCol = letterToColIndex(rangeMatch[3])
+
+  for (let r = startRow; r <= endRow; r++) {
+    let rowHasData = false
+    for (let c = startCol; c <= endCol; c++) {
+      const val = sheet.getValue(r, c)
+      if (val != null && val !== '') {
+        rowHasData = true
+        break
+      }
+    }
+    if (!rowHasData) continue
+
+    const missingCols: string[] = []
+    for (const rc of requiredCols) {
+      const val = sheet.getValue(r, rc.colIndex)
+      if (val == null || val === '') {
+        missingCols.push(rc.label)
+      }
+    }
+    if (missingCols.length > 0) {
+      const rowNum = r - startRow + 1
+      errors.push(`"${tag.tagName}" 第${rowNum}行: ${missingCols.join('、')} 为必填`)
+    }
+  }
+  return errors
 }
 
 function findSheet(
@@ -1644,7 +1733,9 @@ function computeOneSheetStatus(sheetIndex: number): SheetFillStatus {
     if (mappingType === 'SCALAR') {
       if (!isScalarCellEmpty(wb, tag)) filledRequired++
     } else if (mappingType === 'TABLE' || mappingType === 'EQUIPMENT_BENCHMARK') {
-      if (!isTableEmpty(wb, tag)) filledRequired++
+      const tableNotEmpty = !isTableEmpty(wb, tag)
+      const rowErrors = validateTableRowRequired(wb, tag)
+      if (tableNotEmpty && rowErrors.length === 0) filledRequired++
     }
   }
 
@@ -1902,16 +1993,17 @@ function validateRequiredFieldsBySheet(): SheetValidationError[] {
     })
 
     for (const tag of sheetTags) {
-      if (tag.required !== 1) continue
       const mappingType = tag.mappingType ?? 'SCALAR'
       if (mappingType === 'SCALAR') {
-        if (isScalarCellEmpty(workbook, tag)) {
+        if (tag.required === 1 && isScalarCellEmpty(workbook, tag)) {
           errors.push(`"${tag.fieldName ?? tag.tagName}" 为必填字段，请填写`)
         }
       } else if (mappingType === 'TABLE' || mappingType === 'EQUIPMENT_BENCHMARK') {
-        if (isTableEmpty(workbook, tag)) {
+        if (tag.required === 1 && isTableEmpty(workbook, tag)) {
           errors.push(`"${tag.tagName ?? tag.targetTable}" 至少需要填写1行数据`)
         }
+        const rowErrors = validateTableRowRequired(workbook, tag)
+        errors.push(...rowErrors)
       }
     }
 
