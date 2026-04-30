@@ -62,7 +62,7 @@ async function loadData() {
 }
 
 async function loadEnergyOptions() {
-  const res = await getEnergyList({ pageSize: 500 })
+  const res = await getEnergyList({ pageSize: 500, isActive: 1 })
   energyOptions.value = res.rows ?? []
 }
 
