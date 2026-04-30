@@ -173,8 +173,8 @@ export interface GCSpreadSheetsEvents {
   ActiveSheetChanged: string
   CellChanged: string
   ViewZoomed: string
-  ClipboardPasting?: string | number
-  ClipboardPasted?: string | number
+  ClipboardPasting?: string
+  ClipboardPasted?: string
 }
 
 export interface GCSpreadSheets {
