@@ -91,6 +91,9 @@ export interface GCSpreadSheet {
   getRange(row: number, col: number, rowCount: number, colCount: number): GCRange
   setDataValidator(row: number, col: number, validator: GCDataValidator): void
   getDataValidator(row: number, col: number): GCDataValidator | null
+  addRows(row: number, count: number): void
+  deleteRows(row: number, count: number): void
+  getSelections(): Array<{ row: number; col: number; rowCount: number; colCount: number }>
   setRowVisible(row: number, visible: boolean): void
   getCustomName(name: string): GCSpreadNameInfo | null
   name(): string
@@ -128,6 +131,7 @@ export interface GCSpreadWorkbook {
   toJSON(): object
   getSheetCount(): number
   getSheet(index: number): GCSpreadSheet
+  getActiveSheet(): GCSpreadSheet
   getActiveSheetIndex(): number
   setActiveSheet(name: string): void
   setActiveSheetIndex(index: number): void
