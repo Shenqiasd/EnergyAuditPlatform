@@ -45,13 +45,17 @@ public class SpreadsheetDataExtractor {
             Map<String, JsonNode> namedRanges = parseNamedRanges(root);
             Map<String, JsonNode> cellTags = parseCellTags(sheets);
 
+            // Parse _dynamicRanges from submission JSON (add-row feature)
+            // Key: tag mapping ID (string) → {startRow, endRow, startCol, endCol}
+            Map<Long, int[]> dynamicRanges = parseDynamicRanges(root);
+
             for (TplTagMapping mapping : tagMappings) {
                 String tagName = mapping.getTagName();
                 String mappingType = mapping.getMappingType() != null ? mapping.getMappingType() : "SCALAR";
 
                 if ("EQUIPMENT_BENCHMARK".equalsIgnoreCase(mappingType)) {
                     List<Map<String, Object>> benchmarkData = extractEquipmentBenchmark(
-                            sheets, sheetNameList, namedRanges, mapping);
+                            sheets, sheetNameList, namedRanges, mapping, dynamicRanges);
 
                     if (mapping.getRequired() != null && mapping.getRequired() == 1 && benchmarkData.isEmpty()) {
                         throw new BusinessException("必填表格 [" + mapping.getFieldName() + "] 无有效数据行");
@@ -62,7 +66,7 @@ public class SpreadsheetDataExtractor {
                             benchmarkData.size());
                 } else if ("TABLE".equalsIgnoreCase(mappingType)) {
                     List<Map<String, Object>> tableData = extractTableData(
-                            sheets, sheetNameList, namedRanges, mapping);
+                            sheets, sheetNameList, namedRanges, mapping, dynamicRanges);
 
                     if (mapping.getRequired() != null && mapping.getRequired() == 1 && tableData.isEmpty()) {
                         throw new BusinessException("必填表格 [" + mapping.getFieldName() + "] 无有效数据行");
@@ -201,7 +205,8 @@ public class SpreadsheetDataExtractor {
 
     private List<Map<String, Object>> extractTableData(
             JsonNode sheets, List<String> sheetNameList,
-            Map<String, JsonNode> namedRanges, TplTagMapping mapping) {
+            Map<String, JsonNode> namedRanges, TplTagMapping mapping,
+            Map<Long, int[]> dynamicRanges) {
 
         List<Map<String, Object>> rows = new ArrayList<>();
         String tagName = mapping.getTagName();
@@ -210,25 +215,37 @@ public class SpreadsheetDataExtractor {
         int sheetIdx = mapping.getSheetIndex() != null ? mapping.getSheetIndex() : 0;
         String preferredSheetName = mapping.getSheetName();
 
-        JsonNode rangeNode = namedRanges.get(tagName);
-        if (rangeNode != null) {
-            int rangeSheetIdx = rangeNode.path("sheetIndex").asInt(sheetIdx);
-            preferredSheetName = rangeSheetIdx >= 0 && rangeSheetIdx < sheetNameList.size()
-                    ? sheetNameList.get(rangeSheetIdx) : preferredSheetName;
-            sheetIdx = rangeSheetIdx;
-            startRow = rangeNode.path("row").asInt(0);
-            startCol = rangeNode.path("col").asInt(0);
-            rowCount = rangeNode.path("rowCount").asInt(1);
-            colCount = rangeNode.path("colCount").asInt(1);
-        } else if (mapping.getCellRange() != null && !mapping.getCellRange().isBlank()) {
-            int[] parsed = parseCellRange(mapping.getCellRange());
-            startRow = parsed[0];
-            startCol = parsed[1];
-            rowCount = parsed[2] - parsed[0] + 1;
-            colCount = parsed[3] - parsed[1] + 1;
+        // Priority 1: _dynamicRanges from submission JSON (add-row adjusted)
+        int[] dynRange = mapping.getId() != null ? dynamicRanges.get(mapping.getId()) : null;
+        if (dynRange != null) {
+            startRow = dynRange[0];
+            startCol = dynRange[2];
+            rowCount = dynRange[1] - dynRange[0] + 1;
+            colCount = dynRange[3] - dynRange[2] + 1;
+            log.debug("TABLE '{}' using dynamicRange: startRow={}, rowCount={}", tagName, startRow, rowCount);
+        // Priority 2: Named Range from SpreadJS JSON
         } else {
-            log.warn("TABLE mapping '{}' has no Named Range and no cellRange configured", tagName);
-            return rows;
+            JsonNode rangeNode = namedRanges.get(tagName);
+            if (rangeNode != null) {
+                int rangeSheetIdx = rangeNode.path("sheetIndex").asInt(sheetIdx);
+                preferredSheetName = rangeSheetIdx >= 0 && rangeSheetIdx < sheetNameList.size()
+                        ? sheetNameList.get(rangeSheetIdx) : preferredSheetName;
+                sheetIdx = rangeSheetIdx;
+                startRow = rangeNode.path("row").asInt(0);
+                startCol = rangeNode.path("col").asInt(0);
+                rowCount = rangeNode.path("rowCount").asInt(1);
+                colCount = rangeNode.path("colCount").asInt(1);
+            // Priority 3: static cellRange from DB
+            } else if (mapping.getCellRange() != null && !mapping.getCellRange().isBlank()) {
+                int[] parsed = parseCellRange(mapping.getCellRange());
+                startRow = parsed[0];
+                startCol = parsed[1];
+                rowCount = parsed[2] - parsed[0] + 1;
+                colCount = parsed[3] - parsed[1] + 1;
+            } else {
+                log.warn("TABLE mapping '{}' has no Named Range and no cellRange configured", tagName);
+                return rows;
+            }
         }
 
         String sheetName = resolveSheetName(sheets, sheetNameList, preferredSheetName, sheetIdx);
@@ -302,16 +319,25 @@ public class SpreadsheetDataExtractor {
      */
     private List<Map<String, Object>> extractEquipmentBenchmark(
             JsonNode sheets, List<String> sheetNameList,
-            Map<String, JsonNode> namedRanges, TplTagMapping mapping) {
+            Map<String, JsonNode> namedRanges, TplTagMapping mapping,
+            Map<Long, int[]> dynamicRanges) {
 
         List<Map<String, Object>> rows = new ArrayList<>();
 
-        // 1. Resolve cell range
+        // 1. Resolve cell range — prefer dynamicRange, fallback to static cellRange
         int startRow, startCol, rowCount, colCount;
         int sheetIdx = mapping.getSheetIndex() != null ? mapping.getSheetIndex() : 0;
         String preferredSheetName = mapping.getSheetName();
 
-        if (mapping.getCellRange() != null && !mapping.getCellRange().isBlank()) {
+        int[] dynRange = mapping.getId() != null ? dynamicRanges.get(mapping.getId()) : null;
+        if (dynRange != null) {
+            startRow = dynRange[0];
+            startCol = dynRange[2];
+            rowCount = dynRange[1] - dynRange[0] + 1;
+            colCount = dynRange[3] - dynRange[2] + 1;
+            log.debug("EQUIPMENT_BENCHMARK '{}' using dynamicRange: startRow={}, rowCount={}",
+                    mapping.getTagName(), startRow, rowCount);
+        } else if (mapping.getCellRange() != null && !mapping.getCellRange().isBlank()) {
             int[] parsed = parseCellRange(mapping.getCellRange());
             startRow = parsed[0];
             startCol = parsed[1];
@@ -458,6 +484,40 @@ public class SpreadsheetDataExtractor {
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Parse _dynamicRanges from submission JSON (add-row feature).
+     * Format: { "_dynamicRanges": { "tagId": { "startRow":0, "endRow":10, "startCol":0, "endCol":5 }, ... } }
+     * Returns Map&lt;tagId, int[]{startRow, endRow, startCol, endCol}&gt;.
+     * If _dynamicRanges is absent or malformed, returns an empty map (backward compatible).
+     */
+    private Map<Long, int[]> parseDynamicRanges(JsonNode root) {
+        Map<Long, int[]> map = new HashMap<>();
+        JsonNode dr = root.get("_dynamicRanges");
+        if (dr == null || !dr.isObject()) return map;
+        dr.fields().forEachRemaining(entry -> {
+            try {
+                long id = Long.parseLong(entry.getKey());
+                JsonNode range = entry.getValue();
+                if (range.isObject()
+                        && range.has("startRow") && range.has("endRow")
+                        && range.has("startCol") && range.has("endCol")) {
+                    map.put(id, new int[]{
+                            range.get("startRow").asInt(),
+                            range.get("endRow").asInt(),
+                            range.get("startCol").asInt(),
+                            range.get("endCol").asInt()
+                    });
+                }
+            } catch (NumberFormatException ignored) {
+                log.debug("parseDynamicRanges: skipping non-numeric key '{}'", entry.getKey());
+            }
+        });
+        if (!map.isEmpty()) {
+            log.info("Loaded {} dynamicRanges from submission JSON", map.size());
+        }
+        return map;
+    }
 
     private Map<String, JsonNode> parseNamedRanges(JsonNode root) {
         Map<String, JsonNode> map = new HashMap<>();

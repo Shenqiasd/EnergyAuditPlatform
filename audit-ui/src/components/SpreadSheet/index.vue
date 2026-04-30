@@ -56,6 +56,35 @@ let currentSubmission: TplSubmission | null = null
  */
 let ownsLock = false
 
+// ── Add Row Feature: runtime state ──────────────────────────────────────
+/** Runtime-adjusted cellRanges for TABLE/EQUIPMENT_BENCHMARK tags.
+ *  Key: tag mapping ID → 0-based {startRow, endRow, startCol, endCol}. */
+const dynamicRanges = new Map<number, { startRow: number; endRow: number; startCol: number; endCol: number }>()
+
+/** Original cellRange per TABLE tag (as loaded from template/DB).
+ *  Used to determine which rows are "original" vs manually added. Key: tag ID. */
+const originalRanges = new Map<number, { startRow: number; endRow: number; startCol: number; endCol: number }>()
+
+/** Set of absolute row indices manually added by the user. Key: tag ID. */
+const manuallyAddedRows = new Map<number, Set<number>>()
+
+/** Protected CONFIG_PREFILL row ranges per sheet index.
+ *  User cannot insert into or delete these rows. */
+const protectedPrefillRanges = new Map<number, Array<{ startRow: number; endRow: number }>>()
+
+/** Maximum rows allowed per TABLE range */
+const MAX_TABLE_ROWS = 1000
+
+/** Context menu state for add/delete row */
+const ctxMenuVisible = ref(false)
+const ctxMenuX = ref(0)
+const ctxMenuY = ref(0)
+interface CtxMenuItem { label: string; action: string; disabled?: boolean; danger?: boolean }
+const ctxMenuItems = ref<CtxMenuItem[]>([])
+let ctxMenuRow = -1
+let ctxMenuSheetIndex = -1
+let ctxMenuTag: TplTagMapping | null = null
+
 // ── Safe wrappers for optional SpreadJS Workbook APIs ───────────────────
 // Some SpreadJS builds / license tiers expose `suspendEvent`, `suspendCalcService`
 // and `calculate` while others do not. Wrap each call in a feature-detect so
@@ -134,6 +163,10 @@ onBeforeUnmount(() => {
   stopHeartbeat()
   releaseLockIfOwned()
   window.removeEventListener('resize', onWindowResize)
+  document.removeEventListener('click', onDocumentClickDismissCtxMenu)
+  if (spreadRef.value) {
+    spreadRef.value.removeEventListener('contextmenu', onSpreadContextMenu)
+  }
   if (statusUpdateTimer) clearTimeout(statusUpdateTimer)
   if (resizeTimer) clearTimeout(resizeTimer)
   workbook?.destroy()
@@ -172,12 +205,17 @@ async function initWorkbook() {
     }
 
     const jsonStr = currentSubmission?.submissionJson ?? publishedVersion.templateJson
+    // Parse JSON once — extract add-row state before passing to SpreadJS
+    const jsonObj = JSON.parse(jsonStr)
+    if (currentSubmission) {
+      loadDynamicRangesFromObj(jsonObj as Record<string, unknown>)
+    }
     // Skip recalculation during fromJSON — a single recalc is triggered
     // after all Phase 2 mutations complete, avoiding repeated full-workbook
     // recomputation on templates with heavy cross-sheet formulas.
     console.time('[perf] fromJSON')
     ;(workbook.fromJSON as unknown as (data: unknown, opts?: Record<string, unknown>) => void)(
-      JSON.parse(jsonStr),
+      jsonObj,
       { doNotRecalculateAfterLoad: true },
     )
     console.timeEnd('[perf] fromJSON')
@@ -263,6 +301,10 @@ async function initWorkbook() {
             console.timeEnd('[perf] bindValidationErrorDialogs')
             cpTrace('bindValidationErrorDialogs.done')
 
+            // Initialize dynamicRanges from tags (MUST be after config-prefill
+            // which may track protected prefill ranges)
+            initDynamicRangesFromTags(tags)
+
             // Apply cell protection + required field markers (uses pre-fetched tags)
             if (publishedVersion.protectionEnabled !== 0) {
               cpTrace('applyDataEntryProtection.start')
@@ -338,6 +380,11 @@ async function initWorkbook() {
     autoFitCurrentSheet()
     cpTrace('postcalc.autoFitCurrentSheet.done')
     window.addEventListener('resize', onWindowResize)
+    // Bind right-click context menu for add/delete row
+    if (spreadRef.value) {
+      spreadRef.value.addEventListener('contextmenu', onSpreadContextMenu)
+    }
+    document.addEventListener('click', onDocumentClickDismissCtxMenu)
     cpTrace('postcalc.allDone')
   } catch (e: any) {
     errorMsg.value = '加载模板失败：' + (e?.message ?? '未知错误')
@@ -716,6 +763,9 @@ function applyOneConfigPrefill(
     for (let i = rowsToFill; i < maxRows; i++) {
       sheet.setRowVisible(startRow + i, false)
     }
+    // Track this CONFIG_PREFILL area so add-row logic blocks insert/delete here
+    const sheetIdx = resolveSheetIndex(wb, tag)
+    trackPrefillRange(sheetIdx, startRow, rowsToFill)
   }
 
   // 11. Identify master columns that have linkedTo dependents (for event binding)
@@ -1063,6 +1113,116 @@ function colIndexToLetter(col: number): string {
     c = Math.floor(c / 26) - 1
   }
   return result
+}
+
+// ── Add Row Feature: utility functions ───────────────────────────────────
+
+/** Parse cellRange string like "A3:K14" to 0-based {startRow, endRow, startCol, endCol} */
+function parseCellRangeToObj(cellRange: string): { startRow: number; endRow: number; startCol: number; endCol: number } | null {
+  const m = cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
+  if (!m) return null
+  return {
+    startRow: parseInt(m[2]) - 1,
+    endRow: parseInt(m[4]) - 1,
+    startCol: letterToColIndex(m[1]),
+    endCol: letterToColIndex(m[3]),
+  }
+}
+
+/** Get effective range for a TABLE tag: dynamicRange if available, else static cellRange */
+function getDynamicRange(tag: TplTagMapping): { startRow: number; endRow: number; startCol: number; endCol: number } | null {
+  if (tag.id && dynamicRanges.has(tag.id)) {
+    return dynamicRanges.get(tag.id)!
+  }
+  if (tag.cellRange) {
+    return parseCellRangeToObj(tag.cellRange)
+  }
+  return null
+}
+
+/** Resolve the workbook sheet index for a tag */
+function resolveSheetIndex(wb: import('@/types/spreadjs').GCSpreadWorkbook, tag: TplTagMapping): number {
+  if (tag.sheetName) {
+    const count = wb.getSheetCount()
+    const target = tag.sheetName.trim().toLowerCase()
+    for (let i = 0; i < count; i++) {
+      if (wb.getSheet(i).name().trim().toLowerCase() === target) return i
+    }
+  }
+  return tag.sheetIndex ?? 0
+}
+
+/** Find the TABLE/EQUIPMENT_BENCHMARK tag whose dynamic range contains the given row */
+function findTableTagAtCell(sheetIndex: number, row: number): TplTagMapping | null {
+  for (const tag of cachedTags) {
+    const mt = tag.mappingType ?? 'SCALAR'
+    if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
+    if (!workbook) continue
+    const tagSI = resolveSheetIndex(workbook, tag)
+    if (tagSI !== sheetIndex) continue
+    const range = getDynamicRange(tag)
+    if (!range) continue
+    if (row >= range.startRow && row <= range.endRow) return tag
+  }
+  return null
+}
+
+/** Initialize dynamicRanges from loaded tags (static cellRange as baseline) */
+function initDynamicRangesFromTags(tags: TplTagMapping[]) {
+  for (const tag of tags) {
+    const mt = tag.mappingType ?? 'SCALAR'
+    if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
+    if (!tag.cellRange || !tag.id) continue
+    const range = parseCellRangeToObj(tag.cellRange)
+    if (!range) continue
+    originalRanges.set(tag.id, { ...range })
+    if (!dynamicRanges.has(tag.id)) {
+      dynamicRanges.set(tag.id, { ...range })
+    }
+    if (!manuallyAddedRows.has(tag.id)) {
+      manuallyAddedRows.set(tag.id, new Set())
+    }
+  }
+}
+
+/** Load _dynamicRanges and _manuallyAddedRows from parsed submission JSON object */
+function loadDynamicRangesFromObj(jsonObj: Record<string, unknown>) {
+  const dr = jsonObj._dynamicRanges
+  if (dr && typeof dr === 'object') {
+    for (const [idStr, range] of Object.entries(dr as Record<string, unknown>)) {
+      const id = Number(idStr)
+      if (isNaN(id)) continue
+      const r = range as Record<string, number>
+      if (r.startRow != null && r.endRow != null && r.startCol != null && r.endCol != null) {
+        dynamicRanges.set(id, { startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol })
+      }
+    }
+  }
+  const mr = jsonObj._manuallyAddedRows
+  if (mr && typeof mr === 'object') {
+    for (const [idStr, rows] of Object.entries(mr as Record<string, unknown>)) {
+      const id = Number(idStr)
+      if (isNaN(id)) continue
+      if (Array.isArray(rows)) {
+        manuallyAddedRows.set(id, new Set(rows as number[]))
+      }
+    }
+  }
+}
+
+/** Track CONFIG_PREFILL protected range for a sheet (used by add-row to block insert/delete) */
+function trackPrefillRange(sheetIndex: number, startRow: number, rowCount: number) {
+  if (rowCount <= 0) return
+  const ranges = protectedPrefillRanges.get(sheetIndex) ?? []
+  ranges.push({ startRow, endRow: startRow + rowCount - 1 })
+  protectedPrefillRanges.set(sheetIndex, ranges)
+}
+
+/** Check if a row is within a CONFIG_PREFILL protected range */
+function isInProtectedPrefillRange(sheetIndex: number, row: number): boolean {
+  const ranges = protectedPrefillRanges.get(sheetIndex)
+  if (!ranges) return false
+  return ranges.some(r => row >= r.startRow && row <= r.endRow)
 }
 
 /**
@@ -1415,14 +1575,14 @@ function unlockTableRange(
     }
   }
 
-  // ── Strategy 2: fall back to stored cellRange ─────────────────────────
-  if (!sheet && tag.cellRange) {
-    const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
-    if (rangeMatch) {
-      startRow = parseInt(rangeMatch[2]) - 1
-      endRow = parseInt(rangeMatch[4]) - 1
-      startCol = letterToColIndex(rangeMatch[1])
-      endCol = letterToColIndex(rangeMatch[3])
+  // ── Strategy 2: fall back to dynamicRange (add-row adjusted) or stored cellRange
+  if (!sheet) {
+    const dynRange = getDynamicRange(tag)
+    if (dynRange) {
+      startRow = dynRange.startRow
+      endRow = dynRange.endRow
+      startCol = dynRange.startCol
+      endCol = dynRange.endCol
       sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
     }
   }
@@ -1609,14 +1769,11 @@ function isTableEmpty(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tag: TplTagMapping,
 ): boolean {
-  if (!tag.cellRange) return true
-  const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
-  if (!rangeMatch) return true
+  // Use dynamicRange (add-row adjusted) if available, else static cellRange
+  const range = getDynamicRange(tag)
+  if (!range) return true
 
-  const startRow = parseInt(rangeMatch[2]) - 1
-  const endRow = parseInt(rangeMatch[4]) - 1
-  const startCol = letterToColIndex(rangeMatch[1])
-  const endCol = letterToColIndex(rangeMatch[3])
+  const { startRow, endRow, startCol, endCol } = range
 
   const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
   if (!sheet) return true
@@ -1650,14 +1807,15 @@ function validateTableRowRequired(
   tag: TplTagMapping,
 ): string[] {
   const errors: string[] = []
-  if (!tag.cellRange || !tag.columnMappings) return errors
+  if (!tag.columnMappings) return errors
 
-  const rangeMatch = tag.cellRange.toUpperCase().trim().match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/)
-  if (!rangeMatch) return errors
+  // Use dynamicRange (add-row adjusted) if available, else static cellRange
+  const range = getDynamicRange(tag)
+  if (!range) return errors
 
-  const startRow = parseInt(rangeMatch[2]) - 1
-  const endRow = parseInt(rangeMatch[4]) - 1
-  const startCol = letterToColIndex(rangeMatch[1])
+  const startRow = range.startRow
+  const endRow = range.endRow
+  const startCol = range.startCol
 
   const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
   if (!sheet) return errors
@@ -1687,7 +1845,7 @@ function validateTableRowRequired(
 
   if (requiredCols.length === 0) return errors
 
-  const endCol = letterToColIndex(rangeMatch[3])
+  const endCol = range.endCol
 
   for (let r = startRow; r <= endRow; r++) {
     let rowHasData = false
@@ -1850,7 +2008,23 @@ async function save(options?: { skipExtraction?: boolean }): Promise<void> {
   }
   saving.value = true
   try {
-    const json = JSON.stringify(workbook.toJSON())
+    const jsonObj = workbook.toJSON() as Record<string, unknown>
+    // Embed add-row dynamic ranges into the JSON for backend extraction
+    if (dynamicRanges.size > 0) {
+      const drObj: Record<string, unknown> = {}
+      for (const [id, range] of dynamicRanges) {
+        drObj[String(id)] = range
+      }
+      jsonObj._dynamicRanges = drObj
+    }
+    if (manuallyAddedRows.size > 0) {
+      const mrObj: Record<string, number[]> = {}
+      for (const [id, rows] of manuallyAddedRows) {
+        if (rows.size > 0) mrObj[String(id)] = [...rows]
+      }
+      jsonObj._manuallyAddedRows = mrObj
+    }
+    const json = JSON.stringify(jsonObj)
     const saved = await saveDraft({
       templateId: props.templateId,
       auditYear: props.auditYear,
@@ -2203,6 +2377,307 @@ function validateRequiredFieldsBySheet(): SheetValidationError[] {
   return result
 }
 
+// ── Add Row Feature: context menu + insert/delete/reset ────────────────
+
+/** Handle right-click on spreadsheet to show add/delete row context menu */
+function onSpreadContextMenu(e: MouseEvent) {
+  e.preventDefault()
+  ctxMenuVisible.value = false
+
+  if (!workbook) return
+  const submissionStatus = currentSubmission?.status ?? 0
+  const isSubmittedOrApproved = submissionStatus === 1 || submissionStatus === 2
+  if (props.readonly || isSubmittedOrApproved) return
+
+  const sheet = workbook.getActiveSheet()
+  const sheetIndex = workbook.getActiveSheetIndex()
+
+  // Use active selection to determine clicked row
+  const selections = sheet.getSelections()
+  if (!selections || selections.length === 0) return
+  const row = selections[0].row
+  if (row < 0) return
+
+  // Find TABLE tag at this row
+  const tag = findTableTagAtCell(sheetIndex, row)
+  if (!tag || !tag.id) return
+
+  const range = getDynamicRange(tag)
+  if (!range) return
+
+  const currentRows = range.endRow - range.startRow + 1
+  const canInsert = currentRows < MAX_TABLE_ROWS
+  const isProtected = isInProtectedPrefillRange(sheetIndex, row)
+  const addedRows = manuallyAddedRows.get(tag.id) ?? new Set()
+  const canDelete = addedRows.has(row)
+
+  const items: CtxMenuItem[] = [
+    {
+      label: `在第 ${row + 1} 行下方插入行`,
+      action: 'insertBelow',
+      disabled: !canInsert || isProtected,
+    },
+    {
+      label: `删除第 ${row + 1} 行`,
+      action: 'deleteRow',
+      disabled: !canDelete,
+      danger: true,
+    },
+    {
+      label: '重置为模板原始状态',
+      action: 'resetToTemplate',
+      danger: true,
+    },
+  ]
+
+  ctxMenuRow = row
+  ctxMenuSheetIndex = sheetIndex
+  ctxMenuTag = tag
+  ctxMenuItems.value = items
+  ctxMenuX.value = e.clientX
+  ctxMenuY.value = e.clientY
+  ctxMenuVisible.value = true
+}
+
+/** Execute a context menu action */
+function executeCtxAction(action: string) {
+  ctxMenuVisible.value = false
+  if (action === 'insertBelow') handleInsertRow()
+  else if (action === 'deleteRow') handleDeleteRow()
+  else if (action === 'resetToTemplate') handleResetToTemplate()
+}
+
+/** Dismiss context menu on outside click */
+function onDocumentClickDismissCtxMenu() {
+  ctxMenuVisible.value = false
+}
+
+/** Insert a row below the right-clicked row within its TABLE range */
+function handleInsertRow() {
+  if (!workbook || !ctxMenuTag) return
+  const tag = ctxMenuTag
+  const row = ctxMenuRow
+  const sheetIndex = ctxMenuSheetIndex
+  const range = getDynamicRange(tag)
+  if (!range || !tag.id) return
+
+  const sheet = workbook.getSheet(sheetIndex)
+  if (!sheet) return
+
+  const insertAt = row + 1
+  console.log(`[add-row] Inserting row at ${insertAt} in tag ${tag.tagName} (range ${range.startRow}-${range.endRow})`)
+
+  workbook.suspendPaint()
+  suspendEventSafe(workbook)
+  try {
+    const wasProtected = sheet.options.isProtected
+    sheet.options.isProtected = false
+
+    sheet.addRows(insertAt, 1)
+
+    // Update dynamicRanges for ALL TABLE tags on this sheet
+    updateDynamicRangesAfterInsert(sheetIndex, insertAt, tag.id)
+
+    // Track the new row as manually added
+    const added = manuallyAddedRows.get(tag.id) ?? new Set()
+    const shifted = new Set<number>()
+    for (const r of added) {
+      shifted.add(r >= insertAt ? r + 1 : r)
+    }
+    shifted.add(insertAt)
+    manuallyAddedRows.set(tag.id, shifted)
+
+    // Unlock the new row's cells within the TABLE range
+    const updatedRange = getDynamicRange(tag)!
+    sheet.getRange(insertAt, updatedRange.startCol, 1, updatedRange.endCol - updatedRange.startCol + 1).locked(false)
+
+    if (wasProtected) {
+      sheet.options.isProtected = true
+    }
+    console.log(`[add-row] Row inserted. New range: ${updatedRange.startRow}-${updatedRange.endRow}`)
+  } finally {
+    resumeEventSafe(workbook)
+    workbook.resumePaint()
+  }
+  debouncedUpdateFillStatus()
+}
+
+/** Delete a manually added row */
+function handleDeleteRow() {
+  if (!workbook || !ctxMenuTag) return
+  const tag = ctxMenuTag
+  const row = ctxMenuRow
+  const sheetIndex = ctxMenuSheetIndex
+  if (!tag.id) return
+
+  const added = manuallyAddedRows.get(tag.id) ?? new Set()
+  if (!added.has(row)) {
+    ElMessageBox.alert('此行为模板原始行，不可删除。只能删除手动添加的行。', '无法删除')
+    return
+  }
+
+  const sheet = workbook.getSheet(sheetIndex)
+  if (!sheet) return
+
+  console.log(`[add-row] Deleting row ${row} from tag ${tag.tagName}`)
+
+  workbook.suspendPaint()
+  suspendEventSafe(workbook)
+  try {
+    const wasProtected = sheet.options.isProtected
+    sheet.options.isProtected = false
+
+    sheet.deleteRows(row, 1)
+
+    updateDynamicRangesAfterDelete(sheetIndex, row, tag.id)
+
+    added.delete(row)
+    const shifted = new Set<number>()
+    for (const r of added) {
+      shifted.add(r > row ? r - 1 : r)
+    }
+    manuallyAddedRows.set(tag.id, shifted)
+
+    if (wasProtected) {
+      sheet.options.isProtected = true
+    }
+    console.log(`[add-row] Row deleted.`)
+  } finally {
+    resumeEventSafe(workbook)
+    workbook.resumePaint()
+  }
+  debouncedUpdateFillStatus()
+}
+
+/** Reset all dynamic row changes back to template original */
+async function handleResetToTemplate() {
+  try {
+    await ElMessageBox.confirm(
+      '将删除所有手动添加的行，恢复模板原始状态。此操作不可撤销。',
+      '确认重置',
+      { type: 'warning', confirmButtonText: '重置', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+
+  if (!workbook) return
+  console.log('[add-row] Resetting to template original state')
+
+  workbook.suspendPaint()
+  suspendEventSafe(workbook)
+  try {
+    for (const tag of cachedTags) {
+      const mt = tag.mappingType ?? 'SCALAR'
+      if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
+      if (!tag.id) continue
+
+      const original = originalRanges.get(tag.id)
+      const current = dynamicRanges.get(tag.id)
+      if (!original || !current) continue
+
+      const addedRowCount = (current.endRow - current.startRow) - (original.endRow - original.startRow)
+      if (addedRowCount <= 0) continue
+
+      const si = resolveSheetIndex(workbook, tag)
+      const sheet = workbook.getSheet(si)
+      if (!sheet) continue
+
+      const wasProtected = sheet.options.isProtected
+      sheet.options.isProtected = false
+
+      // Delete the extra rows from end of the original range
+      sheet.deleteRows(original.endRow + 1, addedRowCount)
+
+      sheet.options.isProtected = wasProtected
+
+      dynamicRanges.set(tag.id, { ...original })
+      manuallyAddedRows.set(tag.id, new Set())
+    }
+  } finally {
+    resumeEventSafe(workbook)
+    workbook.resumePaint()
+  }
+  console.log('[add-row] Reset complete')
+  debouncedUpdateFillStatus()
+}
+
+/** Update ALL dynamic ranges on the same sheet after a row insertion */
+function updateDynamicRangesAfterInsert(sheetIndex: number, insertedRow: number, triggerTagId: number) {
+  if (!workbook) return
+  for (const tag of cachedTags) {
+    const mt = tag.mappingType ?? 'SCALAR'
+    if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
+    if (!tag.id) continue
+    const tagSI = resolveSheetIndex(workbook, tag)
+    if (tagSI !== sheetIndex) continue
+    const range = dynamicRanges.get(tag.id)
+    if (!range) continue
+
+    if (tag.id === triggerTagId) {
+      range.endRow += 1
+    } else if (range.startRow >= insertedRow) {
+      range.startRow += 1
+      range.endRow += 1
+      // Also shift manually added rows for this other tag
+      const added = manuallyAddedRows.get(tag.id)
+      if (added && added.size > 0) {
+        const shifted = new Set<number>()
+        for (const r of added) shifted.add(r >= insertedRow ? r + 1 : r)
+        manuallyAddedRows.set(tag.id, shifted)
+      }
+    }
+  }
+  // Shift protected prefill ranges on the same sheet
+  const prefillRanges = protectedPrefillRanges.get(sheetIndex)
+  if (prefillRanges) {
+    for (const pr of prefillRanges) {
+      if (pr.startRow >= insertedRow) {
+        pr.startRow += 1
+        pr.endRow += 1
+      } else if (pr.endRow >= insertedRow) {
+        pr.endRow += 1
+      }
+    }
+  }
+}
+
+/** Update ALL dynamic ranges on the same sheet after a row deletion */
+function updateDynamicRangesAfterDelete(sheetIndex: number, deletedRow: number, triggerTagId: number) {
+  if (!workbook) return
+  for (const tag of cachedTags) {
+    const mt = tag.mappingType ?? 'SCALAR'
+    if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
+    if (!tag.id) continue
+    const tagSI = resolveSheetIndex(workbook, tag)
+    if (tagSI !== sheetIndex) continue
+    const range = dynamicRanges.get(tag.id)
+    if (!range) continue
+
+    if (tag.id === triggerTagId) {
+      range.endRow -= 1
+    } else if (range.startRow > deletedRow) {
+      range.startRow -= 1
+      range.endRow -= 1
+      const added = manuallyAddedRows.get(tag.id)
+      if (added && added.size > 0) {
+        const shifted = new Set<number>()
+        for (const r of added) shifted.add(r > deletedRow ? r - 1 : r)
+        manuallyAddedRows.set(tag.id, shifted)
+      }
+    }
+  }
+  const prefillRanges = protectedPrefillRanges.get(sheetIndex)
+  if (prefillRanges) {
+    for (const pr of prefillRanges) {
+      if (pr.startRow > deletedRow) {
+        pr.startRow -= 1
+        pr.endRow -= 1
+      }
+    }
+  }
+}
+
 defineExpose({
   save,
   getSubmissionId,
@@ -2211,6 +2686,7 @@ defineExpose({
   validateRequiredFields,
   validateRequiredFieldsBySheet,
   navigateToSheet: onSheetSelect,
+  handleResetToTemplate,
   saving,
   loading,
   sheetStatuses,
@@ -2246,6 +2722,25 @@ defineExpose({
         </div>
       </div>
     </div>
+    <!-- Right-click context menu for add/delete row -->
+    <teleport to="body">
+      <div
+        v-if="ctxMenuVisible"
+        class="row-context-menu"
+        :style="{ left: ctxMenuX + 'px', top: ctxMenuY + 'px' }"
+        @click.stop
+      >
+        <div
+          v-for="item in ctxMenuItems"
+          :key="item.action"
+          class="ctx-menu-item"
+          :class="{ disabled: item.disabled, danger: item.danger }"
+          @click="!item.disabled && executeCtxAction(item.action)"
+        >
+          {{ item.label }}
+        </div>
+      </div>
+    </teleport>
   </div>
 </template>
 
@@ -2324,6 +2819,45 @@ defineExpose({
 
   &:hover {
     color: #409eff;
+  }
+}
+</style>
+
+<style lang="scss">
+/* Context menu must NOT be scoped — it's teleported to <body> */
+.row-context-menu {
+  position: fixed;
+  z-index: 99999;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  padding: 4px 0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  min-width: 180px;
+}
+
+.ctx-menu-item {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #606266;
+  cursor: pointer;
+  transition: background-color 0.15s;
+
+  &:hover:not(.disabled) {
+    background-color: #f5f7fa;
+  }
+
+  &.disabled {
+    color: #c0c4cc;
+    cursor: not-allowed;
+  }
+
+  &.danger:not(.disabled) {
+    color: #f56c6c;
+
+    &:hover {
+      background-color: #fef0f0;
+    }
   }
 }
 </style>
