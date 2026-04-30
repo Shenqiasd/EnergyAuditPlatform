@@ -1,13 +1,24 @@
 -- =============================================================================
--- Migration 33: 0428 新模板（template_version_id=33）Tag 映射与字段补齐
+-- Migration 33: 0428 新模板 Tag 映射与字段补齐
 --
--- 目标：对标 AUDIT_FULL_0412，为 0428 / Energy_Audit_0428 草稿版本写入完整映射。
+-- 目标：对标 AUDIT_FULL_0412，为 Energy_Audit_0428 v1 写入完整映射。
+--
+-- 版本号定位（v2 — 不再硬编码 template_version_id=33）：
+--   通过 template_code='Energy_Audit_0428' + version=1 在运行时查询真实 version_id
+--   并存入会话变量 @v_id。Railway 上 lookup 仍命中 33（与旧版完全等价），
+--   其它环境（如腾讯云）会自动定位到当地自增分配的 version_id，避免 mapping
+--   错挂到与 33 撞号的别的模板版本上。
+--
+-- 前置条件：必须先在 admin UI 创建好 Energy_Audit_0428 模板（v=1）再跑本迁移。
+-- 如果 @v_id IS NULL（模板未建），所有 UPDATE/DELETE/INSERT 自动 no-op，
+-- 不会写入任何映射；preflight SELECT 会打印警告便于运维排查。
+--
 -- 说明：0428 实际 Excel sheet 名为短名（如 “1.十四五已实施节能技改项目”
 --       在 Workbook 内显示为短名时，系统以 template_json 的 sheet_name 为准）。本迁移
 --       采用已支持的 cell_range(TABLE) 兜底映射，不依赖 Named Range 是否已经在
 --       SpreadJS Designer 内创建。
 --
--- 幂等：先软删 version=33 的旧 active mapping，再插入本迁移维护的完整 mapping。
+-- 幂等：先软删 @v_id 旧 active mapping，再插入本迁移维护的完整 mapping。
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -212,21 +223,40 @@ CALL ensure_column('de_carbon_peak_info', 'submission_id',
 CALL ensure_index('de_carbon_peak_info', 'idx_submission', '(submission_id)');
 
 -- -----------------------------------------------------------------------------
--- 2) 替换 template_version_id=33 的完整映射
+-- 2) 替换 Energy_Audit_0428 v1 的完整映射
 -- -----------------------------------------------------------------------------
+
+-- Resolve target version_id at runtime (avoid hardcoded 33 — see header).
+SET @v_id = (
+    SELECT v.id
+    FROM tpl_template_version v
+    JOIN tpl_template t ON t.id = v.template_id
+    WHERE t.template_code = 'Energy_Audit_0428'
+      AND v.version = 1
+      AND v.deleted = 0
+      AND t.deleted = 0
+    ORDER BY v.id
+    LIMIT 1
+);
+
+-- Preflight indicator (visible in migration logs). NULL → all rebuild steps no-op.
+SELECT CASE
+    WHEN @v_id IS NULL THEN 'WARN: Energy_Audit_0428 v1 not found — mapping rebuild skipped. Create the template via admin UI first, then re-run this migration.'
+    ELSE CONCAT('OK: Energy_Audit_0428 v1 resolved to template_version_id=', @v_id)
+  END AS migration_33_preflight;
 
 UPDATE tpl_tag_mapping
 SET deletion_source = 'MIGRATION',
     update_by = 'migration-33',
     update_time = NOW()
-WHERE template_version_id = 33
+WHERE template_version_id = @v_id
   AND deleted = 1
   AND deletion_source = 'USER'
   AND create_by = 'migration-33';
 
--- Version 33 is maintained by this migration; remove prior migration rows before rebuilding.
+-- Version @v_id is maintained by this migration; remove prior migration rows before rebuilding.
 DELETE FROM tpl_tag_mapping
-WHERE template_version_id = 33
+WHERE template_version_id = @v_id
   AND deleted = 1
   AND deletion_source = 'MIGRATION'
   AND create_by = 'migration-33';
@@ -236,7 +266,7 @@ SET deleted = 1,
     deletion_source = 'MIGRATION',
     update_by = 'migration-33',
     update_time = NOW()
-WHERE template_version_id = 33
+WHERE template_version_id = @v_id
   AND deleted = 0;
 
 INSERT INTO tpl_tag_mapping (
@@ -246,7 +276,7 @@ INSERT INTO tpl_tag_mapping (
     remark, create_by, create_time, update_by, update_time, deleted
 )
 SELECT
-    33, x.tag_name, x.field_name, x.target_table,
+    @v_id, x.tag_name, x.field_name, x.target_table,
     x.data_type, NULL, 0, x.sheet_index, x.sheet_name, x.cell_range,
     x.mapping_type, x.source_type, x.row_key_column, x.column_mappings, x.header_row,
     x.remark, 'migration-33', NOW(), 'migration-33', NOW(), 0
@@ -371,10 +401,10 @@ FROM (
     UNION ALL SELECT 'DROPDOWN_11_ENERGY_PRODUCT','dropdown_energy_product_11','bs_energy','STRING',10,'11.能源流程图（二维表）','C3:C12','CONFIG_PREFILL','CELL_TAG',NULL,NULL,
            '{"mode":"dropdown_only","filter":{"isActive":1},"columns":[{"col":"C","field":"name","extraSources":[{"table":"bs_product","field":"name"}]}]}',NULL
 ) x
-WHERE EXISTS (SELECT 1 FROM tpl_template_version v WHERE v.id = 33 AND v.deleted = 0)
+WHERE @v_id IS NOT NULL
   AND NOT EXISTS (
       SELECT 1 FROM tpl_tag_mapping t
-      WHERE t.template_version_id = 33
+      WHERE t.template_version_id = @v_id
         AND t.tag_name = x.tag_name
         AND t.deleted = 0
   );
