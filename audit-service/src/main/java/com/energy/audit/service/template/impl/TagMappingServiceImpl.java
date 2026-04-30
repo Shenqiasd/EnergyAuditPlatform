@@ -152,13 +152,20 @@ public class TagMappingServiceImpl implements TagMappingService {
 
         existingByTag.forEach((tagName, mapping) -> {
             if (!discoveredByTag.containsKey(tagName)) {
-                // Preserve manually-configured TABLE and EQUIPMENT_BENCHMARK tags —
-                // these are not discoverable from the SpreadJS JSON (no Named Range
-                // or Cell Tag), so syncFromTemplateJson must not remove them.
+                // Only NAMED_RANGE-sourced mappings are auto-discoverable from a SpreadJS
+                // template JSON (see discoverFields). Mappings with any other source_type
+                // are manually configured (via SQL migrations or the admin tag-mapping editor)
+                // and must not be soft-deleted just because they're absent from the JSON:
+                //  - TABLE / EQUIPMENT_BENCHMARK rows have CELL_RANGE source and rely on a
+                //    cell range that isn't surfaced as a Named Range or Cell Tag.
+                //  - SCALAR rows with CELL_TAG source act as fallback locations when the
+                //    template author hasn't annotated the cell tag yet.
+                //  - CONFIG_PREFILL rows are never represented in the template JSON at all.
+                String st = mapping.getSourceType();
                 String mt = mapping.getMappingType();
-                if ("TABLE".equalsIgnoreCase(mt) || "EQUIPMENT_BENCHMARK".equalsIgnoreCase(mt)) {
-                    log.debug("syncFromTemplateJson: preserving manually-configured {} tag '{}' for versionId={}",
-                            mt, tagName, versionId);
+                if (st == null || !"NAMED_RANGE".equalsIgnoreCase(st)) {
+                    log.debug("syncFromTemplateJson: preserving manually-configured {}/{} tag '{}' for versionId={}",
+                            mt, st, tagName, versionId);
                     return; // skip soft-delete
                 }
                 tagMappingMapper.softDeleteById(mapping.getId(), operator);
