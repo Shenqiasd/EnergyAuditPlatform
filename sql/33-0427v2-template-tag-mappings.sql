@@ -135,7 +135,19 @@ SET template_json = JSON_SET(
     '$.sheets."2.企概".data.dataTable."9"."1".tag',  'S2_energy_leader_name',
     '$.sheets."2.企概".data.dataTable."9"."5".tag',  'S2_energy_leader_phone'
 )
-WHERE id = 33
+WHERE id = (
+    SELECT id FROM (
+        SELECT v.id
+        FROM tpl_template_version v
+        JOIN tpl_template t ON t.id = v.template_id
+        WHERE t.template_code = 'Energy_Audit_0428'
+          AND v.version = 1
+          AND v.deleted = 0
+          AND t.deleted = 0
+        ORDER BY v.id
+        LIMIT 1
+    ) target_version
+)
   AND JSON_VALID(template_json)
   AND JSON_CONTAINS_PATH(template_json, 'one', '$.sheets."2.企概"');
 
