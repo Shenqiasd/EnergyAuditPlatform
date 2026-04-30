@@ -2567,31 +2567,51 @@ async function handleResetToTemplate() {
   workbook.suspendPaint()
   suspendEventSafe(workbook)
   try {
+    // Collect ALL manually added rows grouped by sheet index
+    // This avoids both bugs: (1) deleting wrong rows when inserts are mid-range,
+    // (2) cascading row-shift when multiple tags share the same sheet.
+    const rowsBySheet = new Map<number, number[]>()
     for (const tag of cachedTags) {
       const mt = tag.mappingType ?? 'SCALAR'
       if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
       if (!tag.id) continue
 
-      const original = originalRanges.get(tag.id)
-      const current = dynamicRanges.get(tag.id)
-      if (!original || !current) continue
-
-      const addedRowCount = (current.endRow - current.startRow) - (original.endRow - original.startRow)
-      if (addedRowCount <= 0) continue
+      const added = manuallyAddedRows.get(tag.id)
+      if (!added || added.size === 0) continue
 
       const si = resolveSheetIndex(workbook, tag)
+      const existing = rowsBySheet.get(si) ?? []
+      for (const r of added) existing.push(r)
+      rowsBySheet.set(si, existing)
+    }
+
+    // Delete rows bottom-up (highest index first) to avoid shifting issues
+    for (const [si, rows] of rowsBySheet) {
       const sheet = workbook.getSheet(si)
       if (!sheet) continue
 
       const wasProtected = sheet.options.isProtected
       sheet.options.isProtected = false
 
-      // Delete the extra rows from end of the original range
-      sheet.deleteRows(original.endRow + 1, addedRowCount)
+      // Sort descending so deleting a higher row doesn't shift lower rows
+      const sorted = [...new Set(rows)].sort((a, b) => b - a)
+      for (const row of sorted) {
+        sheet.deleteRows(row, 1)
+      }
 
       sheet.options.isProtected = wasProtected
+    }
 
-      dynamicRanges.set(tag.id, { ...original })
+    // Reset all dynamic ranges and tracking state
+    for (const tag of cachedTags) {
+      const mt = tag.mappingType ?? 'SCALAR'
+      if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
+      if (!tag.id) continue
+
+      const original = originalRanges.get(tag.id)
+      if (original) {
+        dynamicRanges.set(tag.id, { ...original })
+      }
       manuallyAddedRows.set(tag.id, new Set())
     }
   } finally {
