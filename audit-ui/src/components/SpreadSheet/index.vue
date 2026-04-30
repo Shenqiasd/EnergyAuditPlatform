@@ -1613,17 +1613,6 @@ function isTableEmpty(
   return true
 }
 
-function colIndexToLetter(index: number): string {
-  let result = ''
-  let i = index + 1
-  while (i > 0) {
-    i--
-    result = String.fromCharCode(65 + (i % 26)) + result
-    i = Math.floor(i / 26)
-  }
-  return result
-}
-
 /**
  * Validate row-level required fields for TABLE tags.
  * Rule: if a row has ANY non-empty cell, then all columns marked required
