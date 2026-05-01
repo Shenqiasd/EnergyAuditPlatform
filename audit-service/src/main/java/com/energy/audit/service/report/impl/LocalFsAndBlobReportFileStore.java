@@ -67,11 +67,8 @@ public class LocalFsAndBlobReportFileStore implements ReportFileStore {
 
     @Override
     public Optional<byte[]> load(String storeKey) {
-        if (storeKey == null || storeKey.isEmpty()) {
-            return Optional.empty();
-        }
-        Path path = Paths.get(storeKey);
-        if (!Files.exists(path)) {
+        Path path = resolveSafe(storeKey);
+        if (path == null || !Files.exists(path)) {
             return Optional.empty();
         }
         try {
@@ -84,13 +81,38 @@ public class LocalFsAndBlobReportFileStore implements ReportFileStore {
 
     @Override
     public void delete(String storeKey) {
-        if (storeKey == null || storeKey.isEmpty()) {
+        Path path = resolveSafe(storeKey);
+        if (path == null) {
             return;
         }
         try {
-            Files.deleteIfExists(Paths.get(storeKey));
+            Files.deleteIfExists(path);
         } catch (IOException e) {
             log.warn("[ReportFileStore] failed to delete {}: {}", storeKey, e.getMessage());
+        }
+    }
+
+    /**
+     * Validate that {@code storeKey} (read from the DB) points inside the configured
+     * upload root before any filesystem operation. Returns {@code null} (caller
+     * treats as miss / no-op) when the path is empty or escapes the base directory,
+     * which defends against tampered DB rows pointing at arbitrary container files.
+     */
+    private Path resolveSafe(String storeKey) {
+        if (storeKey == null || storeKey.isEmpty()) {
+            return null;
+        }
+        try {
+            Path candidate = Paths.get(storeKey).toAbsolutePath().normalize();
+            Path base = baseDir();
+            if (!candidate.startsWith(base)) {
+                log.warn("[ReportFileStore] path {} escapes base dir {}, ignoring", candidate, base);
+                return null;
+            }
+            return candidate;
+        } catch (RuntimeException e) {
+            log.warn("[ReportFileStore] invalid storeKey {}: {}", storeKey, e.getMessage());
+            return null;
         }
     }
 
