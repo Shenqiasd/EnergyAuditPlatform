@@ -5,6 +5,7 @@ import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.model.entity.report.ArReport;
 import com.energy.audit.model.entity.report.ArReportTemplate;
+import com.energy.audit.service.report.ActiveTemplateDownload;
 import com.energy.audit.service.report.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -142,6 +143,39 @@ public class ReportController {
     @GetMapping("/templates")
     public R<List<ArReportTemplate>> listTemplates() {
         return R.ok(reportService.listTemplates());
+    }
+
+    // ====== Enterprise-side: download the active report template ======
+
+    @Operation(summary = "Get currently active report template metadata (enterprise users only)")
+    @GetMapping("/template/active")
+    public R<ArReportTemplate> getActiveTemplate() {
+        requireEnterprise();
+        // Returns null when no active template exists — frontend shows disabled state.
+        return R.ok(reportService.getActiveTemplate());
+    }
+
+    @Operation(summary = "Download the active report template (.docx) for enterprise users")
+    @GetMapping("/template/active/download")
+    public ResponseEntity<byte[]> downloadActiveTemplate() {
+        requireEnterprise();
+        // Single service call returns the metadata + bytes from one DB read so the
+        // Content-Disposition filename and the body cannot drift if an admin swaps
+        // the active template between requests.
+        ActiveTemplateDownload download = reportService.downloadActiveTemplate();
+        ArReportTemplate template = download.getTemplate();
+        String fileName = template.getOriginalFileName();
+        if (fileName == null || fileName.isEmpty()) {
+            String tplName = template.getTemplateName() != null && !template.getTemplateName().isEmpty()
+                ? template.getTemplateName() : "report-template";
+            fileName = tplName + ".docx";
+        }
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename*=UTF-8''" + encodedFileName)
+            .contentType(MediaType.APPLICATION_OCTET_STREAM)
+            .body(download.getBytes());
     }
 
     // ====== Phase 4: Admin Report Template Management ======

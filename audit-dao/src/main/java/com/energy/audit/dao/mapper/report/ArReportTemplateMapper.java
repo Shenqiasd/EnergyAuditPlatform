@@ -17,8 +17,12 @@ public interface ArReportTemplateMapper {
 
     List<ArReportTemplate> selectAll();
 
-    /** Get the currently active template (status=1), most recent first */
+    /** Get the currently active template (status=1), most recent first.
+     *  Includes the BLOB ({@code template_file_data}) — call only when bytes are needed. */
     ArReportTemplate selectActive();
+
+    /** Same as {@link #selectActive()} but excludes the BLOB column for metadata-only callers. */
+    ArReportTemplate selectActiveLight();
 
     /** Soft-delete a template by ID */
     int softDelete(@Param("id") Long id, @Param("updateBy") String updateBy);
