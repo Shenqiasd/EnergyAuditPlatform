@@ -1,8 +1,50 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
-import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { checkPrerequisites } from '@/api/enterpriseSetting'
 
 const route = useRoute()
+const router = useRouter()
+
+const prerequisitePassed = ref(false)
+const checking = ref(true)
+
+async function runPrerequisiteCheck() {
+  checking.value = true
+  try {
+    const result = await checkPrerequisites()
+    if (!result.passed) {
+      const lines = result.errors.map(e => `• ${e}`).join('\n')
+      await ElMessageBox.alert(
+        `请先完成以下前置配置：\n\n${lines}\n\n请前往「基础设置」完成配置后再导出规定图表。`,
+        '前置校验未通过',
+        {
+          type: 'warning',
+          confirmButtonText: '前往设置',
+          dangerouslyUseHTMLString: false,
+        }
+      )
+      router.push('/enterprise/settings/company')
+      return
+    }
+    prerequisitePassed.value = true
+  } catch (e: any) {
+    // ElMessageBox.alert rejects if user presses Escape / close button — treat as redirect
+    if (e === 'close' || e === 'cancel') {
+      router.push('/enterprise/settings/company')
+      return
+    }
+    ElMessage.error('前置校验失败：' + (e?.message ?? '未知错误'))
+    router.push('/enterprise/settings/company')
+  } finally {
+    checking.value = false
+  }
+}
+
+onMounted(() => {
+  runPrerequisiteCheck()
+})
 
 const navItems = [
   { label: '1. 用能单位基本情况', name: 'StandardBasicInfo' },
@@ -28,7 +70,10 @@ const currentName = computed(() => route.name as string)
 </script>
 
 <template>
-  <div class="standard-layout">
+  <div v-if="checking" class="loading-area">
+    <el-empty description="正在校验前置条件…" />
+  </div>
+  <div v-else-if="prerequisitePassed" class="standard-layout">
     <aside class="standard-sidebar">
       <div class="sidebar-title">规定图表</div>
       <nav class="sidebar-nav">
@@ -108,5 +153,12 @@ const currentName = computed(() => route.name as string)
   overflow-y: auto;
   padding: 20px;
   background: #fafafa;
+}
+
+.loading-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
 }
 </style>

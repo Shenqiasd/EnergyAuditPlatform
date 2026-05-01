@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   getTemplateList,
   acquireLock,
@@ -11,9 +11,11 @@ import {
   type TplEditLock,
 } from '@/api/template'
 import { submitForAudit } from '@/api/audit-task'
+import { checkPrerequisites } from '@/api/enterpriseSetting'
 import SpreadSheet from '@/components/SpreadSheet/index.vue'
 
 const route = useRoute()
+const router = useRouter()
 
 const templates = ref<TplTemplate[]>([])
 const selectedTemplateId = ref<number | null>(null)
@@ -55,8 +57,40 @@ async function loadTemplates() {
   templates.value = res.rows ?? []
 }
 
+async function runPrerequisiteCheck(): Promise<boolean> {
+  try {
+    const result = await checkPrerequisites()
+    if (!result.passed) {
+      const lines = result.errors.map(e => `• ${e}`).join('\n')
+      await ElMessageBox.alert(
+        `请先完成以下前置配置：\n\n${lines}\n\n请前往「基础设置」完成配置后再进行填报。`,
+        '前置校验未通过',
+        {
+          type: 'warning',
+          confirmButtonText: '前往设置',
+          dangerouslyUseHTMLString: false,
+        }
+      )
+      router.push('/enterprise/settings/company')
+      return false
+    }
+    return true
+  } catch (e: any) {
+    // ElMessageBox.alert rejects if user presses Escape / close button — treat as cancel
+    if (e === 'close' || e === 'cancel') {
+      return false
+    }
+    ElMessage.error('前置校验失败：' + (e?.message ?? '未知错误'))
+    return false
+  }
+}
+
 async function openTemplate() {
   if (!selectedTemplateId.value) return
+
+  // Prerequisite check — block entry if not all prerequisites are met
+  const passed = await runPrerequisiteCheck()
+  if (!passed) return
   isActive.value = false
   lockedBy.value = null
   isReadonly.value = false
