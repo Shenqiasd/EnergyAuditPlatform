@@ -5,6 +5,7 @@ import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.model.entity.report.ArReport;
 import com.energy.audit.model.entity.report.ArReportTemplate;
+import com.energy.audit.service.report.ActiveTemplateDownload;
 import com.energy.audit.service.report.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -158,11 +159,11 @@ public class ReportController {
     @GetMapping("/template/active/download")
     public ResponseEntity<byte[]> downloadActiveTemplate() {
         requireEnterprise();
-        ArReportTemplate template = reportService.getActiveTemplate();
-        if (template == null) {
-            throw new BusinessException("未找到可用的报告模板，请联系管理员上传模板");
-        }
-        byte[] bytes = reportService.downloadActiveTemplateBytes();
+        // Single service call returns the metadata + bytes from one DB read so the
+        // Content-Disposition filename and the body cannot drift if an admin swaps
+        // the active template between requests.
+        ActiveTemplateDownload download = reportService.downloadActiveTemplate();
+        ArReportTemplate template = download.getTemplate();
         String fileName = template.getOriginalFileName();
         if (fileName == null || fileName.isEmpty()) {
             String tplName = template.getTemplateName() != null && !template.getTemplateName().isEmpty()
@@ -174,7 +175,7 @@ public class ReportController {
             .header(HttpHeaders.CONTENT_DISPOSITION,
                 "attachment; filename*=UTF-8''" + encodedFileName)
             .contentType(MediaType.APPLICATION_OCTET_STREAM)
-            .body(bytes);
+            .body(download.getBytes());
     }
 
     // ====== Enterprise-side: upload + download a filled report ======

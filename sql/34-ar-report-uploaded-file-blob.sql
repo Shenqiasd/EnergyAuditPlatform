@@ -8,3 +8,13 @@ ALTER TABLE ar_report
     ADD COLUMN uploaded_file_size BIGINT       NULL COMMENT '上传文件字节数'                                AFTER uploaded_file_data,
     ADD COLUMN uploaded_file_name VARCHAR(255) NULL COMMENT '上传时的原始文件名'                            AFTER uploaded_file_size,
     ADD COLUMN uploaded_at        DATETIME     NULL COMMENT '上传时间'                                      AFTER uploaded_file_name;
+
+-- Enforce only-one-row-per-(enterprise, year, type, deleted-cohort) at the DB level so
+-- two concurrent uploads from the same enterprise can't both pass the application-level
+-- "select then insert" check and create duplicate rows. Including `deleted` in the key
+-- lets soft-deleted rows coexist with a live row for the same triple.
+-- NOTE: if production already has duplicates, clean them up before this DDL or the
+-- statement will fail.
+ALTER TABLE ar_report
+    ADD UNIQUE KEY uk_ar_report_ent_year_type
+        (enterprise_id, audit_year, report_type, deleted);
