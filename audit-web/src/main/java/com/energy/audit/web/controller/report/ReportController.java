@@ -177,6 +177,66 @@ public class ReportController {
             .body(bytes);
     }
 
+    // ====== Enterprise-side: upload + download a filled report ======
+
+    @Operation(summary = "Upload an enterprise-filled .docx report (overwrites the latest copy for that year)")
+    @PostMapping("/upload")
+    public R<ArReport> uploadFilledReport(
+            @RequestPart("file") MultipartFile file,
+            @RequestParam Integer auditYear,
+            @RequestParam(required = false) Integer reportType) {
+        requireEnterprise();
+        if (file == null || file.isEmpty()) {
+            return R.fail("请选择要上传的文件");
+        }
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        String username = SecurityUtils.getCurrentUsername();
+        try {
+            ArReport report = reportService.uploadFilledReport(
+                enterpriseId, auditYear, reportType,
+                file.getOriginalFilename(), file.getBytes(), username);
+            return R.ok(report);
+        } catch (BusinessException be) {
+            return R.fail(be.getMessage());
+        } catch (java.io.IOException e) {
+            return R.fail("文件读取失败");
+        }
+    }
+
+    @Operation(summary = "Download an enterprise-uploaded report by ID")
+    @GetMapping("/{id}/uploaded/download")
+    public ResponseEntity<byte[]> downloadUploadedReport(@PathVariable Long id) {
+        // Permission: enterprise users may only download their own; auditors/admins any.
+        Integer userType = SecurityUtils.getCurrentUserType();
+        if (userType == null) {
+            throw new BusinessException("请先登录");
+        }
+        ArReport report = reportService.getReport(id);
+        if (report == null) {
+            throw new BusinessException("报告不存在");
+        }
+        if (userType == 3) {
+            Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+            if (!enterpriseId.equals(report.getEnterpriseId())) {
+                throw new BusinessException("无权访问其他企业的报告");
+            }
+        } else if (userType != 1 && userType != 2) {
+            throw new BusinessException("当前用户无权下载报告");
+        }
+
+        byte[] bytes = reportService.downloadUploadedReportBytes(id);
+        String fileName = report.getUploadedFileName();
+        if (fileName == null || fileName.isEmpty()) {
+            fileName = "audit-report-" + id + ".docx";
+        }
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename*=UTF-8''" + encodedFileName)
+            .contentType(MediaType.APPLICATION_OCTET_STREAM)
+            .body(bytes);
+    }
+
     // ====== Phase 4: Admin Report Template Management ======
 
     private void requireAdmin() {

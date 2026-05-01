@@ -1,6 +1,7 @@
 package com.energy.audit.model.entity.report;
 
 import com.energy.audit.model.entity.BaseEntity;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -22,6 +23,20 @@ public class ArReport extends BaseEntity {
     private Integer status;
     private String generatedFilePath;
     private String uploadedFilePath;
+
+    /** Uploaded report content stored as binary in DB (survives container restarts) */
+    @JsonIgnore
+    private byte[] uploadedFileData;
+
+    /** Size of the uploaded report file in bytes */
+    private Long uploadedFileSize;
+
+    /** Original file name supplied by the enterprise user at upload time */
+    private String uploadedFileName;
+
+    /** Timestamp at which the enterprise user uploaded the report */
+    private LocalDateTime uploadedAt;
+
     private String onlyofficeDocKey;
     private LocalDateTime generateTime;
     private LocalDateTime submitTime;
