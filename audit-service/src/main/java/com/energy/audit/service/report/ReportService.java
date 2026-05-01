@@ -60,6 +60,30 @@ public interface ReportService {
      */
     ActiveTemplateDownload downloadActiveTemplate();
 
+    // ====== Enterprise-uploaded final report (Phase 2 simplified flow) ======
+
+    /**
+     * Persist an enterprise-uploaded {@code .docx} report against {@code (enterpriseId, auditYear, reportType)}.
+     * Upserts a single {@code ar_report} row; existing uploads in {@code status ∈ {0, 2, 6}} are overwritten
+     * (only the latest copy is retained per {@code report_type}). Calls in {@code status ∈ {4, 5}} are rejected.
+     *
+     * @param enterpriseId callers must verify this matches the authenticated enterprise
+     * @param auditYear    audit year of the report
+     * @param reportType   1 = preliminary, 2 = final (default)
+     * @param fileName     original filename for {@code Content-Disposition} round-trip
+     * @param fileBytes    raw {@code .docx} content; magic-byte validated by impl
+     * @param username     calling user (for {@code update_by})
+     * @return the upserted {@link ArReport} record (without BLOB)
+     */
+    ArReport uploadFilledReport(Long enterpriseId, Integer auditYear, Integer reportType,
+                                String fileName, byte[] fileBytes, String username);
+
+    /**
+     * Load the bytes of an enterprise-uploaded report by record ID. Filesystem first
+     * (via {@link ReportFileStore}), DB BLOB on miss with self-heal of the local cache.
+     */
+    byte[] downloadUploadedReportBytes(Long reportId);
+
     // ====== Phase 4: Admin Report Template Management ======
 
     /**

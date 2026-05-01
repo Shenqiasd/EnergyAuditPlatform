@@ -6,6 +6,7 @@ import com.energy.audit.dao.mapper.report.ArReportTemplateMapper;
 import com.energy.audit.model.entity.report.ArReport;
 import com.energy.audit.model.entity.report.ArReportTemplate;
 import com.energy.audit.service.report.ActiveTemplateDownload;
+import com.energy.audit.service.report.ReportFileStore;
 import com.energy.audit.service.report.ReportService;
 import com.energy.audit.service.report.TemplateBasedReportBuilder;
 import org.slf4j.Logger;
@@ -29,6 +30,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 public class ReportServiceImpl implements ReportService {
@@ -48,8 +50,14 @@ public class ReportServiceImpl implements ReportService {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private ReportFileStore reportFileStore;
+
     @Value("${app.report.upload-dir:upload/report}")
     private String uploadDir;
+
+    @Value("${app.report.max-upload-size-mb:50}")
+    private int maxUploadSizeMb;
 
     @Override
     public List<ArReport> listReports(Long enterpriseId, Integer auditYear) {
@@ -318,6 +326,157 @@ public class ReportServiceImpl implements ReportService {
         // Light variant: explicit column list excludes the BLOB so the metadata
         // endpoint never pulls a multi-MB byte[] just to drop it on serialization.
         return reportTemplateMapper.selectActiveLight();
+    }
+
+    @Override
+    @Transactional
+    public ArReport uploadFilledReport(Long enterpriseId, Integer auditYear, Integer reportType,
+                                       String fileName, byte[] fileBytes, String username) {
+        if (enterpriseId == null) {
+            throw new BusinessException("未识别到企业身份，请重新登录");
+        }
+        if (auditYear == null || auditYear < 1900 || auditYear > 9999) {
+            throw new BusinessException("请选择正确的审计年度");
+        }
+        int rt = (reportType == null) ? 2 : reportType;
+        if (rt != 1 && rt != 2) {
+            throw new BusinessException("reportType 仅支持 1（初报）或 2（终报）");
+        }
+        if (fileBytes == null || fileBytes.length == 0) {
+            throw new BusinessException("上传文件不能为空");
+        }
+        long maxBytes = (long) maxUploadSizeMb * 1024L * 1024L;
+        if (fileBytes.length > maxBytes) {
+            throw new BusinessException("文件大小超过限制（" + maxUploadSizeMb + " MB）");
+        }
+        if (fileName == null || !fileName.toLowerCase().endsWith(".docx")) {
+            throw new BusinessException("仅支持 .docx 格式的报告文件");
+        }
+        // .docx is a ZIP archive — magic bytes 50 4B 03 04 (PK\x03\x04). Reject .doc / random files.
+        if (fileBytes.length < 4 ||
+            fileBytes[0] != 0x50 || fileBytes[1] != 0x4B ||
+            fileBytes[2] != 0x03 || fileBytes[3] != 0x04) {
+            if (TemplateBasedReportBuilder.isOle2Format(fileBytes)) {
+                throw new BusinessException(
+                    "上传的文件为旧版 .doc 格式（Office 97-2003），系统仅支持 .docx 格式（Office 2007+）。" +
+                    "请用 Word 打开后「另存为」选择 .docx 格式后重新上传。");
+            }
+            throw new BusinessException("上传的文件不是有效的 .docx 文档");
+        }
+
+        ArReport existing = reportMapper.selectByEnterpriseAndYear(enterpriseId, auditYear, rt);
+        if (existing != null && existing.getStatus() != null) {
+            int s = existing.getStatus();
+            if (s == 4) {
+                throw new BusinessException("该年度报告已提交审核，等待审核结果后再重新上传");
+            }
+            if (s == 5) {
+                throw new BusinessException("该年度报告已审核通过，无需再次上传");
+            }
+        }
+
+        // 1. Write the file bytes to the pluggable store (local fs by default, could be COS later).
+        // Fail loud on storage failure rather than persisting a row whose uploaded_file_path
+        // is null but whose BLOB has the new bytes — that combination would silently serve
+        // the OLD filesystem file on the next download (if the previous path is still
+        // present on disk) because the MyBatis update statement guards uploaded_file_path
+        // with <if test="uploadedFilePath != null">.
+        String newKey = reportFileStore.save(enterpriseId, auditYear, fileName, fileBytes);
+        if (newKey == null) {
+            throw new BusinessException("文件保存失败，请稍后重试");
+        }
+
+        // 2. Upsert the ar_report row + persist BLOB redundancy in one tx.
+        Long reportId;
+        String oldKey = null;
+        if (existing == null) {
+            ArReport record = new ArReport();
+            record.setEnterpriseId(enterpriseId);
+            record.setAuditYear(auditYear);
+            record.setReportType(rt);
+            record.setStatus(2); // "已生成" — repurposed here as "report content uploaded"
+            record.setUploadedFilePath(newKey);
+            record.setUploadedFileData(fileBytes);
+            record.setUploadedFileSize((long) fileBytes.length);
+            record.setUploadedFileName(fileName);
+            record.setUploadedAt(LocalDateTime.now());
+            record.setReviewComment(null);
+            record.setCreateBy(username);
+            record.setUpdateBy(username);
+            try {
+                reportMapper.insert(record);
+            } catch (org.springframework.dao.DuplicateKeyException dup) {
+                // Another concurrent upload won the race against the
+                // uk_ar_report_ent_year_type unique index — translate into a
+                // friendly retry message instead of a 500.
+                log.warn("[ReportService] Concurrent upload conflict for enterprise={} year={} type={}",
+                    enterpriseId, auditYear, rt);
+                throw new BusinessException("该年度报告正在被同时上传，请稍后重试");
+            }
+            reportId = record.getId();
+        } else {
+            oldKey = existing.getUploadedFilePath();
+            existing.setStatus(2); // overwrite back to "uploaded" regardless of prior 0/2/6
+            existing.setUploadedFilePath(newKey);
+            existing.setUploadedFileData(fileBytes);
+            existing.setUploadedFileSize((long) fileBytes.length);
+            existing.setUploadedFileName(fileName);
+            existing.setUploadedAt(LocalDateTime.now());
+            existing.setReviewComment(null);   // clear any prior rejection reason on re-upload
+            existing.setReviewerId(null);
+            existing.setUpdateBy(username);
+            reportMapper.update(existing);
+            reportId = existing.getId();
+        }
+
+        // 3. Best-effort delete of the previous file (after the new path is persisted).
+        if (oldKey != null && !oldKey.equals(newKey)) {
+            reportFileStore.delete(oldKey);
+        }
+
+        log.info("[ReportService] Enterprise {} uploaded report year={} type={} id={} bytes={} key={}",
+            enterpriseId, auditYear, rt, reportId, fileBytes.length, newKey);
+        return reportMapper.selectById(reportId);
+    }
+
+    @Override
+    public byte[] downloadUploadedReportBytes(Long reportId) {
+        if (reportId == null) {
+            throw new BusinessException("reportId 不能为空");
+        }
+        ArReport report = reportMapper.selectById(reportId);
+        if (report == null) {
+            throw new BusinessException("报告不存在");
+        }
+        // Filesystem first (fast)
+        Optional<byte[]> fsBytes = reportFileStore.load(report.getUploadedFilePath());
+        if (fsBytes.isPresent()) {
+            return fsBytes.get();
+        }
+        // BLOB fallback (Railway-restart durable copy)
+        byte[] blob = reportMapper.selectUploadedFileBytesById(reportId);
+        if (blob != null && blob.length > 0) {
+            // Self-heal is best-effort: a write/DB failure here must not abort the
+            // download, since the bytes the caller actually wants are already in hand.
+            try {
+                String newKey = reportFileStore.save(
+                    report.getEnterpriseId(),
+                    report.getAuditYear() == null ? 0 : report.getAuditYear(),
+                    report.getUploadedFileName(),
+                    blob);
+                if (newKey != null && !newKey.equals(report.getUploadedFilePath())) {
+                    // Targeted update — must NOT use reportMapper.update(patch), which would
+                    // unconditionally set review_comment = NULL and erase any auditor's rejection reason.
+                    reportMapper.updateUploadedFilePathById(reportId, newKey, "system");
+                    log.info("[ReportService] Self-healed local cache for report {} -> {}", reportId, newKey);
+                }
+            } catch (RuntimeException e) {
+                log.warn("[ReportService] Self-heal failed for report {} (serving BLOB only): {}",
+                    reportId, e.getMessage());
+            }
+            return blob;
+        }
+        throw new BusinessException("报告文件不存在，请重新上传");
     }
 
     @Override

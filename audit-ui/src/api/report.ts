@@ -28,6 +28,8 @@ export interface ArReportTemplate {
   version: number
   status: number
   createTime: string
+  originalFileName?: string | null
+  fileSize?: number | null
 }
 
 export const REPORT_STATUS_MAP: Record<number, { label: string; type: 'info' | 'warning' | 'success' | 'primary' | 'danger' }> = {
@@ -50,6 +52,47 @@ export function getReportDetail(id: number): Promise<ArReport> {
 
 export function downloadReport(id: number): Promise<Blob> {
   return request.get<Blob>(`/report/${id}/download`, { responseType: 'blob' })
+}
+
+// ====== Enterprise: download active template, upload filled report ======
+
+/**
+ * Get currently-active report template metadata. Returns null when no template
+ * has been activated yet — UI shows a disabled state.
+ */
+export function getActiveReportTemplate(): Promise<ArReportTemplate | null> {
+  return request.get<ArReportTemplate | null>('/report/template/active')
+}
+
+/**
+ * Download the currently-active report template as a .docx blob.
+ */
+export function downloadActiveReportTemplate(): Promise<Blob> {
+  return request.get<Blob>('/report/template/active/download', { responseType: 'blob' })
+}
+
+/**
+ * Upload an enterprise-filled .docx report. Upserts by (auditYear, reportType).
+ */
+export function uploadFilledReport(
+  file: File,
+  auditYear: number,
+  reportType?: number,
+): Promise<ArReport> {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('auditYear', String(auditYear))
+  if (reportType != null) {
+    formData.append('reportType', String(reportType))
+  }
+  return request.post<ArReport>('/report/upload', formData)
+}
+
+/**
+ * Download a previously-uploaded enterprise report (returns the .docx).
+ */
+export function downloadUploadedReport(id: number): Promise<Blob> {
+  return request.get<Blob>(`/report/${id}/uploaded/download`, { responseType: 'blob' })
 }
 
 // Template-based report generation (Phase 1)

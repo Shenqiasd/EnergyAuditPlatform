@@ -13,6 +13,10 @@
         <result column="status" property="status"/>
         <result column="generated_file_path" property="generatedFilePath"/>
         <result column="uploaded_file_path" property="uploadedFilePath"/>
+        <result column="uploaded_file_data" property="uploadedFileData"/>
+        <result column="uploaded_file_size" property="uploadedFileSize"/>
+        <result column="uploaded_file_name" property="uploadedFileName"/>
+        <result column="uploaded_at" property="uploadedAt"/>
         <result column="onlyoffice_doc_key" property="onlyofficeDocKey"/>
         <result column="generate_time" property="generateTime"/>
         <result column="submit_time" property="submitTime"/>
@@ -30,7 +34,7 @@
         <result column="enterprise_name" property="enterpriseName"/>
     </resultMap>
 
-    <!-- Light result map without report_html (which can be very large) -->
+    <!-- Light result map without report_html and uploaded_file_data (which can be very large) -->
     <resultMap id="LightResultMap" type="com.energy.audit.model.entity.report.ArReport">
         <id column="id" property="id"/>
         <result column="enterprise_id" property="enterpriseId"/>
@@ -40,6 +44,9 @@
         <result column="status" property="status"/>
         <result column="generated_file_path" property="generatedFilePath"/>
         <result column="uploaded_file_path" property="uploadedFilePath"/>
+        <result column="uploaded_file_size" property="uploadedFileSize"/>
+        <result column="uploaded_file_name" property="uploadedFileName"/>
+        <result column="uploaded_at" property="uploadedAt"/>
         <result column="generate_time" property="generateTime"/>
         <result column="submit_time" property="submitTime"/>
         <result column="template_id" property="templateId"/>
@@ -58,10 +65,14 @@
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO ar_report (enterprise_id, audit_year, report_name, report_type,
                                status, generated_file_path, generate_time,
+                               uploaded_file_path, uploaded_file_data,
+                               uploaded_file_size, uploaded_file_name, uploaded_at,
                                report_html, template_id, submission_id, flow_chart_path,
                                create_by, update_by)
         VALUES (#{enterpriseId}, #{auditYear}, #{reportName}, #{reportType},
                 #{status}, #{generatedFilePath}, #{generateTime},
+                #{uploadedFilePath}, #{uploadedFileData},
+                #{uploadedFileSize}, #{uploadedFileName}, #{uploadedAt},
                 #{reportHtml}, #{templateId}, #{submissionId}, #{flowChartPath},
                 #{createBy}, #{updateBy})
     </insert>
@@ -73,6 +84,10 @@
             <if test="status != null">status = #{status},</if>
             <if test="generatedFilePath != null">generated_file_path = #{generatedFilePath},</if>
             <if test="uploadedFilePath != null">uploaded_file_path = #{uploadedFilePath},</if>
+            <if test="uploadedFileData != null">uploaded_file_data = #{uploadedFileData},</if>
+            <if test="uploadedFileSize != null">uploaded_file_size = #{uploadedFileSize},</if>
+            <if test="uploadedFileName != null">uploaded_file_name = #{uploadedFileName},</if>
+            <if test="uploadedAt != null">uploaded_at = #{uploadedAt},</if>
             <if test="generateTime != null">generate_time = #{generateTime},</if>
             <if test="submitTime != null">submit_time = #{submitTime},</if>
             <if test="reportHtml != null">report_html = #{reportHtml},</if>
@@ -80,23 +95,54 @@
             <if test="submissionId != null">submission_id = #{submissionId},</if>
             <if test="flowChartPath != null">flow_chart_path = #{flowChartPath},</if>
             review_comment = #{reviewComment},
-            <if test="reviewerId != null">reviewer_id = #{reviewerId},</if>
+            reviewer_id = #{reviewerId},
             update_by = #{updateBy},
             update_time = CURRENT_TIMESTAMP,
         </set>
         WHERE id = #{id} AND deleted = 0
     </update>
 
+    <!--
+      selectById intentionally avoids r.* to skip the large uploaded_file_data BLOB.
+      Use selectUploadedFileBytesById to fetch the BLOB on demand for downloads.
+    -->
     <select id="selectById" resultMap="BaseResultMap">
-        SELECT r.*, e.enterprise_name
+        SELECT r.id, r.enterprise_id, r.audit_year, r.report_name, r.report_type,
+               r.status, r.generated_file_path, r.uploaded_file_path,
+               r.uploaded_file_size, r.uploaded_file_name, r.uploaded_at,
+               r.onlyoffice_doc_key, r.generate_time, r.submit_time, r.report_html,
+               r.template_id, r.submission_id, r.flow_chart_path,
+               r.review_comment, r.reviewer_id,
+               r.create_by, r.create_time, r.update_by, r.update_time, r.deleted,
+               e.enterprise_name
         FROM ar_report r
         LEFT JOIN ent_enterprise e ON e.id = r.enterprise_id
         WHERE r.id = #{id} AND r.deleted = 0
     </select>
 
+    <select id="selectUploadedFileBytesById" resultType="byte[]">
+        SELECT uploaded_file_data
+        FROM ar_report
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <!--
+      Targeted update used by the self-heal path in downloadUploadedReportBytes.
+      Avoids the general-purpose <update id="update"> which has an unconditional
+      review_comment = #{reviewComment} clause that would clobber existing comments.
+    -->
+    <update id="updateUploadedFilePathById">
+        UPDATE ar_report
+        SET uploaded_file_path = #{path},
+            update_by          = #{updateBy},
+            update_time        = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
     <select id="selectByEnterprise" resultMap="LightResultMap">
         SELECT r.id, r.enterprise_id, r.audit_year, r.report_name, r.report_type,
                r.status, r.generated_file_path, r.uploaded_file_path,
+               r.uploaded_file_size, r.uploaded_file_name, r.uploaded_at,
                r.generate_time, r.submit_time, r.template_id, r.submission_id,
                r.flow_chart_path, r.review_comment, r.reviewer_id,
                r.create_by, r.create_time, r.update_by, r.update_time, r.deleted,
@@ -113,6 +159,7 @@
     <select id="selectByEnterpriseAndYear" resultMap="LightResultMap">
         SELECT id, enterprise_id, audit_year, report_name, report_type,
                status, generated_file_path, uploaded_file_path,
+               uploaded_file_size, uploaded_file_name, uploaded_at,
                generate_time, submit_time, template_id, submission_id,
                flow_chart_path, review_comment, reviewer_id,
                create_by, create_time, update_by, update_time, deleted
@@ -128,6 +175,7 @@
     <select id="selectByStatus" resultMap="LightResultMap">
         SELECT r.id, r.enterprise_id, r.audit_year, r.report_name, r.report_type,
                r.status, r.generated_file_path, r.uploaded_file_path,
+               r.uploaded_file_size, r.uploaded_file_name, r.uploaded_at,
                r.generate_time, r.submit_time, r.template_id, r.submission_id,
                r.flow_chart_path, r.review_comment, r.reviewer_id,
                r.create_by, r.create_time, r.update_by, r.update_time, r.deleted,
