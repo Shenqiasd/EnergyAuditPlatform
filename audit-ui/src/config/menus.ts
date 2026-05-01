@@ -38,8 +38,7 @@ export const enterpriseMenuItems: MenuItem[] = [
   {
     key: 'audit-report', icon: '📄', title: '审计报告',
     children: [
-      { key: 'report-generate', icon: '📝', title: '在线生成报告', path: '/enterprise/audit-report/generate', disabled: true, tooltip: '功能即将上线' },
-      { key: 'report-upload',   icon: '📤', title: '上传报告',     path: '/enterprise/audit-report/upload' },
+      { key: 'report-upload', icon: '📄', title: '我的报告', path: '/enterprise/audit-report/upload' },
     ],
   },
 ]
@@ -78,8 +77,7 @@ export const enterpriseMenus: MenuSection[] = [
   {
     section: '审计报告',
     items: [
-      { key: 'report-generate', icon: '📝', title: '在线生成报告', path: '/enterprise/audit-report/generate', disabled: true, tooltip: '功能即将上线' },
-      { key: 'report-upload',   icon: '📤', title: '上传报告',     path: '/enterprise/audit-report/upload' },
+      { key: 'report-upload', icon: '📄', title: '我的报告', path: '/enterprise/audit-report/upload' },
     ],
   },
 ]

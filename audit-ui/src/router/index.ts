@@ -65,9 +65,8 @@ const routes: RouteRecordRaw[] = [
       },
       { path: 'charts/energy-flow', name: 'ChartsEnergyFlow', component: () => import('@/views/enterprise/charts/energy-flow/index.vue'), meta: { title: '能源流向图' } },
       { path: 'charts/report-assist', name: 'ChartsReportAssist', component: () => import('@/views/enterprise/charts/report-assist/index.vue'), meta: { title: '辅助图表' } },
-      // Audit report (new routes)
-      { path: 'audit-report/generate', name: 'AuditReportGenerate', component: () => import('@/views/enterprise/audit-report/generate/index.vue'), meta: { title: '在线生成报告' } },
-      { path: 'audit-report/upload', name: 'AuditReportUpload', component: () => import('@/views/enterprise/audit-report/upload/index.vue'), meta: { title: '上传报告' } },
+      // Audit report (unified download-template + upload-filled-report page)
+      { path: 'audit-report/upload', name: 'AuditReportUpload', component: () => import('@/views/enterprise/audit-report/upload/index.vue'), meta: { title: '审计报告' } },
       // Legacy report routes (kept for backward compat)
       { path: 'report/generate', name: 'ReportGenerate', component: () => import('@/views/enterprise/report/generate/index.vue'), meta: { title: '填报进度' } },
       { path: 'report/edit', name: 'ReportEdit', component: () => import('@/views/enterprise/report/edit/index.vue'), meta: { title: '在线编辑报告' } },

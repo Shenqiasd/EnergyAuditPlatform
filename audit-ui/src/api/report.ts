@@ -9,6 +9,9 @@ export interface ArReport {
   status: number
   generatedFilePath: string | null
   uploadedFilePath: string | null
+  uploadedFileSize?: number | null
+  uploadedFileName?: string | null
+  uploadedAt?: string | null
   generateTime: string | null
   submitTime: string | null
   reportHtml: string | null
