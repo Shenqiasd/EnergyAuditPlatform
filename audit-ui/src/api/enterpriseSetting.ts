@@ -89,3 +89,14 @@ export interface ConfigPrefillData {
 export function getConfigPrefillData(): Promise<ConfigPrefillData> {
   return request.get('/enterprise/setting/config-prefill-data')
 }
+
+/** Prerequisite check result */
+export interface PrerequisiteCheckResult {
+  passed: boolean
+  errors: string[]
+}
+
+/** Check whether all prerequisite tables are completed before data entry / chart export */
+export function checkPrerequisites(): Promise<PrerequisiteCheckResult> {
+  return request.get('/enterprise/setting/prerequisite-check')
+}
