@@ -45,13 +45,15 @@ const canSubmitForReview = computed(() => {
   return [2, 6].includes(myReport.value.status) && !!myReport.value.uploadedFilePath
 })
 
+// uploadedFilePath is the source of truth for "a file actually exists in the store".
+// uploadedFileName is just display metadata and can be set independently.
 const canDownloadOwn = computed(() => {
   if (!myReport.value) return false
-  return !!myReport.value.uploadedFilePath || !!myReport.value.uploadedFileName
+  return !!myReport.value.uploadedFilePath
 })
 
 function formatBytes(bytes: number | null | undefined): string {
-  if (!bytes || bytes <= 0) return '—'
+  if (bytes == null || bytes <= 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB']
   let v = bytes
   let i = 0
@@ -84,7 +86,10 @@ async function loadData() {
   try {
     const [tpl, reports] = await Promise.all([
       getActiveReportTemplate().catch(() => null),
-      listReports(selectedYear.value),
+      listReports(selectedYear.value).catch((e: unknown) => {
+        ElMessage.error('加载历史报告失败：' + extractMsg(e))
+        return [] as ArReport[]
+      }),
     ])
     activeTemplate.value = tpl
     // Pick the matching record for the selected year (defensive — listReports already filters).
@@ -127,7 +132,9 @@ function beforeUpload(file: File): boolean {
 
 async function handleUpload(opts: { file: File }) {
   const file = opts.file
-  if (!file || !beforeUpload(file)) return
+  // beforeUpload is already invoked by el-upload's :before-upload binding
+  // before this http-request handler fires — don't double-validate here.
+  if (!file) return
   if (myReport.value && [4, 5].includes(myReport.value.status)) {
     ElMessage.warning('当前报告已提交审核或已通过，无法重新上传')
     return
