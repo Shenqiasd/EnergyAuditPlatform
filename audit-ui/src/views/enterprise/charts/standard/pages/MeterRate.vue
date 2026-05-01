@@ -56,12 +56,20 @@ onMounted(async () => {
 
 function getDefaultRows(): Record<string, unknown>[] {
   return [
-    { energyType: '电力', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 100 },
-    { energyType: '固态能源', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 95 },
-    { energyType: '液态能源', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 95 },
-    { energyType: '气态能源', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 95 },
-    { energyType: '热力（蒸汽/热水）', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 95 },
-    { energyType: '可再生能源', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 95 },
+    { energyType: '电力', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 95 },
+    { energyType: '固态能源-煤', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 90 },
+    { energyType: '固态能源-焦炭', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 90 },
+    { energyType: '固态能源-原煤', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 90 },
+    { energyType: '液态能源-成品油', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 95 },
+    { energyType: '液态能源-重油', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 90 },
+    { energyType: '液态能源-渣油', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 90 },
+    { energyType: '气态能源-天然气', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 90 },
+    { energyType: '气态能源-液化气', inOutStandard: 100, secondaryStandard: 100, equipmentStandard: 90 },
+    { energyType: '气态能源-煤气', inOutStandard: 100, secondaryStandard: 90, equipmentStandard: 80 },
+    { energyType: '载热工质-蒸汽', inOutStandard: 100, secondaryStandard: 80, equipmentStandard: 70 },
+    { energyType: '载热工质-热水', inOutStandard: 100, secondaryStandard: 95, equipmentStandard: 80 },
+    { energyType: '可回收余能', inOutStandard: 100, secondaryStandard: 80, equipmentStandard: 60 },
+    { energyType: '其他', inOutStandard: 100, secondaryStandard: 90, equipmentStandard: 80 },
   ]
 }
 </script>
