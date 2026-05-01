@@ -5,6 +5,7 @@ import com.energy.audit.dao.mapper.report.ArReportMapper;
 import com.energy.audit.dao.mapper.report.ArReportTemplateMapper;
 import com.energy.audit.model.entity.report.ArReport;
 import com.energy.audit.model.entity.report.ArReportTemplate;
+import com.energy.audit.service.report.ActiveTemplateDownload;
 import com.energy.audit.service.report.ReportService;
 import com.energy.audit.service.report.TemplateBasedReportBuilder;
 import org.slf4j.Logger;
@@ -314,34 +315,65 @@ public class ReportServiceImpl implements ReportService {
         if (reportTemplateMapper == null) {
             return null;
         }
-        return reportTemplateMapper.selectActive();
+        // Light variant: explicit column list excludes the BLOB so the metadata
+        // endpoint never pulls a multi-MB byte[] just to drop it on serialization.
+        return reportTemplateMapper.selectActiveLight();
     }
 
     @Override
-    public byte[] downloadActiveTemplateBytes() {
+    public ActiveTemplateDownload downloadActiveTemplate() {
         if (reportTemplateMapper == null) {
             throw new BusinessException("报告模板模块未初始化");
         }
+        // Single DB read so the filename and bytes returned to the controller
+        // are guaranteed to come from the same template row.
         ArReportTemplate template = reportTemplateMapper.selectActive();
         if (template == null) {
             throw new BusinessException("未找到可用的报告模板，请联系管理员上传模板");
         }
-        // Filesystem first (fast), then DB BLOB (survives container restarts)
+
+        // Filesystem first (fast), then DB BLOB (survives container restarts).
         String fsPath = template.getTemplateFilePath();
-        if (fsPath != null && Files.exists(Paths.get(fsPath))) {
-            try {
-                log.info("[ReportService] Active template served from filesystem: {}", fsPath);
-                return Files.readAllBytes(Paths.get(fsPath));
-            } catch (IOException e) {
-                log.warn("[ReportService] Failed to read template file {}, falling back to DB BLOB", fsPath, e);
+        if (fsPath != null && !fsPath.isEmpty()) {
+            Path resolved = resolveTemplatePath(fsPath);
+            if (resolved != null && Files.exists(resolved)) {
+                try {
+                    byte[] bytes = Files.readAllBytes(resolved);
+                    log.info("[ReportService] Active template served from filesystem: {}", resolved);
+                    return new ActiveTemplateDownload(template, bytes);
+                } catch (IOException e) {
+                    log.warn("[ReportService] Failed to read template file {}, falling back to DB BLOB",
+                        resolved, e);
+                }
             }
         }
         byte[] data = template.getTemplateFileData();
         if (data != null && data.length > 0) {
             log.info("[ReportService] Active template served from DB BLOB ({} bytes)", data.length);
-            return data;
+            return new ActiveTemplateDownload(template, data);
         }
         throw new BusinessException("报告模板文件不存在且数据库中无模板数据，请重新上传模板");
+    }
+
+    /**
+     * Validate a {@code template_file_path} value coming from the DB before reading it.
+     * Returns {@code null} (caller falls back to BLOB) when the path escapes the configured
+     * upload root, defending against tampered DB rows pointing at arbitrary container paths.
+     */
+    private Path resolveTemplatePath(String fsPath) {
+        try {
+            Path candidate = Paths.get(fsPath).toAbsolutePath().normalize();
+            Path baseDir = Paths.get(uploadDir).toAbsolutePath().normalize();
+            if (!candidate.startsWith(baseDir)) {
+                log.warn("[ReportService] Template path {} escapes upload root {}, ignoring",
+                    candidate, baseDir);
+                return null;
+            }
+            return candidate;
+        } catch (RuntimeException e) {
+            log.warn("[ReportService] Invalid template path {}: {}", fsPath, e.getMessage());
+            return null;
+        }
     }
 
     // ====== Phase 4: Admin Report Template Management ======

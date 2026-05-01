@@ -80,6 +80,16 @@
         LIMIT 1
     </select>
 
+    <!-- Metadata-only variant: explicit column list excluding the BLOB -->
+    <select id="selectActiveLight" resultMap="LightResultMap">
+        SELECT id, template_name, template_file_path, original_file_name, version, status,
+               create_by, create_time, update_by, update_time, deleted
+        FROM ar_report_template
+        WHERE status = 1 AND deleted = 0
+        ORDER BY version DESC
+        LIMIT 1
+    </select>
+
     <update id="softDelete">
         UPDATE ar_report_template
         SET deleted = 1, update_by = #{updateBy}, update_time = CURRENT_TIMESTAMP
