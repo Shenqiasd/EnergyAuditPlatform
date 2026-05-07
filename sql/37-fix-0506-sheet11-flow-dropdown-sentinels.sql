@@ -4,6 +4,11 @@
 -- de_energy_flow. The downstream EnergyFlowPostProcessor treats the literal
 -- values "外购" and "产出" as virtual nodes, so the data-entry dropdowns must
 -- expose them even though they are not rows in bs_unit.
+--
+-- Use UTF-8 hex literals for the Chinese sentinel values. Some deployment
+-- shells/mysql clients do not default to utf8mb4, and plain string literals can
+-- otherwise be written as mojibake (e.g. å¤–è´­) even when the table collation is
+-- correct.
 
 SET @v_id := (
     SELECT tv.id
@@ -27,13 +32,13 @@ SET column_mappings = JSON_OBJECT(
             JSON_OBJECT(
                 'col', 'A',
                 'field', 'name',
-                'extraValues', JSON_ARRAY('外购'),
+                'extraValues', JSON_ARRAY(_utf8mb4 0xE5A496E8B4AD),
                 'extraPosition', 'prepend'
             ),
             JSON_OBJECT(
                 'col', 'B',
                 'field', 'name',
-                'extraValues', JSON_ARRAY('产出'),
+                'extraValues', JSON_ARRAY(_utf8mb4 0xE4BAA7E587BA),
                 'extraPosition', 'append'
             )
         )
