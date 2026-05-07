@@ -78,12 +78,12 @@ function certLabel(val: unknown): string {
         { label: '单位类型', value: info.unitNature },
       ]" />
       <InfoRow :items="[
-        { label: '单位注册日期', value: info.registeredDate },
-        { label: '单位注册资本（万元）', value: info.registeredCapital },
-      ]" />
-      <InfoRow :items="[
         { label: '单位地址', value: info.unitAddress || info.enterpriseAddress },
         { label: '邮政编码', value: info.postalCode },
+      ]" />
+      <InfoRow :items="[
+        { label: '电子邮箱', value: info.enterpriseEmail },
+        { label: '传真（区号）', value: info.fax },
       ]" />
       <InfoRow :items="[
         { label: '法定代表人姓名', value: info.legalRepresentative },
@@ -91,27 +91,27 @@ function certLabel(val: unknown): string {
       ]" />
       <InfoRow :items="[
         { label: '能源管理机构名称', value: info.energyMgmtOrg },
-        { label: '传真（区号）', value: info.fax },
+        { label: '是否建立能源管理中心', value: info.hasEnergyMgmtCenter },
       ]" />
       <InfoRow :items="[
         { label: '单位主管节能领导姓名', value: info.energyLeaderName },
-        { label: '联系电话', value: info.energyLeaderPhone },
+        { label: '单位主管节能领导电话', value: info.energyLeaderPhone },
       ]" />
       <InfoRow :items="[
-        { label: '企业联系人', value: info.enterpriseContact },
-        { label: '手机号', value: info.enterpriseMobile },
+        { label: '能源管理负责人姓名', value: info.energyManagerName },
+        { label: '能源管理负责人电话', value: info.energyDeptLeaderPhone },
       ]" />
       <InfoRow :items="[
-        { label: '联系电话', value: info.energyDeptLeaderPhone },
-        { label: '电子邮箱', value: info.enterpriseEmail },
+        { label: '能审联系人姓名', value: info.enterpriseContact },
+        { label: '能审联系人电话', value: info.enterpriseMobile },
       ]" />
       <InfoRow :items="[
-        { label: '编制单位联系人', value: info.compilerContact },
-        { label: '手机号', value: info.compilerMobile },
+        { label: '能审报告编制单位', value: info.compilerName },
+        { label: '编制单位联系人姓名', value: info.compilerContact },
       ]" />
       <InfoRow :items="[
-        { label: '编制单位名称', value: info.compilerName },
-        { label: '电子邮箱', value: info.compilerEmail },
+        { label: '编制单位联系人电话', value: info.compilerMobile },
+        { label: '编制单位联系人邮箱', value: info.compilerEmail },
       ]" />
       <InfoRow :items="[
         { label: '是否通过能源管理体系认证', value: certLabel(info.energyCert) },

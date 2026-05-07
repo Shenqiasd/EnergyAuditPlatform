@@ -14,6 +14,8 @@ const columns: RegColumn[] = [
   { prop: 'projectType', label: '项目类型', minWidth: 100 },
   { prop: 'projectName', label: '项目名称', minWidth: 150 },
   { prop: 'mainContent', label: '主要内容', minWidth: 200 },
+  { prop: 'energyCategory', label: '能源品类', minWidth: 100 },
+  { prop: 'physicalQuantity', label: '实物量', minWidth: 100 },
   { prop: 'savingPotential', label: '节能潜力（吨标煤/年）', minWidth: 160 },
   { prop: 'carbonReduction', label: '减碳量（吨二氧化碳/年）', minWidth: 160 },
   { prop: 'investment', label: '投资（万元）', minWidth: 110 },

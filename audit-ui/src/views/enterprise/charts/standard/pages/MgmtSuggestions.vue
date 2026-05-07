@@ -13,6 +13,8 @@ const columns: RegColumn[] = [
   { prop: 'seqNo', label: '序号', width: 60 },
   { prop: 'projectName', label: '项目名称', minWidth: 150 },
   { prop: 'mainContent', label: '主要内容', minWidth: 200 },
+  { prop: 'energyCategory', label: '能源品类', minWidth: 100 },
+  { prop: 'physicalQuantity', label: '实物量', minWidth: 100 },
   { prop: 'investment', label: '投资（万元）', minWidth: 110 },
   { prop: 'annualSaving', label: '年节能量（吨标煤）', minWidth: 140 },
   { prop: 'annualCarbonReduction', label: '年减碳量（吨二氧化碳）', minWidth: 150 },
