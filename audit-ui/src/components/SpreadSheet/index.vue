@@ -180,7 +180,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   document.removeEventListener('click', onDocumentClickDismissCtxMenu)
   if (spreadRef.value) {
-    spreadRef.value.removeEventListener('contextmenu', onSpreadContextMenu)
+    spreadRef.value.removeEventListener('contextmenu', onSpreadContextMenu, true)
   }
   if (statusUpdateTimer) clearTimeout(statusUpdateTimer)
   if (resizeTimer) clearTimeout(resizeTimer)
@@ -205,6 +205,7 @@ async function initWorkbook() {
   let wb: WB | null = null
   try {
     wb = new window.GC.Spread.Sheets.Workbook(spreadRef.value)
+    disableNativeContextMenu(wb)
     workbook = wb
 
     // ── Phase 1: fetch template version + submission in parallel ──────
@@ -418,7 +419,7 @@ async function initWorkbook() {
     window.addEventListener('resize', onWindowResize)
     // Bind right-click context menu for add/delete row
     if (spreadRef.value) {
-      spreadRef.value.addEventListener('contextmenu', onSpreadContextMenu)
+      spreadRef.value.addEventListener('contextmenu', onSpreadContextMenu, { capture: true })
     }
     document.addEventListener('click', onDocumentClickDismissCtxMenu)
     cpTrace('postcalc.allDone')
@@ -2465,9 +2466,52 @@ function validateRequiredFieldsBySheet(): SheetValidationError[] {
 
 // ── Add Row Feature: context menu + insert/delete/reset ────────────────
 
+/** Disable SpreadJS/browser native right-click menus on the data-entry workbook. */
+function disableNativeContextMenu(wb: WB) {
+  try {
+    wb.options.allowContextMenu = false
+  } catch {
+    // Best-effort only; the DOM contextmenu handler below still suppresses the menu.
+  }
+}
+
+function resolveContextMenuTarget(e: MouseEvent): { sheetIndex: number; row: number } | null {
+  if (!workbook) return null
+
+  try {
+    const hit = (workbook as unknown as {
+      hitTest?: (x: number, y: number) => {
+        worksheet?: import('@/types/spreadjs').GCSpreadSheet
+        row?: number
+        col?: number
+      } | null
+    }).hitTest?.(e.pageX, e.pageY)
+
+    if (hit?.worksheet && hit.row != null && hit.row >= 0) {
+      const count = workbook.getSheetCount()
+      for (let i = 0; i < count; i++) {
+        if (workbook.getSheet(i) === hit.worksheet) {
+          return { sheetIndex: i, row: hit.row }
+        }
+      }
+    }
+  } catch {
+    // Fall through to the active selection fallback.
+  }
+
+  const sheet = workbook.getActiveSheet()
+  const selections = sheet.getSelections()
+  if (!selections || selections.length === 0) return null
+  const row = selections[0].row
+  if (row < 0) return null
+  return { sheetIndex: workbook.getActiveSheetIndex(), row }
+}
+
 /** Handle right-click on spreadsheet to show add/delete row context menu */
 function onSpreadContextMenu(e: MouseEvent) {
   e.preventDefault()
+  e.stopPropagation()
+  e.stopImmediatePropagation()
   ctxMenuVisible.value = false
 
   if (!workbook) return
@@ -2475,14 +2519,9 @@ function onSpreadContextMenu(e: MouseEvent) {
   const isSubmittedOrApproved = submissionStatus === 1 || submissionStatus === 2
   if (props.readonly || isSubmittedOrApproved) return
 
-  const sheet = workbook.getActiveSheet()
-  const sheetIndex = workbook.getActiveSheetIndex()
-
-  // Use active selection to determine clicked row
-  const selections = sheet.getSelections()
-  if (!selections || selections.length === 0) return
-  const row = selections[0].row
-  if (row < 0) return
+  const target = resolveContextMenuTarget(e)
+  if (!target) return
+  const { sheetIndex, row } = target
 
   // Find TABLE tag at this row
   const tag = findTableTagAtCell(sheetIndex, row)
