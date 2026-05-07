@@ -6,6 +6,8 @@
     <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.enterprise.EntEnterpriseSetting">
         <id     column="id"                        property="id"/>
         <result column="enterprise_id"             property="enterpriseId"/>
+        <result column="enterprise_name"           property="enterpriseName"/>
+        <result column="credit_code"               property="creditCode"/>
         <result column="region"                    property="region"/>
         <result column="industry_field"            property="industryField"/>
         <result column="industry_name"             property="industryName"/>
@@ -57,9 +59,12 @@
     </resultMap>
 
     <select id="selectByEnterpriseId" resultMap="BaseResultMap">
-        SELECT *
-        FROM ent_enterprise_setting
-        WHERE enterprise_id = #{enterpriseId} AND deleted = 0
+        SELECT s.*,
+               e.enterprise_name AS enterprise_name,
+               e.credit_code AS credit_code
+        FROM ent_enterprise_setting s
+        LEFT JOIN ent_enterprise e ON e.id = s.enterprise_id AND e.deleted = 0
+        WHERE s.enterprise_id = #{enterpriseId} AND s.deleted = 0
         LIMIT 1
     </select>
 

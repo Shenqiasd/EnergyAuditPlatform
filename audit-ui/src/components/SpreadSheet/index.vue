@@ -16,6 +16,7 @@ import {
 import { getEnterpriseSettingPrefill, getConfigPrefillData, type ConfigPrefillData } from '@/api/enterpriseSetting'
 import { getDataByTypes, type DictData } from '@/api/dict'
 import { initSpreadJSLicense } from '@/utils/spreadjs-license'
+import { onEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
 
 const props = defineProps<{
   templateId: number
@@ -50,6 +51,7 @@ let publishedVersion: TplTemplateVersion | null = null
 let currentSubmission: TplSubmission | null = null
 let disposed = false
 let loadSeq = 0
+let stopEnterpriseSettingUpdatedListener: (() => void) | null = null
 
 /**
  * ownsLock is initialised from props.hasLock at mount time (before any async work),
@@ -162,12 +164,17 @@ watch(
 onMounted(() => {
   disposed = false
   ownsLock = props.hasLock
+  stopEnterpriseSettingUpdatedListener = onEnterpriseSettingUpdated(() => {
+    refreshEnterpriseSettingPrefill()
+  })
   initWorkbook()
 })
 
 onBeforeUnmount(() => {
   disposed = true
   loadSeq++
+  stopEnterpriseSettingUpdatedListener?.()
+  stopEnterpriseSettingUpdatedListener = null
   stopHeartbeat()
   releaseLockIfOwned()
   window.removeEventListener('resize', onWindowResize)
@@ -255,15 +262,14 @@ async function initWorkbook() {
               console.warn('[phase2] listTags failed:', e)
               return [] as TplTagMapping[]
             }),
-            !currentSubmission
-              ? getEnterpriseSettingPrefill().catch(() => null)
-              : Promise.resolve(null),
+            getEnterpriseSettingPrefill().catch(() => null),
             // Always fetch config data — dropdowns need it even for existing submissions
             getConfigPrefillData().catch(() => null),
           ])
           console.timeEnd('[perf] phase2-fetch')
           if (isLoadStale(loadId, wb)) return
           cpTrace('phase2.fetch.done', { tagCount: tags.length })
+          cachedTags = tags
 
           // Master suspend envelope for all Phase 2 mutations — prevents the
           // ~1000 setValue/setStyle/setDataValidator calls below from each
@@ -287,7 +293,7 @@ async function initWorkbook() {
             cpTrace('buildCellTagIndex.done')
 
             // Pre-fill enterprise settings (uses pre-fetched tags + prefillData)
-            if (!currentSubmission && prefillData) {
+            if (prefillData) {
               cpTrace('applyPrefill.start')
               console.time('[perf] applyPrefill')
               if (isLoadStale(loadId, wb)) return
@@ -437,16 +443,12 @@ function applyPrefill(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tags: TplTagMapping[],
   prefillData: Record<string, unknown>,
+  lockFilledCells = false,
 ) {
   try {
     if (!prefillData || Object.keys(prefillData).length === 0) return
 
-    // Filter to only ent_enterprise_setting SCALAR mappings
-    const entTags = tags.filter(
-      (t: TplTagMapping) =>
-        t.targetTable === 'ent_enterprise_setting' &&
-        (!t.mappingType || t.mappingType === 'SCALAR'),
-    )
+    const entTags = tags.filter(isEnterpriseSettingScalarTag)
     if (entTags.length === 0) return
 
     wb.suspendPaint()
@@ -457,7 +459,7 @@ function applyPrefill(
         const value = prefillData[fieldName]
         if (value == null || value === '') continue
 
-        const filled = fillTaggedCell(wb, tag, value)
+        const filled = fillTaggedCell(wb, tag, value, lockFilledCells)
         if (!filled) {
           console.debug(`[prefill] could not locate cell for tag "${tag.tagName}"`)
         }
@@ -468,6 +470,38 @@ function applyPrefill(
   } catch (e) {
     // Pre-fill is best-effort; don't block template loading
     console.warn('[prefill] failed to pre-fill enterprise settings:', e)
+  }
+}
+
+function isEnterpriseSettingScalarTag(tag: TplTagMapping): boolean {
+  return tag.targetTable === 'ent_enterprise_setting' &&
+    (!tag.mappingType || tag.mappingType === 'SCALAR')
+}
+
+async function refreshEnterpriseSettingPrefill() {
+  if (!workbook || disposed) return
+  const wb = workbook
+  const loadId = loadSeq
+  try {
+    const prefillData = await getEnterpriseSettingPrefill()
+    if (!prefillData || isLoadStale(loadId, wb)) return
+
+    wb.suspendPaint()
+    suspendEventSafe(wb)
+    suspendCalcServiceSafe(wb)
+    try {
+      applyPrefill(wb, cachedTags, prefillData, true)
+    } finally {
+      resumeCalcServiceSafe(wb)
+      resumeEventSafe(wb)
+      wb.resumePaint()
+    }
+
+    if (isLoadStale(loadId, wb)) return
+    calculateAllSafe(wb)
+    computeAllSheetStatuses()
+  } catch (e) {
+    console.warn('[prefill] failed to refresh enterprise settings:', e)
   }
 }
 
@@ -913,6 +947,7 @@ function fillTaggedCell(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tag: TplTagMapping,
   value: unknown,
+  lockFilledCell = false,
 ): boolean {
   const sheetCount = wb.getSheetCount()
 
@@ -942,21 +977,23 @@ function fillTaggedCell(
     }
   }
 
-  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
-  if (tag.tagName) {
-    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
-    if (found) {
-      const sheet = wb.getSheet(found.sheetIndex)
-      sheet.setValue(found.row, found.col, value)
-      return true
-    }
-  }
-
   const rangeTarget = resolveSingleCellRange(wb, tag)
   if (rangeTarget) {
     const sheet = wb.getSheet(rangeTarget.sheetIndex)
     sheet.setValue(rangeTarget.row, rangeTarget.col, value)
+    if (lockFilledCell) sheet.getCell(rangeTarget.row, rangeTarget.col).locked(true)
     return true
+  }
+
+  // Use pre-built cell-tag index for O(1) lookup
+  if (tag.tagName) {
+    const found = lookupCellTag(wb, tag.tagName, tag.sheetName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      sheet.setValue(found.row, found.col, value)
+      if (lockFilledCell) sheet.getCell(found.row, found.col).locked(true)
+      return true
+    }
   }
 
   return false
@@ -1431,8 +1468,8 @@ function applyDataEntryProtection(
       // getTag scans that used to live in unlockScalarCell/fillTaggedCell
       // (addressed by the cell-tag index in a separate PR), and (b) the suspend
       // envelope / single-recalc changes in this PR. We deliberately keep the
-      // original "brute-force lock-all" semantics here because `setDefaultStyle`
-      // alone does NOT override per-cell explicit `locked=false`.
+      // original lock-all semantics here because `setDefaultStyle` alone does
+      // NOT override per-cell explicit `locked=false`.
       for (let si = 0; si < sheetCount; si++) {
         const sheet = wb.getSheet(si)
         const rows = sheet.getRowCount()
@@ -1448,6 +1485,7 @@ function applyDataEntryProtection(
       let failed = 0
       for (const tag of tags) {
         try {
+          if (isEnterpriseSettingScalarTag(tag)) continue
           const mappingType = tag.mappingType ?? 'SCALAR'
 
           if (mappingType === 'SCALAR') {
@@ -1531,18 +1569,6 @@ function unlockScalarCell(
     }
   }
 
-  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
-  if (tag.tagName) {
-    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
-    if (found) {
-      const sheet = wb.getSheet(found.sheetIndex)
-      const cell = sheet.getCell(found.row, found.col)
-      cell.locked(false)
-      if (tag.required === 1) markCellRequired(cell, hint)
-      return
-    }
-  }
-
   const rangeTarget = resolveSingleCellRange(wb, tag)
   if (rangeTarget) {
     const sheet = wb.getSheet(rangeTarget.sheetIndex)
@@ -1550,6 +1576,18 @@ function unlockScalarCell(
     cell.locked(false)
     if (tag.required === 1) markCellRequired(cell, hint)
     return
+  }
+
+  // Use pre-built cell-tag index for O(1) lookup
+  if (tag.tagName) {
+    const found = lookupCellTag(wb, tag.tagName, tag.sheetName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      const cell = sheet.getCell(found.row, found.col)
+      cell.locked(false)
+      if (tag.required === 1) markCellRequired(cell, hint)
+      return
+    }
   }
   console.warn(
     `[protection] SCALAR tag 未找到匹配单元格: ${tag.tagName}`,
@@ -1731,15 +1769,18 @@ function buildCellTagIndex(wb: import('@/types/spreadjs').GCSpreadWorkbook): voi
  * Returns {sheetIndex, row, col} or null if not found.
  */
 function lookupCellTag(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tagName: string,
+  sheetName?: string | null,
   sheetIndex?: number | null,
 ): { sheetIndex: number; row: number; col: number } | null {
   if (!cellTagIndex) return null
-  if (sheetIndex != null) {
-    const sheetMap = cellTagIndex.get(sheetIndex)
+  const resolvedSheetIndex = resolveSheetIndexByNameOrIndex(wb, sheetName, sheetIndex)
+  if (resolvedSheetIndex != null) {
+    const sheetMap = cellTagIndex.get(resolvedSheetIndex)
     if (sheetMap) {
       const pos = sheetMap.get(tagName)
-      if (pos) return { sheetIndex, ...pos }
+      if (pos) return { sheetIndex: resolvedSheetIndex, ...pos }
     }
     return null
   }
@@ -1779,21 +1820,21 @@ function isScalarCellEmpty(
     }
   }
 
-  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
-  if (tag.tagName) {
-    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
-    if (found) {
-      const sheet = wb.getSheet(found.sheetIndex)
-      const val = sheet.getValue(found.row, found.col)
-      return val == null || val === ''
-    }
-  }
-
   const rangeTarget = resolveSingleCellRange(wb, tag)
   if (rangeTarget) {
     const sheet = wb.getSheet(rangeTarget.sheetIndex)
     const val = sheet.getValue(rangeTarget.row, rangeTarget.col)
     return val == null || val === ''
+  }
+
+  // Use pre-built cell-tag index for O(1) lookup
+  if (tag.tagName) {
+    const found = lookupCellTag(wb, tag.tagName, tag.sheetName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      const val = sheet.getValue(found.row, found.col)
+      return val == null || val === ''
+    }
   }
   return true // if we can't find the cell, treat as empty
 }
@@ -1911,24 +1952,34 @@ function findSheet(
   sheetName?: string,
   sheetIndex?: number,
 ): import('@/types/spreadjs').GCSpreadSheet | null {
+  const resolvedSheetIndex = resolveSheetIndexByNameOrIndex(wb, sheetName, sheetIndex)
+  if (resolvedSheetIndex != null) return wb.getSheet(resolvedSheetIndex)
+  console.warn(`[protection] findSheet 失败: name=${sheetName}, index=${sheetIndex}, sheetCount=${wb.getSheetCount()}`)
+  return null
+}
+
+function resolveSheetIndexByNameOrIndex(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  sheetName?: string | null,
+  sheetIndex?: number | null,
+): number | null {
   const count = wb.getSheetCount()
   if (sheetName) {
     const target = sheetName.trim()
     // Exact match first
     for (let i = 0; i < count; i++) {
       const s = wb.getSheet(i)
-      if (s.name() === target) return s
+      if (s.name() === target) return i
     }
-    // Trimmed / case-insensitive fallback (handles encoding or whitespace diffs)
+    // Trimmed / case-insensitive fallback
     const targetLower = target.toLowerCase()
     for (let i = 0; i < count; i++) {
       const s = wb.getSheet(i)
-      if (s.name().trim().toLowerCase() === targetLower) return s
+      if (s.name().trim().toLowerCase() === targetLower) return i
     }
   }
   const idx = sheetIndex ?? 0
-  if (idx >= 0 && idx < count) return wb.getSheet(idx)
-  console.warn(`[protection] findSheet 失败: name=${sheetName}, index=${sheetIndex}, sheetCount=${count}`)
+  if (idx >= 0 && idx < count) return idx
   return null
 }
 

@@ -43,7 +43,7 @@ public class SpreadsheetDataExtractor {
             sheets.fieldNames().forEachRemaining(sheetNameList::add);
 
             Map<String, JsonNode> namedRanges = parseNamedRanges(root);
-            Map<String, JsonNode> cellTags = parseCellTags(sheets);
+            Map<String, Map<String, JsonNode>> cellTags = parseCellTags(sheets, sheetNameList);
 
             // Parse _dynamicRanges from submission JSON (add-row feature)
             // Key: tag mapping ID (string) → {startRow, endRow, startCol, endCol}
@@ -79,10 +79,16 @@ public class SpreadsheetDataExtractor {
                     Object value = null;
                     if (namedRanges.containsKey(tagName)) {
                         value = extractFromNamedRange(sheets, sheetNameList, namedRanges.get(tagName), mapping.getSheetName());
-                    } else if (cellTags.containsKey(tagName)) {
-                        value = extractCellValue(cellTags.get(tagName));
-                    } else if (mapping.getCellRange() != null && !mapping.getCellRange().isBlank()) {
+                    } else if ("CELL_RANGE".equalsIgnoreCase(mapping.getSourceType())
+                            && mapping.getCellRange() != null && !mapping.getCellRange().isBlank()) {
                         value = extractFromCellRange(sheets, sheetNameList, mapping);
+                    } else {
+                        JsonNode taggedCell = resolveCellTag(cellTags, sheetNameList, mapping);
+                        if (taggedCell != null) {
+                            value = extractCellValue(taggedCell);
+                        } else if (mapping.getCellRange() != null && !mapping.getCellRange().isBlank()) {
+                            value = extractFromCellRange(sheets, sheetNameList, mapping);
+                        }
                     }
 
                     value = convertType(value, mapping.getDataType());
@@ -533,9 +539,11 @@ public class SpreadsheetDataExtractor {
         return map;
     }
 
-    private Map<String, JsonNode> parseCellTags(JsonNode sheets) {
-        Map<String, JsonNode> map = new HashMap<>();
-        sheets.fieldNames().forEachRemaining(sheetName -> {
+    private Map<String, Map<String, JsonNode>> parseCellTags(JsonNode sheets, List<String> sheetNameList) {
+        Map<String, Map<String, JsonNode>> map = new HashMap<>();
+        for (int sheetIndex = 0; sheetIndex < sheetNameList.size(); sheetIndex++) {
+            String sheetName = sheetNameList.get(sheetIndex);
+            String sheetIndexKey = String.valueOf(sheetIndex);
             JsonNode dataTable = sheets.get(sheetName).path("data").path("dataTable");
             if (dataTable.isObject()) {
                 dataTable.fields().forEachRemaining(rowEntry ->
@@ -546,7 +554,7 @@ public class SpreadsheetDataExtractor {
                         if (tagNode.isTextual()) {
                             String tagValue = tagNode.asText();
                             if (!tagValue.isBlank()) {
-                                map.put(tagValue, cell);
+                                map.computeIfAbsent(tagValue, k -> new HashMap<>()).putIfAbsent(sheetIndexKey, cell);
                             }
                         } else {
                             log.debug("parseCellTags: non-text tag ignored — sheet={} type={}",
@@ -555,8 +563,30 @@ public class SpreadsheetDataExtractor {
                     })
                 );
             }
-        });
+        }
         return map;
+    }
+
+    private JsonNode resolveCellTag(Map<String, Map<String, JsonNode>> cellTags,
+                                    List<String> sheetNameList,
+                                    TplTagMapping mapping) {
+        String tagName = mapping.getTagName();
+        if (tagName == null || tagName.isBlank()) return null;
+        Map<String, JsonNode> matches = cellTags.get(tagName);
+        if (matches == null || matches.isEmpty()) return null;
+        Integer sheetIndex = mapping.getSheetIndex();
+        if (mapping.getSheetName() != null && !mapping.getSheetName().isBlank()) {
+            for (int i = 0; i < sheetNameList.size(); i++) {
+                if (mapping.getSheetName().trim().equals(sheetNameList.get(i).trim())) {
+                    sheetIndex = i;
+                    break;
+                }
+            }
+        }
+        if (sheetIndex != null) {
+            return matches.get(String.valueOf(sheetIndex));
+        }
+        return matches.values().iterator().next();
     }
 
     private Object extractFromNamedRange(JsonNode sheets, List<String> sheetNameList,
