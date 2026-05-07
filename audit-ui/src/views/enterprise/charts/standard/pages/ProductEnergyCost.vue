@@ -14,7 +14,7 @@ const columns: RegColumn[] = [
   { prop: 'productName', label: '产品名称', minWidth: 140 },
   { prop: 'energyCost', label: '能源成本（万元）', minWidth: 130 },
   { prop: 'costRatio', label: '占该产品生产成本比例（%）', minWidth: 180 },
-  { prop: 'totalCostRatio', label: '占能源总成本比例（%）', minWidth: 160 },
+  { prop: 'energyTotalRatio', label: '占能源总成本比例（%）', minWidth: 160 },
   { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 

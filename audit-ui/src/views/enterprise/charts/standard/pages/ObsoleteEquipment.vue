@@ -14,8 +14,8 @@ const columns: RegColumn[] = [
   { prop: 'equipmentName', label: '淘汰设备名称', minWidth: 140 },
   { prop: 'modelSpec', label: '型号规格', minWidth: 120 },
   { prop: 'quantity', label: '数量', width: 70 },
-  { prop: 'startDate', label: '开始使用日期', minWidth: 120 },
-  { prop: 'planObsoleteDate', label: '计划淘汰日期', minWidth: 120 },
+  { prop: 'startUseDate', label: '开始使用日期', minWidth: 120 },
+  { prop: 'plannedRetireDate', label: '计划淘汰日期', minWidth: 120 },
   { prop: 'remark', label: '备注', minWidth: 120 },
 ]
 

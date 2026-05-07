@@ -17,7 +17,7 @@ const columns: RegColumn[] = [
   { prop: 'savingPotential', label: '节能潜力（吨标煤/年）', minWidth: 160 },
   { prop: 'carbonReduction', label: '减碳量（吨二氧化碳/年）', minWidth: 160 },
   { prop: 'investment', label: '投资（万元）', minWidth: 110 },
-  { prop: 'calculationNote', label: '节能潜力计算说明', minWidth: 180 },
+  { prop: 'calcDescription', label: '节能潜力计算说明', minWidth: 180 },
   { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 

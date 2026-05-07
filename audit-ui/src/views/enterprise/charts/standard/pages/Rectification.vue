@@ -13,13 +13,13 @@ const columns: RegColumn[] = [
   { prop: 'seqNo', label: '序号', width: 60 },
   { prop: 'projectName', label: '整改项目名称', minWidth: 150 },
   { prop: 'projectType', label: '项目类型', minWidth: 100 },
-  { prop: 'measures', label: '整改具体措施', minWidth: 200 },
-  { prop: 'rectificationDate', label: '整改日期', minWidth: 110 },
+  { prop: 'detailContent', label: '整改具体措施', minWidth: 200 },
+  { prop: 'rectifyDate', label: '整改日期', minWidth: 110 },
   { prop: 'responsiblePerson', label: '责任人', minWidth: 80 },
   { prop: 'estimatedCost', label: '整改预计费用（万元）', minWidth: 160 },
-  { prop: 'annualSaving', label: '年节能量（吨标准煤）', minWidth: 150 },
-  { prop: 'annualCarbonReduction', label: '年降碳量（吨二氧化碳）', minWidth: 160 },
-  { prop: 'annualEconomicBenefit', label: '年经济效益（万元）', minWidth: 140 },
+  { prop: 'savingAmount', label: '年节能量（吨标准煤）', minWidth: 150 },
+  { prop: 'carbonReduction', label: '年降碳量（吨二氧化碳）', minWidth: 160 },
+  { prop: 'economicBenefit', label: '年经济效益（万元）', minWidth: 140 },
 ]
 
 onMounted(async () => {

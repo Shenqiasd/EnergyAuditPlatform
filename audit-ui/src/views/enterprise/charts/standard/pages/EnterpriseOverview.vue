@@ -21,22 +21,22 @@ const tableLoading = ref(false)
 const tableError = ref('')
 
 const indicatorColumns: RegColumn[] = [
-  { prop: 'code', label: '代码', width: 60 },
-  { prop: 'itemName', label: '项目名称', minWidth: 200 },
+  { prop: 'rowSeq', label: '代码', width: 60 },
+  { prop: 'projectName', label: '项目名称', minWidth: 200 },
   { prop: 'unit', label: '计量单位', minWidth: 100 },
-  { prop: 'auditYearValue', label: '今年', minWidth: 120 },
-  { prop: 'lastYearValue', label: '去年', minWidth: 120 },
-  { prop: 'changeRate', label: '增减%', minWidth: 100 },
+  { prop: 'currentYear', label: '今年', minWidth: 120 },
+  { prop: 'prevYear', label: '去年', minWidth: 120 },
+  { prop: 'changePct', label: '增减%', minWidth: 100 },
 ]
 
 const energyColumns: RegColumn[] = [
-  { prop: 'code', label: '代码', width: 60 },
-  { prop: 'itemName', label: '项目名称', minWidth: 200 },
+  { prop: 'rowSeq', label: '代码', width: 60 },
+  { prop: 'projectName', label: '项目名称', minWidth: 200 },
   { prop: 'unit', label: '计量单位', minWidth: 100 },
-  { prop: 'auditYearValue', label: '今年', minWidth: 120 },
-  { prop: 'lastYearValue', label: '去年', minWidth: 120 },
-  { prop: 'changeRate', label: '增减%', minWidth: 100 },
-  { prop: 'excludingRawMaterial', label: '扣除原材料后', minWidth: 120 },
+  { prop: 'currentYear', label: '今年', minWidth: 120 },
+  { prop: 'prevYear', label: '去年', minWidth: 120 },
+  { prop: 'changePct', label: '增减%', minWidth: 100 },
+  { prop: 'materialAdjustment', label: '扣除原材料后', minWidth: 120 },
 ]
 
 onMounted(async () => {

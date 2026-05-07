@@ -10,16 +10,16 @@ const rows = ref<Record<string, unknown>[]>([])
 const tableError = ref('')
 
 const columns: RegColumn[] = [
-  { prop: 'equipmentId', label: '设备编号', minWidth: 100 },
-  { prop: 'equipmentName', label: '设备名称', minWidth: 120 },
+  { prop: 'deviceNo', label: '设备编号', minWidth: 100 },
+  { prop: 'deviceName', label: '设备名称', minWidth: 120 },
   { prop: 'modelSpec', label: '型号规格', minWidth: 120 },
   {
     prop: '_testIndicator', label: '测试指标', children: [
-      { prop: 'indicatorName', label: '名称', minWidth: 120 },
-      { prop: 'indicatorUnit', label: '计量单位', minWidth: 80 },
+      { prop: 'testIndicatorName', label: '名称', minWidth: 120 },
+      { prop: 'measurementUnit', label: '计量单位', minWidth: 80 },
       { prop: 'qualifiedValue', label: '合格值或限值', minWidth: 110 },
-      { prop: 'measuredValue', label: '实测值', minWidth: 80 },
-      { prop: 'judgment', label: '判别', width: 70 },
+      { prop: 'actualValue', label: '实测值', minWidth: 80 },
+      { prop: 'judgement', label: '判别', width: 70 },
       { prop: 'testDate', label: '测试日期', minWidth: 100 },
     ],
   },
