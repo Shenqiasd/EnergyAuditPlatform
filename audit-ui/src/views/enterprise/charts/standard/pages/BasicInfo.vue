@@ -91,7 +91,7 @@ function certLabel(val: unknown): string {
       ]" />
       <InfoRow :items="[
         { label: '能源管理机构名称', value: info.energyMgmtOrg },
-        { label: '是否建立能源管理中心', value: info.hasEnergyMgmtCenter },
+        { label: '是否建立能源管理中心', value: info.hasEnergyCenter },
       ]" />
       <InfoRow :items="[
         { label: '单位主管节能领导姓名', value: info.energyLeaderName },
