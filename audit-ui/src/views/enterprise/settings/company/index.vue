@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getEnterpriseSetting, upsertEnterpriseSetting, type EnterpriseSetting } from '@/api/enterpriseSetting'
 import { INDUSTRY_CLASSIFICATION, buildIndustryLookup, type IndustryNode } from '@/config/industry-classification'
+import { notifyEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
 import {
   REGION_OPTIONS,
   FIELD_OPTIONS,
@@ -101,6 +102,7 @@ async function handleSave() {
   saving.value = true
   try {
     await upsertEnterpriseSetting(form.value)
+    notifyEnterpriseSettingUpdated()
     ElMessage.success('保存成功')
   } finally {
     saving.value = false

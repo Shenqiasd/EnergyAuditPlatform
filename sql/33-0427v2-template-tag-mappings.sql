@@ -358,7 +358,7 @@ FROM (
     -- Sheet 3: 企业基础信息 SCALAR（存企业设置，匹配现有双向同步）
     SELECT 'UNIT_NAME','enterpriseName','ent_enterprise_setting','STRING',3,'3.主技指','C3','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B3:单位名称（如模板含 cell tag 则抽取）'
     UNION ALL SELECT 'LEGAL_CODE','creditCode','ent_enterprise_setting','STRING',3,'3.主技指','C4','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C4:统一社会信用代码/法人代码'
-    UNION ALL SELECT 'ENERGY_LEADER','energyLeaderName','ent_enterprise_setting','STRING',3,'3.主技指','C5','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B5:单位主管节能领导姓名/职务'
+    UNION ALL SELECT 'ENERGY_LEADER_TITLE','energyLeaderTitle','ent_enterprise_setting','STRING',3,'3.主技指','C5','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C5:单位主管节能领导职务'
     UNION ALL SELECT 'ENERGY_DEPT','energyDeptName','ent_enterprise_setting','STRING',3,'3.主技指','C6','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B6:节能主管部门名称'
     UNION ALL SELECT 'DEPT_LEADER','energyManagerName','ent_enterprise_setting','STRING',3,'3.主技指','C7','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B7:能源管理负责人姓名'
     UNION ALL SELECT 'FULL_TIME_MGR','fulltimeStaffCount','de_company_overview','NUMBER',3,'3.主技指','C8','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B8:专职管理人数'
@@ -403,23 +403,23 @@ FROM (
     UNION ALL SELECT '表13_能源成本','de_product_energy_cost','de_product_energy_cost','STRING',13,'13.企业产品能源成本表','A5:G102','TABLE','CELL_RANGE',0,NULL,
            '[{"col":0,"field":"seq_no","label":"序号","type":"NUMBER"},{"col":1,"field":"product_name","label":"产品名称","type":"STRING"},{"col":2,"field":"energy_cost","label":"能源成本（万元）","type":"NUMBER"},{"col":3,"field":"production_cost","label":"生产成本（万元）","type":"NUMBER"},{"col":4,"field":"cost_ratio","label":"占该产品生产成本比例(%)","type":"NUMBER"},{"col":5,"field":"energy_total_ratio","label":"占能源总成本比例(%)","type":"NUMBER"},{"col":6,"field":"remark","label":"备注","type":"STRING"}]',NULL
     -- Sheet 14: 节能量计算数据（实际有审计期/基准期两列）
-    UNION ALL SELECT 'S14_ENERGY_EQUAL_CURRENT','energyEqualCurrent','de_saving_calculation','NUMBER',14,'14.节能量计算数据',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'B3:审计期综合能耗等价值'
-    UNION ALL SELECT 'S14_ENERGY_EQUAL_BASE','energyEqualBase','de_saving_calculation','NUMBER',14,'14.节能量计算数据',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C3:基准期综合能耗等价值'
-    UNION ALL SELECT 'S14_ENERGY_EQUIV_CURRENT','energyEquivCurrent','de_saving_calculation','NUMBER',14,'14.节能量计算数据',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'B4:审计期综合能耗当量值'
-    UNION ALL SELECT 'S14_ENERGY_EQUIV_BASE','energyEquivBase','de_saving_calculation','NUMBER',14,'14.节能量计算数据',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C4:基准期综合能耗当量值'
-    UNION ALL SELECT 'S14_GROSS_OUTPUT_CURRENT','grossOutputCurrent','de_saving_calculation','NUMBER',14,'14.节能量计算数据',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'B5:审计期工业总产值'
-    UNION ALL SELECT 'S14_GROSS_OUTPUT_BASE','grossOutputBase','de_saving_calculation','NUMBER',14,'14.节能量计算数据',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C5:基准期工业总产值'
-    UNION ALL SELECT 'S14_PRODUCT_OUTPUT_CURRENT','productOutputCurrent','de_saving_calculation','NUMBER',14,'14.节能量计算数据',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'B6:审计期产品产量'
-    UNION ALL SELECT 'S14_PRODUCT_OUTPUT_BASE','productOutputBase','de_saving_calculation','NUMBER',14,'14.节能量计算数据',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C6:基准期产品产量'
+    UNION ALL SELECT 'S14_ENERGY_EQUAL_CURRENT','energyEqualCurrent','de_saving_calculation','NUMBER',14,'14.节能量计算数据','B3','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B3:审计期综合能耗等价值'
+    UNION ALL SELECT 'S14_ENERGY_EQUAL_BASE','energyEqualBase','de_saving_calculation','NUMBER',14,'14.节能量计算数据','C3','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C3:基准期综合能耗等价值'
+    UNION ALL SELECT 'S14_ENERGY_EQUIV_CURRENT','energyEquivCurrent','de_saving_calculation','NUMBER',14,'14.节能量计算数据','B4','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B4:审计期综合能耗当量值'
+    UNION ALL SELECT 'S14_ENERGY_EQUIV_BASE','energyEquivBase','de_saving_calculation','NUMBER',14,'14.节能量计算数据','C4','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C4:基准期综合能耗当量值'
+    UNION ALL SELECT 'S14_GROSS_OUTPUT_CURRENT','grossOutputCurrent','de_saving_calculation','NUMBER',14,'14.节能量计算数据','B5','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B5:审计期工业总产值'
+    UNION ALL SELECT 'S14_GROSS_OUTPUT_BASE','grossOutputBase','de_saving_calculation','NUMBER',14,'14.节能量计算数据','C5','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C5:基准期工业总产值'
+    UNION ALL SELECT 'S14_PRODUCT_OUTPUT_CURRENT','productOutputCurrent','de_saving_calculation','NUMBER',14,'14.节能量计算数据','B6','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B6:审计期产品产量'
+    UNION ALL SELECT 'S14_PRODUCT_OUTPUT_BASE','productOutputBase','de_saving_calculation','NUMBER',14,'14.节能量计算数据','C6','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C6:基准期产品产量'
     -- Sheet 15
     UNION ALL SELECT '表15_化石燃料排放','de_carbon_emission','de_carbon_emission','STRING',15,'15,温室气体排放排放汇总','A26:H33','TABLE','CELL_RANGE',0,NULL,
            '[{"col":0,"field":"source_name","label":"能源品种","type":"STRING"},{"col":1,"field":"low_heat_value","label":"收到基低位发热量","type":"NUMBER"},{"col":2,"field":"carbon_content","label":"单位热值含碳量","type":"NUMBER"},{"col":3,"field":"oxidation_rate","label":"碳氧化率","type":"NUMBER"},{"col":4,"field":"activity_data","label":"工业生产消费量","type":"NUMBER"},{"col":5,"field":"conversion_output","label":"能源加工转换产出","type":"NUMBER"},{"col":6,"field":"recovery_amount","label":"回收利用","type":"NUMBER"},{"col":7,"field":"co2_emission","label":"CO₂排放量/t","type":"NUMBER"}]','emission_category 必填列未在模板中出现，当前会落通用存储或需后续默认值策略'
-    UNION ALL SELECT 'HEAT_EMISSION','heatEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'E39:热力排放量'
-    UNION ALL SELECT 'ELEC_EMISSION','elecEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'E40:电力排放量'
-    UNION ALL SELECT 'GREEN_ELEC_OFFSET','greenElecOffset','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'E41:购买绿电抵消排放量（0428 排放因子改为 0，合计公式改为 E39+(D40-D41)*C40）'
-    UNION ALL SELECT 'TOTAL_EMISSION','totalEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'B14:碳排放量合计'
-    UNION ALL SELECT 'DIRECT_EMISSION','directEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C3:直接排放'
-    UNION ALL SELECT 'INDIRECT_EMISSION','indirectEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C7:C8 间接排放'
+    UNION ALL SELECT 'HEAT_EMISSION','heatEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总','E39','SCALAR','CELL_RANGE',NULL,NULL,NULL,'E39:热力排放量'
+    UNION ALL SELECT 'ELEC_EMISSION','elecEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总','E40','SCALAR','CELL_RANGE',NULL,NULL,NULL,'E40:电力排放量'
+    UNION ALL SELECT 'GREEN_ELEC_OFFSET','greenElecOffset','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总','E41','SCALAR','CELL_RANGE',NULL,NULL,NULL,'E41:购买绿电抵消排放量（0428 排放因子改为 0，合计公式改为 E39+(D40-D41)*C40）'
+    UNION ALL SELECT 'TOTAL_EMISSION','totalEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总','B14','SCALAR','CELL_RANGE',NULL,NULL,NULL,'B14:碳排放量合计'
+    UNION ALL SELECT 'DIRECT_EMISSION','directEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总','C3','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C3:直接排放'
+    UNION ALL SELECT 'INDIRECT_EMISSION','indirectEmission','de_carbon_emission','NUMBER',15,'15,温室气体排放排放汇总','C7','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C7:C8 间接排放'
     -- Sheet 16-19
     UNION ALL SELECT '表16_节能潜力','de_saving_potential','de_saving_potential','STRING',16,'16,节能潜力明细','A3:I102','TABLE','CELL_RANGE',0,NULL,
            '[{"col":0,"field":"seq_no","label":"序号","type":"NUMBER"},{"col":1,"field":"project_type","label":"项目类型","type":"STRING"},{"col":2,"field":"project_name","label":"项目名称","type":"STRING"},{"col":3,"field":"main_content","label":"主要内容","type":"STRING"},{"col":4,"field":"saving_potential","label":"节能潜力（吨标煤/年）","type":"NUMBER"},{"col":5,"field":"carbon_reduction","label":"减碳量（吨CO2/年）","type":"NUMBER"},{"col":6,"field":"investment","label":"投资（万元）","type":"NUMBER"},{"col":7,"field":"calc_description","label":"节能潜力计算说明","type":"STRING"},{"col":8,"field":"remark","label":"备注","type":"STRING"}]',NULL
@@ -431,19 +431,19 @@ FROM (
            '[{"col":0,"field":"seq_no","label":"序号","type":"NUMBER"},{"col":1,"field":"project_name","label":"整改项目名称","type":"STRING"},{"col":2,"field":"project_type","label":"项目类型","type":"STRING"},{"col":3,"field":"detail_content","label":"整改具体措施","type":"STRING"},{"col":4,"field":"rectify_date","label":"整改日期","type":"STRING"},{"col":5,"field":"responsible_person","label":"责任人","type":"STRING"},{"col":6,"field":"estimated_cost","label":"整改预计费用（万元）","type":"NUMBER"},{"col":7,"field":"saving_amount","label":"年节能量（吨标准煤）","type":"NUMBER"},{"col":8,"field":"carbon_reduction","label":"年减碳量（吨二氧化碳）","type":"NUMBER"},{"col":9,"field":"economic_benefit","label":"年经济效益（万元）","type":"NUMBER"}]',
            '方案缺少实际第9/10列年减碳量、年经济效益；已补齐'
     -- Sheet 20
-    UNION ALL SELECT 'PEAK_YEAR','peakYear','de_carbon_peak_info','NUMBER',20,'20.碳达峰信息',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C3:企业碳排放达峰年'
-    UNION ALL SELECT 'PEAK_EMISSION','peakEmission','de_carbon_peak_info','NUMBER',20,'20.碳达峰信息',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C4:达峰碳排放量'
+    UNION ALL SELECT 'PEAK_YEAR','peakYear','de_carbon_peak_info','NUMBER',20,'20.碳达峰信息','C3','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C3:企业碳排放达峰年'
+    UNION ALL SELECT 'PEAK_EMISSION','peakEmission','de_carbon_peak_info','NUMBER',20,'20.碳达峰信息','C4','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C4:达峰碳排放量'
     UNION ALL SELECT '表20_产品碳峰','de_five_year_target','de_five_year_target','STRING',20,'20.碳达峰信息','A18:F19','TABLE','CELL_RANGE',0,NULL,
            '[{"col":0,"field":"year_label","label":"产品类别","type":"STRING"},{"col":1,"field":"product_output","label":"产品产量","type":"NUMBER"},{"col":2,"field":"gross_output","label":"产品产值（万元）","type":"NUMBER"},{"col":3,"field":"emission","label":"排放量（吨CO2）","type":"NUMBER"},{"col":4,"field":"unit_strength","label":"单位产值碳排放强度","type":"NUMBER"},{"col":5,"field":"intensity_drop","label":"产品碳排放强度","type":"NUMBER"}]','产品表实际为 A18:F19；section_type 需后续默认值/业务处理'
     UNION ALL SELECT '表20_年度目标','de_five_year_target','de_five_year_target','STRING',20,'20.碳达峰信息','A11:H14','TABLE','CELL_RANGE',0,NULL,
            '[{"col":0,"field":"target_name","label":"目标名称","type":"STRING"},{"col":1,"field":"measurement_unit","label":"计量单位","type":"STRING"},{"col":2,"field":"y2025","label":"2025年","type":"NUMBER"},{"col":3,"field":"y2026","label":"2026年","type":"NUMBER"},{"col":4,"field":"y2027","label":"2027年","type":"NUMBER"},{"col":5,"field":"y2028","label":"2028年","type":"NUMBER"},{"col":6,"field":"y2029","label":"2029年","type":"NUMBER"},{"col":7,"field":"y2030","label":"2030年","type":"NUMBER"}]','实际含 2025 现状列，方案漏列'
     -- Sheet 21
-    UNION ALL SELECT 'ACT_2025_OUTPUT','grossOutputActual2025','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'A4:2025年实际产值'
-    UNION ALL SELECT 'ACT_2025_ENERGY_EQUIV','energyEqualActual2025','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C4:2025年综合能耗等价值'
-    UNION ALL SELECT 'ACT_2025_ENERGY_CURR','energyEquivActual2025','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'C5:2025年综合能耗当量值'
-    UNION ALL SELECT 'TGT_2030_OUTPUT','grossOutputTarget2030','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'E4:2030年目标产值'
-    UNION ALL SELECT 'TGT_2030_ENERGY_EQUIV','energyEqualTarget2030','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'G4:2030年目标综合能耗等价值'
-    UNION ALL SELECT 'TGT_2030_ENERGY_CURR','energyEquivTarget2030','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标',NULL,'SCALAR','CELL_TAG',NULL,NULL,NULL,'G5:2030年目标综合能耗当量值'
+    UNION ALL SELECT 'ACT_2025_OUTPUT','grossOutputActual2025','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标','A4','SCALAR','CELL_RANGE',NULL,NULL,NULL,'A4:2025年实际产值'
+    UNION ALL SELECT 'ACT_2025_ENERGY_EQUIV','energyEqualActual2025','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标','C4','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C4:2025年综合能耗等价值'
+    UNION ALL SELECT 'ACT_2025_ENERGY_CURR','energyEquivActual2025','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标','C5','SCALAR','CELL_RANGE',NULL,NULL,NULL,'C5:2025年综合能耗当量值'
+    UNION ALL SELECT 'TGT_2030_OUTPUT','grossOutputTarget2030','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标','E4','SCALAR','CELL_RANGE',NULL,NULL,NULL,'E4:2030年目标产值'
+    UNION ALL SELECT 'TGT_2030_ENERGY_EQUIV','energyEqualTarget2030','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标','G4','SCALAR','CELL_RANGE',NULL,NULL,NULL,'G4:2030年目标综合能耗等价值'
+    UNION ALL SELECT 'TGT_2030_ENERGY_CURR','energyEquivTarget2030','de_five_year_target','NUMBER',21,'21.“十五五”期间节能目标','G5','SCALAR','CELL_RANGE',NULL,NULL,NULL,'G5:2030年目标综合能耗当量值'
     UNION ALL SELECT '表21_产品单耗','de_five_year_target','de_five_year_target','STRING',21,'21.“十五五”期间节能目标','A7:I9','TABLE','CELL_RANGE',0,NULL,
            '[{"col":0,"field":"product_name","label":"2025产品名称","type":"STRING"},{"col":1,"field":"indicator_name","label":"2025单耗指标名","type":"STRING"},{"col":2,"field":"indicator_value","label":"2025单耗指标值","type":"NUMBER"},{"col":3,"field":"actual_value","label":"2025单耗实际值","type":"NUMBER"},{"col":4,"field":"target_name","label":"2030产品名称","type":"STRING"},{"col":5,"field":"year_label","label":"2030单耗指标名","type":"STRING"},{"col":6,"field":"y2030","label":"2030单耗指标值","type":"NUMBER"},{"col":7,"field":"unit_energy_equal","label":"2030单耗实际值","type":"NUMBER"},{"col":8,"field":"decline_rate","label":"单耗指标下降率%","type":"NUMBER"}]',NULL
     UNION ALL SELECT '表21_年度节能','de_five_year_target','de_five_year_target','STRING',21,'21.“十五五”期间节能目标','A12:G16','TABLE','CELL_RANGE',0,NULL,
