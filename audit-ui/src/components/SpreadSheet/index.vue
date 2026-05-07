@@ -1775,14 +1775,16 @@ function lookupCellTag(
   sheetIndex?: number | null,
 ): { sheetIndex: number; row: number; col: number } | null {
   if (!cellTagIndex) return null
-  const resolvedSheetIndex = resolveSheetIndexByNameOrIndex(wb, sheetName, sheetIndex)
-  if (resolvedSheetIndex != null) {
-    const sheetMap = cellTagIndex.get(resolvedSheetIndex)
-    if (sheetMap) {
-      const pos = sheetMap.get(tagName)
-      if (pos) return { sheetIndex: resolvedSheetIndex, ...pos }
+  if (sheetName || sheetIndex != null) {
+    const resolvedSheetIndex = resolveSheetIndexByNameOrIndex(wb, sheetName, sheetIndex)
+    if (resolvedSheetIndex != null) {
+      const sheetMap = cellTagIndex.get(resolvedSheetIndex)
+      if (sheetMap) {
+        const pos = sheetMap.get(tagName)
+        if (pos) return { sheetIndex: resolvedSheetIndex, ...pos }
+      }
+      return null
     }
-    return null
   }
   // Search all sheets
   for (const [si, sheetMap] of cellTagIndex) {
