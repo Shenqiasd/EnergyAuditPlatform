@@ -31,6 +31,11 @@ audit-ui/.env.*
 !audit-ui/.env.example
 application-local.yml
 .local/
+deploy-tencent/ssl/
+deploy-tencent/*.sql.gz
+deploy-tencent/*.dump
+deploy-tencent/*.bak
+deploy-tencent/*.backup
 
 # TinyMCE static assets (copied from node_modules by scripts/setup-tinymce.sh)
 audit-ui/public/tinymce/
