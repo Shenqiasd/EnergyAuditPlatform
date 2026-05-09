@@ -13,6 +13,9 @@ target/
 # Node
 audit-ui/node_modules/
 audit-ui/dist/
+audit-ui/coverage/
+audit-ui/playwright-report/
+audit-ui/test-results/
 
 # Logs
 *.log
