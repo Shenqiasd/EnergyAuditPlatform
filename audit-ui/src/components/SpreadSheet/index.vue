@@ -205,7 +205,6 @@ async function initWorkbook() {
   let wb: WB | null = null
   try {
     wb = new window.GC.Spread.Sheets.Workbook(spreadRef.value)
-    disableNativeContextMenu(wb)
     workbook = wb
 
     // ── Phase 1: fetch template version + submission in parallel ──────
@@ -242,6 +241,9 @@ async function initWorkbook() {
     )
     console.timeEnd('[perf] fromJSON')
     if (isLoadStale(loadId, wb)) return
+    // Must run after fromJSON: the deserialized template restores workbook
+    // options, which would otherwise overwrite allowContextMenu back to true.
+    disableNativeContextMenu(wb)
 
     // ── Phase 2: fetch tags + prefill data in parallel (one listTags call) ─
     // Wrapped in its own try-catch so that a failure in supplementary features
