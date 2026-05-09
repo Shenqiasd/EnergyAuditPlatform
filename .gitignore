@@ -23,6 +23,12 @@ logs/
 Thumbs.db
 
 # Local config
+.env
+.env.*
+!.env.example
+audit-ui/.env
+audit-ui/.env.*
+!audit-ui/.env.example
 application-local.yml
 .local/
 
