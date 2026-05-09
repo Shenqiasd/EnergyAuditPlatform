@@ -1,22 +1,17 @@
 let initialized = false
 
-// Fallback keys are only used when deployment-specific Vite env vars are absent.
-// Domains with their own SpreadJS license, such as Tencent Cloud, should inject
-// VITE_SPREADJS_LICENSE / VITE_SPREADJS_DESIGNER_LICENSE at build time.
-const FALLBACK_SHEETS_KEY =
-  'sjs.ben-china.org.cn,E267784365749128#B1UcMBjakdUNvcDOl34VZRETCl7TuxUSJl4VrAnbpNTYjJ6NrRDSqRUWwU7RC3UTvdnWT9mWhVHW0FXNmdDSHBDSvI6RxlkTQNWWEFzdlVFTEV6caZFSmxmUphVVwkzZklkWzpnN4cmWvk4d0VWOYFGURhWYm3SZjJTTGllVoBXOaZDTSVHMP96UDdFczgDT4pEOl3GZ6oUbSRjR4Z7KDhGRyM5VZVHaYdWepVTY6pFTUl5QrE4SPFjQEpERzAFMvZVMsRXYLNndoJ6N7IXYZB7Z8Qld85mSaVzNNdEe4kjbQt4K586NaVjSwcDePRVQBZVV6czYItUV6c4V7EnNV9mQ0dnYTpVa5NzUMxUZ7kmI0IyUiwiI6YEMykzQwEjI0ICSiwCN5cTOxcTN7YTM0IicfJye35XX3JCSJpkQiojIDJCLigTMuYHITpEIkFWZyB7UiojIOJyebpjIkJHUiwiIwUjNyQDMgQTM4AjNyAjMiojI4J7QiwiIwMDNwYjMwIjI0ICc8VkIsIibj9yZy3mLh9WaoNWLuVmYuMnazJiOiMXbEJCLig1jlzahlDZmpnInm/KnmDoimH9pnDblmPron71goLZgm7JtofbtmrIukLiOiEmTDJCLlVnc4pjIsZXRiwiI8ITM9QzN5YzM4gzN7YjMiojIklkIs4XXbpjInxmZiwSZzxWYmpjIyNHZisnOiwmbBJye0ICRiwiI34zZyETSrFlZrQEbRpGbyJFVEtUWChUMwJHaHVzUiZzcOR5SDlFbKVWdOp4QykzZn9WOtV5Uq34cO9ETykVSrFERkZ6MVdgeKN'
-
-const FALLBACK_DESIGNER_KEY =
-  'sjs.ben-china.org.cn,E877549285941994#B1wNMb4pGTwYGVQ3mSilXeZdTRGRUd8tiZUhXWrg4RJZVQSRGSx34czRGV6t6UmBzaVhnYqNnbzd4Q9gzd0BjNsRVVwQlZOZHNYtWQlp5KvJUZqZ4T5hVY7MHUFJGaGR6MDFFUaJ7VERmdxdHdDl4ShdXSU9GZsZlRhlHaE5UV7kTO6oUbuFGR5tEUK3mbaFGNnVEO8RHWrNVbrh6U4FmQupXbsVlZjFUVzFFaIZ6M7UjT8h4bhp7Q65mSwFEV8Y7Urc4KUNGO8pUMvcUMDZ6YGJ7UqBTc4olNrc6aYxEW4QEbwgGbKNkd0l5LZVnd4EHZTdEcUBDUiFnSolESLxUcXBneURERaNlI0IyUiwiICJUQ7E4N7IjI0ICSiwCM6cDM4UTN8ATM0IicfJye35XX3JSOZNzMiojIDJCLigTMuYHIu3GZkFULyVmbnl6clRULTpEZhVmcwNlI0IiTis7W0ICZyBlIsISM5YjM4ADI4EDNwYjMwIjI0ICdyNkIsICMzQDM6IDMyIiOiAHeFJCLi86Yucmcv9SYulGaj5iblJmLzp6ciojIz5GRiwiI8+Y9sWY9QmZ0Jyp9vyp9Aqo9Re09wWp9zK093OI0SGo9dSL07Wr9KiL9iojIh94QiwSZ5JHd0ICb6VkIsICN9kTM4kTN8ITO4UzN7gjI0ICZJJye0ICRiwiI34zZ8NzaOdURjp5TxdjZ5klcvpUSzBneGFzK7ZXZ0lUUyZ4aMZFMVV7ajx4TQJHcVdGMB9Gd8BDayxUYFVWayIjWxlndvBTemNGcGN4aLVJN'
-
 export function initSpreadJSLicense(): void {
   if (initialized) return
   if (typeof window.GC === 'undefined') return
 
-  const sheetsKey = import.meta.env.VITE_SPREADJS_LICENSE || FALLBACK_SHEETS_KEY
-  const designerKey = import.meta.env.VITE_SPREADJS_DESIGNER_LICENSE || FALLBACK_DESIGNER_KEY
+  const sheetsKey = import.meta.env.VITE_SPREADJS_LICENSE
+  const designerKey = import.meta.env.VITE_SPREADJS_DESIGNER_LICENSE
 
-  if (window.GC.Spread?.Sheets) {
+  if (!sheetsKey || !designerKey) {
+    console.warn('SpreadJS license env vars are missing. Set VITE_SPREADJS_LICENSE and VITE_SPREADJS_DESIGNER_LICENSE before building.')
+  }
+
+  if (sheetsKey && window.GC.Spread?.Sheets) {
     window.GC.Spread.Sheets.LicenseKey = sheetsKey
   }
   if (designerKey && window.GC.Spread?.Sheets?.Designer) {
