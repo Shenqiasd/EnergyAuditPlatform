@@ -37,18 +37,73 @@ const columns: RegColumn[] = [
   },
 ]
 
+const LEVEL_PREFIX: Record<number, 'inOut' | 'secondary' | 'equipment'> = {
+  1: 'inOut',
+  2: 'secondary',
+  3: 'equipment',
+}
+
+function toNumber(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+function computeRate(actual: number | null, required: number | null): string {
+  if (actual === null || required === null || required === 0) return ''
+  return ((actual / required) * 100).toFixed(2)
+}
+
+function buildRows(dbRows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const defaults = getDefaultRows()
+  if (!dbRows.length) return defaults
+
+  // Group DB rows by energy_type and pivot by level_type.
+  const grouped = new Map<string, Record<string, unknown>>()
+  for (const r of dbRows) {
+    const energyType = String(r.energy_type ?? '')
+    if (!energyType) continue
+    const levelType = Number(r.level_type)
+    const prefix = LEVEL_PREFIX[levelType]
+    if (!prefix) continue
+    const required = toNumber(r.required_count)
+    const actual = toNumber(r.actual_count)
+    const existing = grouped.get(energyType) ?? { energyType }
+    existing[`${prefix}Required`] = required ?? ''
+    existing[`${prefix}Actual`] = actual ?? ''
+    existing[`${prefix}Rate`] = computeRate(actual, required)
+    grouped.set(energyType, existing)
+  }
+
+  // Merge with default rows so standards and template row order are preserved,
+  // and unmatched extracted energy types are appended at the end.
+  const result: Record<string, unknown>[] = []
+  const used = new Set<string>()
+  for (const def of defaults) {
+    const merged = { ...def }
+    const extracted = grouped.get(def.energyType as string)
+    if (extracted) {
+      Object.assign(merged, extracted)
+      used.add(def.energyType as string)
+    }
+    result.push(merged)
+  }
+  for (const [energyType, extracted] of grouped.entries()) {
+    if (!used.has(energyType)) {
+      result.push(extracted)
+    }
+  }
+  return result
+}
+
 onMounted(async () => {
   loading.value = true
   try {
-    const data = await queryExtractedTable('de_meter_rate', { pageSize: 200 }).catch((e: Error) => {
+    const data = await queryExtractedTable('de_meter_config_rate', { pageSize: 200 }).catch((e: Error) => {
       tableError.value = e.message?.includes('404') ? '数据表尚未对接' : ''
       return { rows: [], total: 0 }
     })
-    if (data.rows?.length) {
-      rows.value = data.rows
-    } else {
-      rows.value = getDefaultRows()
-    }
+    rows.value = buildRows(data.rows || [])
   } finally {
     loading.value = false
   }

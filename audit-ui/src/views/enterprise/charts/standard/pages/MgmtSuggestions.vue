@@ -19,14 +19,26 @@ const columns: RegColumn[] = [
   { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 
+function adaptRow(r: Record<string, unknown>, index: number): Record<string, unknown> {
+  return {
+    seqNo: r.seq_no ?? index + 1,
+    projectName: r.project_name ?? '',
+    mainContent: r.main_content ?? '',
+    investment: r.investment ?? '',
+    annualSaving: r.annual_saving ?? '',
+    annualCarbonReduction: r.annual_carbon_reduction ?? '',
+    remark: r.remark ?? '',
+  }
+}
+
 onMounted(async () => {
   loading.value = true
   try {
-    const data = await queryExtractedTable('de_mgmt_suggestion', { pageSize: 200 }).catch((e: Error) => {
+    const data = await queryExtractedTable('de_management_suggestion', { pageSize: 200 }).catch((e: Error) => {
       tableError.value = e.message?.includes('404') ? '数据表尚未对接' : ''
       return { rows: [], total: 0 }
     })
-    rows.value = (data.rows || []).map((r, i) => ({ ...r, seqNo: i + 1 }))
+    rows.value = (data.rows || []).map(adaptRow)
   } finally {
     loading.value = false
   }
