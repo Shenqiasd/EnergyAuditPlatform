@@ -54,13 +54,30 @@ function computeRate(actual: number | null, required: number | null): string {
   return ((actual / required) * 100).toFixed(2)
 }
 
+function toIdOrInf(v: unknown): number {
+  if (v === null || v === undefined || v === '') return Infinity
+  const n = Number(v)
+  return Number.isFinite(n) ? n : Infinity
+}
+
 function buildRows(dbRows: Record<string, unknown>[]): Record<string, unknown>[] {
   const defaults = getDefaultRows()
   if (!dbRows.length) return defaults
 
+  // Backend returns ORDER BY id DESC; sort by id ascending so unmatched
+  // energy_type rows render in insertion order rather than visibly reversed.
+  const sorted = [...dbRows]
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const idDiff = toIdOrInf(a.r.id) - toIdOrInf(b.r.id)
+      if (idDiff !== 0) return idDiff
+      return a.i - b.i
+    })
+    .map(({ r }) => r)
+
   // Group DB rows by energy_type and pivot by level_type.
   const grouped = new Map<string, Record<string, unknown>>()
-  for (const r of dbRows) {
+  for (const r of sorted) {
     const energyType = String(r.energy_type ?? '')
     if (!energyType) continue
     const levelType = Number(r.level_type)

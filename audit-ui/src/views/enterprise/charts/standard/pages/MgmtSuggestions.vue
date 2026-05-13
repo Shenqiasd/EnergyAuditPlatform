@@ -19,6 +19,25 @@ const columns: RegColumn[] = [
   { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 
+function toNumOrInf(v: unknown): number {
+  if (v === null || v === undefined || v === '') return Infinity
+  const n = Number(v)
+  return Number.isFinite(n) ? n : Infinity
+}
+
+function sortByTemplateOrder(items: Record<string, unknown>[]): Record<string, unknown>[] {
+  return items
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const seqDiff = toNumOrInf(a.r.seq_no) - toNumOrInf(b.r.seq_no)
+      if (seqDiff !== 0) return seqDiff
+      const idDiff = toNumOrInf(a.r.id) - toNumOrInf(b.r.id)
+      if (idDiff !== 0) return idDiff
+      return a.i - b.i
+    })
+    .map(({ r }) => r)
+}
+
 function adaptRow(r: Record<string, unknown>, index: number): Record<string, unknown> {
   return {
     seqNo: r.seq_no ?? index + 1,
@@ -38,7 +57,7 @@ onMounted(async () => {
       tableError.value = e.message?.includes('404') ? '数据表尚未对接' : ''
       return { rows: [], total: 0 }
     })
-    rows.value = (data.rows || []).map(adaptRow)
+    rows.value = sortByTemplateOrder(data.rows || []).map(adaptRow)
   } finally {
     loading.value = false
   }
