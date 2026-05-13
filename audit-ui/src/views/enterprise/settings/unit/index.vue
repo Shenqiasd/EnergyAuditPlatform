@@ -15,13 +15,16 @@ import {
   type BsUnitEnergy,
   type BsEnergy,
 } from '@/api/setting'
-import { getDataByType, type DictData } from '@/api/dict'
 
 const TABS = [
   { label: '加工转换', unitType: 1 },
-  { label: '分配输送', unitType: 2 },
+  { label: '输送分配', unitType: 2 },
   { label: '终端使用', unitType: 3 },
 ]
+
+// Fixed options for end-use (unitType=3) sub-category — see GRA-70.
+// Backend mirrors this list in UnitSettingServiceImpl.
+const END_USE_CATEGORY_OPTIONS = ['生产系统', '辅助系统', '非生产系统', '外供'] as const
 
 const activeTab = ref('1')
 const loading = ref(false)
@@ -34,16 +37,19 @@ const dialogTitle = ref('')
 const submitting = ref(false)
 const formRef = ref()
 const form = ref<Partial<BsUnit>>({})
-const rules = {
-  name: [{ required: true, message: '请输入单元名称', trigger: 'blur' }],
-}
 
 const currentTabType = computed(() => Number(activeTab.value))
 const isEndUseTab = computed(() => currentTabType.value === 3)
 const isEndUse = computed(() => (dialogVisible.value ? form.value.unitType === 3 : isEndUseTab.value))
 
+const rules = computed(() => ({
+  name: [{ required: true, message: '请输入单元名称', trigger: 'blur' }],
+  subCategory: isEndUse.value
+    ? [{ required: true, message: '请选择子类别', trigger: 'change' }]
+    : [],
+}))
+
 const energyOptions = ref<BsEnergy[]>([])
-const endUseCategoryOptions = ref<DictData[]>([])
 
 const expandedUnitEnergies = ref<Record<number, BsUnitEnergy[]>>({})
 const loadingEnergies = ref<Record<number, boolean>>({})
@@ -64,14 +70,6 @@ async function loadData() {
 async function loadEnergyOptions() {
   const res = await getEnergyList({ pageSize: 500, isActive: 1 })
   energyOptions.value = res.rows ?? []
-}
-
-async function loadEndUseCategoryOptions() {
-  try {
-    endUseCategoryOptions.value = await getDataByType('unit_terminal_category')
-  } catch {
-    endUseCategoryOptions.value = []
-  }
 }
 
 function onTabChange() {
@@ -163,7 +161,7 @@ function availableEnergies(unitId: number) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadData(), loadEnergyOptions(), loadEndUseCategoryOptions()])
+  await Promise.all([loadData(), loadEnergyOptions()])
 })
 </script>
 
@@ -267,28 +265,25 @@ onMounted(async () => {
           <el-input v-model="form.name" placeholder="请输入用能单元名称" />
         </el-form-item>
 
-        <el-form-item label="子类别">
-          <template v-if="isEndUse && endUseCategoryOptions.length">
-            <el-select
-              v-model="form.subCategory"
-              placeholder="请选择终端使用子类别"
-              clearable
-              style="width:100%"
-            >
-              <el-option
-                v-for="item in endUseCategoryOptions"
-                :key="item.dictValue"
-                :label="item.dictLabel"
-                :value="item.dictValue"
-              />
-            </el-select>
-          </template>
-          <template v-else>
-            <el-input
-              v-model="form.subCategory"
-              :placeholder="isEndUse ? '请输入终端使用子类别（如：照明、动力、工艺等）' : '请输入子类别（选填）'"
+        <el-form-item label="子类别" prop="subCategory">
+          <el-select
+            v-if="isEndUse"
+            v-model="form.subCategory"
+            placeholder="请选择终端使用子类别"
+            style="width:100%"
+          >
+            <el-option
+              v-for="option in END_USE_CATEGORY_OPTIONS"
+              :key="option"
+              :label="option"
+              :value="option"
             />
-          </template>
+          </el-select>
+          <el-input
+            v-else
+            v-model="form.subCategory"
+            placeholder="请输入子类别（选填）"
+          />
         </el-form-item>
 
         <el-form-item label="备注">
