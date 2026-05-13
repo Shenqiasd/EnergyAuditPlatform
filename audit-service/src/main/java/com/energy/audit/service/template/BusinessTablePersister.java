@@ -217,6 +217,7 @@ public class BusinessTablePersister {
 
         boolean hasSid = hasSubmissionId(tableName);
         List<Map<String, Object>> dbRows = new ArrayList<>();
+        int skippedEmpty = 0;
         for (Map<String, Object> row : rows) {
             Map<String, Object> dbRow = new HashMap<>();
             if (hasSid) {
@@ -232,6 +233,7 @@ public class BusinessTablePersister {
                 dbRow.put("row_seq", rowIndex);
             }
 
+            boolean hasBusinessValue = false;
             for (Map.Entry<String, Object> entry : row.entrySet()) {
                 String key = entry.getKey();
                 if (key.startsWith("_")) continue;
@@ -245,13 +247,29 @@ public class BusinessTablePersister {
                         log.debug("Skipping unknown column '{}' for table '{}'", colName, tableName);
                         continue;
                     }
-                    dbRow.put(colName, convertValue(entry.getValue()));
+                    // convertValue() already coerces blank/whitespace-only strings to null
+                    // (see convertValue) so a row of empty strings registers as empty here.
+                    Object normalized = convertValue(entry.getValue());
+                    if (normalized != null) hasBusinessValue = true;
+                    dbRow.put(colName, normalized);
                 }
+            }
+            // Skip rows where every mapped business column is null/blank — these
+            // are spreadsheet placeholder rows produced by SpreadJS style/validation
+            // metadata, not real user input. row_seq alone (without any business
+            // value) is not enough to keep the row.
+            if (!hasBusinessValue) {
+                skippedEmpty++;
+                continue;
             }
             // Fill required year columns AFTER user data so putIfAbsent
             // restores the default when extraction provides null
             fillRequiredYearColumns(tableName, dbRow, auditYear);
             dbRows.add(dbRow);
+        }
+        if (skippedEmpty > 0) {
+            log.debug("persistTableRows: skipped {} all-empty placeholder row(s) for table '{}'",
+                    skippedEmpty, tableName);
         }
 
         if (dbRows.isEmpty()) return true;

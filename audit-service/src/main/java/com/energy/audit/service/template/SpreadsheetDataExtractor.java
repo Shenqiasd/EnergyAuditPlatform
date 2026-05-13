@@ -288,12 +288,14 @@ public class SpreadsheetDataExtractor {
                     int absCol = startCol + cm.col;
                     Object val = extractCellValue(rowNode.path(String.valueOf(absCol)));
                     val = convertType(val, cm.type);
+                    val = normalizeBlank(val);
                     if (val != null) hasAnyValue = true;
                     rowData.put(cm.field, val);
                 }
             } else {
                 for (int c = startCol; c < startCol + colCount; c++) {
                     Object val = extractCellValue(rowNode.path(String.valueOf(c)));
+                    val = normalizeBlank(val);
                     if (val != null) hasAnyValue = true;
                     rowData.put("col_" + (c - startCol), val);
                 }
@@ -448,6 +450,7 @@ public class SpreadsheetDataExtractor {
                 int absCol = startCol + cm.col;
                 Object val = extractCellValue(rowNode.path(String.valueOf(absCol)));
                 val = convertType(val, cm.type);
+                val = normalizeBlank(val);
                 if (val != null) hasAnyValue = true;
                 rowData.put(cm.field, val);
             }
@@ -459,6 +462,7 @@ public class SpreadsheetDataExtractor {
                     int absCol = startCol + cm.col;
                     Object val = extractCellValue(rowNode.path(String.valueOf(absCol)));
                     val = convertType(val, cm.type);
+                    val = normalizeBlank(val);
                     if (val != null) hasAnyValue = true;
                     rowData.put(cm.field, val);
                 }
@@ -628,6 +632,26 @@ public class SpreadsheetDataExtractor {
         if (value != null || !result.containsKey(fieldName)) {
             result.put(fieldName, value);
         }
+    }
+
+    /**
+     * Treat blank/whitespace-only CharSequence values as null so they do not
+     * mark a TABLE row as non-empty. SpreadJS submissions often include cells
+     * with empty string values (from data validation lists, prior edits cleared
+     * back to blank, or style-only placeholders); without this normalisation,
+     * every spreadsheet row in the mapped range would be persisted as an
+     * all-null placeholder DB row.
+     */
+    static Object normalizeBlank(Object value) {
+        if (value == null) return null;
+        if (value instanceof CharSequence) {
+            String s = value.toString();
+            for (int i = 0; i < s.length(); i++) {
+                if (!Character.isWhitespace(s.charAt(i))) return value;
+            }
+            return null;
+        }
+        return value;
     }
 
     private Object extractCellValue(JsonNode cellNode) {
