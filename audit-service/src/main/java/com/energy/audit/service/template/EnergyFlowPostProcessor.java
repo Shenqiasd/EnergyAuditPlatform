@@ -101,7 +101,7 @@ public class EnergyFlowPostProcessor {
      * <ul>
      *   <li>购入储存 → {@code purchased}</li>
      *   <li>加工转换 → {@code conversion}</li>
-     *   <li>分配输送 → {@code distribution}</li>
+     *   <li>输送分配 / 分配输送 → {@code distribution}</li>
      *   <li>终端使用 → {@code terminal}</li>
      * </ul>
      *
@@ -121,13 +121,14 @@ public class EnergyFlowPostProcessor {
                         + "SET flow_stage = CASE flow_stage "
                         + "  WHEN '购入储存' THEN 'purchased' "
                         + "  WHEN '加工转换' THEN 'conversion' "
+                        + "  WHEN '输送分配' THEN 'distribution' "
                         + "  WHEN '分配输送' THEN 'distribution' "
                         + "  WHEN '终端使用' THEN 'terminal' "
                         + "  ELSE flow_stage "
                         + "END "
                         + "WHERE submission_id = :submissionId "
                         + "  AND deleted = 0 "
-                        + "  AND flow_stage IN ('购入储存','加工转换','分配输送','终端使用')";
+                        + "  AND flow_stage IN ('购入储存','加工转换','输送分配','分配输送','终端使用')";
         MapSqlParameterSource params = new MapSqlParameterSource().addValue("submissionId", submissionId);
         // NOTE: intentionally NOT using safeUpdate — see javadoc.
         return jdbcTemplate.update(sql, params);

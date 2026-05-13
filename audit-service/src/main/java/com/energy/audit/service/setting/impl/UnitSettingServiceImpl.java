@@ -12,9 +12,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class UnitSettingServiceImpl implements UnitSettingService {
+
+    /** unitType=3 (terminal use) sub-category whitelist — kept in sync with audit-ui (GRA-70). */
+    private static final int END_USE_UNIT_TYPE = 3;
+    private static final Set<String> END_USE_SUB_CATEGORIES =
+            Set.of("生产系统", "辅助系统", "非生产系统", "外供");
 
     private final BsUnitMapper unitMapper;
     private final BsUnitEnergyMapper unitEnergyMapper;
@@ -46,6 +52,7 @@ public class UnitSettingServiceImpl implements UnitSettingService {
     @Override
     @Transactional
     public void create(BsUnit unit) {
+        validateSubCategory(unit);
         String operator = SecurityUtils.getCurrentUsername();
         unit.setCreateBy(operator);
         unit.setUpdateBy(operator);
@@ -56,9 +63,32 @@ public class UnitSettingServiceImpl implements UnitSettingService {
     @Override
     public void update(BsUnit unit) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        getByIdForEnterprise(unit.getId(), enterpriseId);
+        BsUnit existing = getByIdForEnterprise(unit.getId(), enterpriseId);
+        // If the request omits unitType (PATCH-style update), fall back to the
+        // persisted value so end-use validation still applies.
+        if (unit.getUnitType() == null) {
+            unit.setUnitType(existing.getUnitType());
+        }
+        validateSubCategory(unit);
         unit.setUpdateBy(SecurityUtils.getCurrentUsername());
         unitMapper.updateById(unit);
+    }
+
+    /**
+     * Enforce GRA-70: terminal-use (unitType=3) units must carry a sub-category
+     * from the fixed whitelist. Non-terminal units are unconstrained.
+     */
+    private void validateSubCategory(BsUnit unit) {
+        if (unit.getUnitType() == null || unit.getUnitType() != END_USE_UNIT_TYPE) {
+            return;
+        }
+        String subCategory = unit.getSubCategory();
+        if (subCategory == null || subCategory.isBlank()) {
+            throw new BusinessException("终端使用单元的子类别不能为空");
+        }
+        if (!END_USE_SUB_CATEGORIES.contains(subCategory)) {
+            throw new BusinessException("终端使用单元的子类别必须为：生产系统/辅助系统/非生产系统/外供");
+        }
     }
 
     @Override

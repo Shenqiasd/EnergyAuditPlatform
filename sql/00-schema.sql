@@ -389,7 +389,7 @@ CREATE TABLE `bs_unit` (
     `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     `enterprise_id` BIGINT       NOT NULL                COMMENT '企业ID -> ent_enterprise.id',
     `name`          VARCHAR(128) NOT NULL                COMMENT '名称',
-    `unit_type`     TINYINT      NOT NULL                COMMENT '单元类型(1加工转换 2分配输送 3终端使用)',
+    `unit_type`     TINYINT      NOT NULL                COMMENT '单元类型(1加工转换 2输送分配 3终端使用)',
     `sub_category`  VARCHAR(64)  DEFAULT NULL            COMMENT '分类(字典, 终端使用时使用)',
     `remark`        VARCHAR(512) DEFAULT NULL            COMMENT '备注',
     `create_by`     VARCHAR(64)  DEFAULT NULL            COMMENT '创建人',
@@ -1470,7 +1470,7 @@ INSERT INTO `sys_dict_data` (`dict_type`, `dict_label`, `dict_value`, `dict_sort
 -- 单元类型
 INSERT INTO `sys_dict_data` (`dict_type`, `dict_label`, `dict_value`, `dict_sort`, `status`, `create_by`) VALUES
 ('unit_type', '加工转换', '1', 1, 1, 'system'),
-('unit_type', '分配输送', '2', 2, 1, 'system'),
+('unit_type', '输送分配', '2', 2, 1, 'system'),
 ('unit_type', '终端使用', '3', 3, 1, 'system');
 
 -- 排放类型
