@@ -19,7 +19,7 @@ export const UNIT_TYPE_OPTIONS = [
 ]
 
 export const ENERGY_USAGE_TYPE_OPTIONS = [
-  '电力生产企业','其他能源加工转换企业','非能源加工转换行业'
+  '电力生产企业','其他能源加工转换企业','非能源加工转换企业'
 ]
 
 export const SUPERIOR_DEPT_GROUPS = [

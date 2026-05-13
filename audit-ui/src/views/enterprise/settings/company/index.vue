@@ -24,6 +24,7 @@ const rules = computed(() => ({
   industryField:          [{ required: true, message: '请选择所属领域', trigger: 'change' }],
   unitNature:             [{ required: true, message: '请选择单位类型', trigger: 'change' }],
   energyUsageType:        [{ required: true, message: '请选择用能企业类型', trigger: 'change' }],
+  industryCode:           [{ required: true, message: '请选择行业分类', trigger: 'change' }],
   registeredDate:         [{ required: true, message: '请选择单位注册日期', trigger: 'change' }],
   registeredCapital:      [{ required: true, message: '请输入注册资本', trigger: 'blur' }],
   legalRepresentative:    [{ required: true, message: '请输入法定代表人姓名', trigger: 'blur' }],
@@ -71,18 +72,19 @@ function onIndustryChange(value: string[] | null) {
     form.value.industryCode = undefined
     form.value.industryName = undefined
     form.value.industryCategory = undefined
-    return
+  } else {
+    const selectedCode = value[value.length - 1]
+    const entry = industryLookup.get(selectedCode)
+    if (entry) {
+      // Extract just the name part (after the code prefix)
+      const nameOnly = entry.name.replace(/^\S+\s+/, '')
+      form.value.industryCode = selectedCode
+      form.value.industryName = nameOnly
+      // Store the 大类 code (second level) for category
+      form.value.industryCategory = value.length >= 2 ? value[1] : value[0]
+    }
   }
-  const selectedCode = value[value.length - 1]
-  const entry = industryLookup.get(selectedCode)
-  if (entry) {
-    // Extract just the name part (after the code prefix)
-    const nameOnly = entry.name.replace(/^\S+\s+/, '')
-    form.value.industryCode = selectedCode
-    form.value.industryName = nameOnly
-    // Store the 大类 code (second level) for category
-    form.value.industryCategory = value.length >= 2 ? value[1] : value[0]
-  }
+  formRef.value?.validateField('industryCode').catch(() => { /* validation message handled by form item */ })
 }
 
 async function loadData() {
@@ -139,7 +141,7 @@ onMounted(loadData)
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="行业分类">
+          <el-form-item label="行业分类" prop="industryCode">
             <el-cascader
               v-model="industryCascaderValue"
               :options="(industryOptions as unknown as import('element-plus').CascaderOption[])"
