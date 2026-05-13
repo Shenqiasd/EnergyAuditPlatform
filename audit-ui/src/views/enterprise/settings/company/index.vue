@@ -9,7 +9,8 @@ import {
   FIELD_OPTIONS,
   UNIT_TYPE_OPTIONS,
   ENERGY_USAGE_TYPE_OPTIONS,
-  SUPERIOR_DEPT_GROUPS
+  SUPERIOR_DEPT_GROUPS,
+  normalizeEnergyUsageType
 } from '@/config/enterprise-options'
 
 const saving = ref(false)
@@ -92,6 +93,9 @@ async function loadData() {
   try {
     const res = await getEnterpriseSetting()
     form.value = res ?? {}
+    // Forward-migrate legacy energyUsageType values so existing records pick up
+    // the renamed option label (GRA-68) without manual reselection.
+    form.value.energyUsageType = normalizeEnergyUsageType(form.value.energyUsageType) ?? undefined
     // Restore cascader path from stored industry code
     industryCascaderValue.value = resolveIndustryPath(form.value.industryCode)
   } finally {
@@ -101,6 +105,8 @@ async function loadData() {
 
 async function handleSave() {
   await formRef.value?.validate()
+  // Defense in depth: normalize any legacy value still in memory before sending.
+  form.value.energyUsageType = normalizeEnergyUsageType(form.value.energyUsageType) ?? undefined
   saving.value = true
   try {
     await upsertEnterpriseSetting(form.value)

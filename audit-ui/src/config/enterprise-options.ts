@@ -22,6 +22,24 @@ export const ENERGY_USAGE_TYPE_OPTIONS = [
   '电力生产企业','其他能源加工转换企业','非能源加工转换企业'
 ]
 
+/**
+ * Legacy energy-usage-type strings rewritten to the current option set.
+ * Used to forward-migrate persisted values transparently on load and before save
+ * (GRA-68 — the option label `非能源加工转换行业` was renamed to
+ * `非能源加工转换企业`).
+ */
+export const ENERGY_USAGE_TYPE_LEGACY_MAP: Record<string, string> = {
+  '非能源加工转换行业': '非能源加工转换企业',
+}
+
+/** Normalize a stored energy-usage-type value to the current option label. */
+export function normalizeEnergyUsageType(
+  value: string | null | undefined
+): string | null | undefined {
+  if (!value) return value
+  return ENERGY_USAGE_TYPE_LEGACY_MAP[value] ?? value
+}
+
 export const SUPERIOR_DEPT_GROUPS = [
   {
     label: '集团企业',

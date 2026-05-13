@@ -1,5 +1,6 @@
 package com.energy.audit.web.controller.enterprise;
 
+import com.energy.audit.common.exception.BusinessException;
 import com.energy.audit.common.result.R;
 import com.energy.audit.common.util.SecurityUtils;
 import com.energy.audit.model.entity.enterprise.EntEnterpriseSetting;
@@ -62,6 +63,11 @@ public class EnterpriseSettingController {
     @PutMapping
     public R<Void> save(@RequestBody EntEnterpriseSetting setting) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+        // Frontend already enforces industry classification as required (GRA-67),
+        // but we mirror that here so the save API cannot be bypassed by direct callers.
+        if (isBlank(setting.getIndustryCode()) || isBlank(setting.getIndustryName())) {
+            throw new BusinessException(400, "行业分类不能为空");
+        }
         setting.setEnterpriseId(enterpriseId);
         settingService.save(setting);
         return R.ok();
