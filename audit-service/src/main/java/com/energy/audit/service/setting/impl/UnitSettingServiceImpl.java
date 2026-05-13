@@ -64,10 +64,16 @@ public class UnitSettingServiceImpl implements UnitSettingService {
     public void update(BsUnit unit) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         BsUnit existing = getByIdForEnterprise(unit.getId(), enterpriseId);
-        // If the request omits unitType (PATCH-style update), fall back to the
-        // persisted value so end-use validation still applies.
+        // BsUnitMapper.updateById guards every column with <if test="x != null">,
+        // so PATCH-style requests legitimately omit fields they don't want to
+        // change. Mirror the persisted unitType / subCategory before validating
+        // so partial updates on end-use units don't trip the GRA-70 whitelist
+        // just because the caller didn't re-send unchanged fields.
         if (unit.getUnitType() == null) {
             unit.setUnitType(existing.getUnitType());
+        }
+        if (unit.getSubCategory() == null) {
+            unit.setSubCategory(existing.getSubCategory());
         }
         validateSubCategory(unit);
         unit.setUpdateBy(SecurityUtils.getCurrentUsername());
