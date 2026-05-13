@@ -18,20 +18,7 @@ const props = defineProps<{
 }>()
 
 function handleExport() {
-  const flatCols = flattenColumns(props.columns)
-  exportTableToExcel(flatCols, props.data, props.exportFilename || props.title || '导出数据')
-}
-
-function flattenColumns(cols: RegColumn[]): RegColumn[] {
-  const result: RegColumn[] = []
-  for (const col of cols) {
-    if (col.children?.length) {
-      result.push(...flattenColumns(col.children))
-    } else {
-      result.push(col)
-    }
-  }
-  return result
+  exportTableToExcel(props.columns, props.data, props.exportFilename || props.title || '导出数据')
 }
 </script>
 

@@ -4,51 +4,59 @@ import { queryExtractedTable } from '@/api/extracted-data'
 import SectionTitle from '../components/SectionTitle.vue'
 import RegulationTable from '../components/RegulationTable.vue'
 import type { RegColumn } from '../components/RegulationTable.vue'
+import { splitFiveYearRows, type Row } from '../utils/regulated-rows'
 
 const loading = ref(false)
-const summaryRows = ref<Record<string, unknown>[]>([])
-const productRows = ref<Record<string, unknown>[]>([])
-const annualRows = ref<Record<string, unknown>[]>([])
+const summaryRows = ref<Row[]>([])
+const productRows = ref<Row[]>([])
+const annualRows = ref<Row[]>([])
 const tableError = ref('')
 
+// Field names mirror the snake_case keys returned by /extracted-data/{table}.
+// The "2025年实际" / "2030年目标" parent labels are preserved in export via
+// the hierarchical-header support in `exportTableToExcel`.
 const summaryColumns: RegColumn[] = [
   {
     prop: '_actual2025', label: '2025年实际', children: [
-      { prop: 'actual2025Output', label: '产量', minWidth: 100 },
-      { prop: 'actual2025EnergyEquivalent', label: '综合能耗（吨标煤）-等价值', minWidth: 160 },
-      { prop: 'actual2025EnergyCalorific', label: '综合能耗（吨标煤）-当量值', minWidth: 160 },
-      { prop: 'actual2025UnitConsumption', label: '产品综合能耗（吨标煤/万元）', minWidth: 180 },
+      { prop: 'gross_output_actual2025', label: '产值（万元）', minWidth: 120 },
+      { prop: 'energy_equiv_actual2025', label: '综合能耗（吨标煤）-当量值', minWidth: 170 },
+      { prop: 'energy_equal_actual2025', label: '综合能耗（吨标煤）-等价值', minWidth: 170 },
     ],
   },
   {
     prop: '_target2030', label: '2030年目标', children: [
-      { prop: 'target2030Output', label: '产量', minWidth: 100 },
-      { prop: 'target2030EnergyEquivalent', label: '综合能耗（吨标煤）-等价值', minWidth: 160 },
-      { prop: 'target2030EnergyCalorific', label: '综合能耗（吨标煤）-当量值', minWidth: 160 },
-      { prop: 'target2030UnitConsumption', label: '产品综合能耗（吨标煤/万元）', minWidth: 180 },
+      { prop: 'gross_output_target2030', label: '产值（万元）', minWidth: 120 },
+      { prop: 'energy_equiv_target2030', label: '综合能耗（吨标煤）-当量值', minWidth: 170 },
+      { prop: 'energy_equal_target2030', label: '综合能耗（吨标煤）-等价值', minWidth: 170 },
     ],
   },
-  { prop: 'declineRate', label: '万元产值综合能耗下降率（%）', minWidth: 200 },
+  { prop: 'decline_rate', label: '万元产值综合能耗下降率（%）', minWidth: 200 },
 ]
 
 const productColumns: RegColumn[] = [
-  { prop: 'productName', label: '产品名称', minWidth: 120 },
-  { prop: 'indicatorName', label: '单耗指标名称', minWidth: 150 },
-  { prop: 'indicatorValue', label: '单耗指标值', minWidth: 100 },
-  { prop: 'targetProductName', label: '目标产品名称', minWidth: 120 },
-  { prop: 'targetIndicatorName', label: '目标单耗指标名称', minWidth: 150 },
-  { prop: 'targetIndicatorValue', label: '目标单耗指标值', minWidth: 100 },
-  { prop: 'indicatorDeclineRate', label: '单耗指标下降率（%）', minWidth: 150 },
+  { prop: 'product_name', label: '产品名称', minWidth: 120 },
+  { prop: 'indicator_name', label: '单耗指标名称', minWidth: 150 },
+  { prop: 'indicator_value', label: '2025单耗指标值', minWidth: 130 },
+  { prop: 'actual_value', label: '2025单耗实际值', minWidth: 130 },
+  { prop: 'target_name', label: '2030产品名称', minWidth: 120 },
+  { prop: 'year_label', label: '2030单耗指标名', minWidth: 150 },
+  { prop: 'y2030', label: '2030单耗指标值', minWidth: 130 },
+  { prop: 'unit_energy_equal', label: '2030单耗实际值', minWidth: 130 },
+  { prop: 'decline_rate', label: '单耗指标下降率（%）', minWidth: 150 },
 ]
 
 const annualColumns: RegColumn[] = [
-  { prop: 'targetName', label: '目标名称', minWidth: 200 },
-  { prop: 'unit', label: '计量单位', minWidth: 100 },
-  { prop: 'y2026', label: '2026年', minWidth: 100 },
-  { prop: 'y2027', label: '2027年', minWidth: 100 },
-  { prop: 'y2028', label: '2028年', minWidth: 100 },
-  { prop: 'y2029', label: '2029年', minWidth: 100 },
-  { prop: 'y2030', label: '2030年', minWidth: 100 },
+  { prop: 'target_name', label: '目标名称', minWidth: 200 },
+  { prop: 'measurement_unit', label: '计量单位', minWidth: 100 },
+  {
+    prop: '_years', label: '2026-2030年', children: [
+      { prop: 'y2026', label: '2026年', minWidth: 100 },
+      { prop: 'y2027', label: '2027年', minWidth: 100 },
+      { prop: 'y2028', label: '2028年', minWidth: 100 },
+      { prop: 'y2029', label: '2029年', minWidth: 100 },
+      { prop: 'y2030', label: '2030年', minWidth: 100 },
+    ],
+  },
 ]
 
 onMounted(async () => {
@@ -58,13 +66,11 @@ onMounted(async () => {
       tableError.value = e.message?.includes('404') ? '数据表尚未对接' : ''
       return { rows: [], total: 0 }
     })
-    const allRows = data.rows || []
-    summaryRows.value = allRows.filter((r: Record<string, unknown>) => r.rowType === 'summary')
-    productRows.value = allRows.filter((r: Record<string, unknown>) => r.rowType === 'product')
-    annualRows.value = allRows.filter((r: Record<string, unknown>) => r.rowType === 'annual' || r.y2026 !== undefined)
-    if (!summaryRows.value.length && !annualRows.value.length && !productRows.value.length) {
-      summaryRows.value = allRows
-    }
+    const allRows = (data.rows || []) as Row[]
+    const sections = splitFiveYearRows(allRows)
+    summaryRows.value = sections.summary
+    productRows.value = sections.product
+    annualRows.value = sections.annual
   } finally {
     loading.value = false
   }
@@ -85,7 +91,6 @@ onMounted(async () => {
     />
 
     <RegulationTable
-      v-if="productRows.length"
       :columns="productColumns"
       :data="productRows"
       :loading="loading"
@@ -94,7 +99,6 @@ onMounted(async () => {
     />
 
     <RegulationTable
-      v-if="annualRows.length"
       :columns="annualColumns"
       :data="annualRows"
       :loading="loading"
