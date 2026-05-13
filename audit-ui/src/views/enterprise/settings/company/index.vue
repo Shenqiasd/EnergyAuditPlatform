@@ -2,7 +2,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getEnterpriseSetting, upsertEnterpriseSetting, type EnterpriseSetting } from '@/api/enterpriseSetting'
-import { INDUSTRY_CLASSIFICATION, buildIndustryLookup, type IndustryNode } from '@/config/industry-classification'
+import {
+  INDUSTRY_CLASSIFICATION,
+  buildIndustryLookup,
+  resolveIndustryPath,
+  type IndustryNode,
+} from '@/config/industry-classification'
 import { notifyEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
 import {
   REGION_OPTIONS,
@@ -57,15 +62,8 @@ const rules = computed(() => ({
 const industryLookup = buildIndustryLookup()
 const industryOptions: IndustryNode[] = INDUSTRY_CLASSIFICATION
 
-/** Current cascader selection path, e.g. ['C', 'C28', 'C281'] */
+/** Current cascader selection path, e.g. ['28', '281'] */
 const industryCascaderValue = ref<string[]>([])
-
-/** Resolve stored industryCode back to cascader path on load */
-function resolveIndustryPath(code: string | undefined | null): string[] {
-  if (!code) return []
-  const entry = industryLookup.get(code)
-  return entry ? [...entry.fullPath] : []
-}
 
 /** Handle cascader selection change */
 function onIndustryChange(value: string[] | null) {
@@ -77,12 +75,12 @@ function onIndustryChange(value: string[] | null) {
     const selectedCode = value[value.length - 1]
     const entry = industryLookup.get(selectedCode)
     if (entry) {
-      // Extract just the name part (after the code prefix)
+      // Strip the leading "<code> " prefix from the label to get the name
       const nameOnly = entry.name.replace(/^\S+\s+/, '')
       form.value.industryCode = selectedCode
       form.value.industryName = nameOnly
-      // Store the 大类 code (second level) for category
-      form.value.industryCategory = value.length >= 2 ? value[1] : value[0]
+      // First level of the cascader path is the 大类 code
+      form.value.industryCategory = value[0]
     }
   }
   formRef.value?.validateField('industryCode').catch(() => { /* validation message handled by form item */ })
@@ -96,8 +94,31 @@ async function loadData() {
     // Forward-migrate legacy energyUsageType values so existing records pick up
     // the renamed option label (GRA-68) without manual reselection.
     form.value.energyUsageType = normalizeEnergyUsageType(form.value.energyUsageType) ?? undefined
-    // Restore cascader path from stored industry code
-    industryCascaderValue.value = resolveIndustryPath(form.value.industryCode)
+    // Restore cascader path from stored industry code (normalising legacy
+    // prefixed values like `C281` to the canonical `281`). The resolver only
+    // returns leaf paths — ambiguous legacy major codes such as `C28` or an
+    // unknown code resolve to `[]`, in which case we clear the industry
+    // fields so the form's `required` rule forces the user to pick a 中类
+    // rather than silently saving a non-leaf major as `industryCode`.
+    const path = resolveIndustryPath(form.value.industryCode, industryLookup)
+    industryCascaderValue.value = path
+    if (path.length >= 2) {
+      // Re-stamp the normalised code/category onto the form so a subsequent
+      // save persists the canonical value rather than the legacy prefixed one.
+      const leafCode = path[path.length - 1]
+      const entry = industryLookup.get(leafCode)
+      if (entry) {
+        form.value.industryCode = leafCode
+        form.value.industryCategory = path[0]
+        if (!form.value.industryName) {
+          form.value.industryName = entry.name.replace(/^\S+\s+/, '')
+        }
+      }
+    } else {
+      form.value.industryCode = undefined
+      form.value.industryName = undefined
+      form.value.industryCategory = undefined
+    }
   } finally {
     loading.value = false
   }
