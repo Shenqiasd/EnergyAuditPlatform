@@ -9,17 +9,15 @@
 -- Idempotent: the WHERE clause matches the old label, so running this on a
 -- database that has already been migrated is a no-op.
 --
--- Also normalises any de_energy_flow.flow_stage rows that may have been left
--- with the historical "分配输送" Chinese label before EnergyFlowPostProcessor
--- translated them to "distribution".
+-- Scope note: this migration intentionally does NOT touch de_energy_flow
+-- rows. EnergyFlowPostProcessor.translateFlowStages already normalises both
+-- "分配输送" and "输送分配" to "distribution" at processing time, so historical
+-- rows continue to work without a one-shot data rewrite. If historical
+-- de_energy_flow.flow_stage values ever need to be backfilled, do that under
+-- a separate, approved data-repair migration with backup / row-count / rollback.
 
 UPDATE `sys_dict_data`
 SET `dict_label` = '输送分配'
 WHERE `dict_type` = 'unit_type'
   AND `dict_value` = '2'
   AND `dict_label` = '分配输送';
-
-UPDATE `de_energy_flow`
-SET `flow_stage` = 'distribution'
-WHERE `deleted` = 0
-  AND `flow_stage` IN ('分配输送', '输送分配');
