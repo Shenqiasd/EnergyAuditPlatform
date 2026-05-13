@@ -3,6 +3,7 @@ import {
   INDUSTRY_CLASSIFICATION,
   buildIndustryLookup,
   normalizeIndustryCode,
+  resolveIndustryPath,
 } from './industry-classification'
 
 describe('INDUSTRY_CLASSIFICATION (EA-CUST-045)', () => {
@@ -71,5 +72,36 @@ describe('buildIndustryLookup', () => {
     const lookup = buildIndustryLookup()
     expect(lookup.has('C281')).toBe(false)
     expect(lookup.get(normalizeIndustryCode('C281'))?.fullPath).toEqual(['28', '281'])
+  })
+})
+
+describe('resolveIndustryPath', () => {
+  it('returns a leaf path for a stored middle code', () => {
+    expect(resolveIndustryPath('281')).toEqual(['28', '281'])
+  })
+
+  it('strips a legacy 门类 letter prefix on a middle code', () => {
+    expect(resolveIndustryPath('C281')).toEqual(['28', '281'])
+  })
+
+  it('auto-promotes legacy single-leaf majors (C16/C21/C31/C42/D46) to their sole 中类 child', () => {
+    expect(resolveIndustryPath('C16')).toEqual(['16', '160'])
+    expect(resolveIndustryPath('C21')).toEqual(['21', '210'])
+    expect(resolveIndustryPath('C31')).toEqual(['31', '310'])
+    expect(resolveIndustryPath('C42')).toEqual(['42', '420'])
+    expect(resolveIndustryPath('D46')).toEqual(['46', '460'])
+  })
+
+  it('does not promote a major that has multiple middle children', () => {
+    // 28 has 3 middles (281/282/283), so a stored bare `28` must NOT be
+    // auto-promoted because we cannot pick the user's intended 中类.
+    expect(resolveIndustryPath('28')).toEqual(['28'])
+  })
+
+  it('returns an empty path for an unknown / empty code', () => {
+    expect(resolveIndustryPath('999')).toEqual([])
+    expect(resolveIndustryPath('')).toEqual([])
+    expect(resolveIndustryPath(null)).toEqual([])
+    expect(resolveIndustryPath(undefined)).toEqual([])
   })
 })

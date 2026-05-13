@@ -905,3 +905,30 @@ export function buildIndustryLookup(): Map<string, { code: string; name: string;
   }
   return map
 }
+
+/**
+ * Resolve a stored industry code (possibly with a legacy 门类 letter prefix)
+ * back to a cascader path `[majorCode, middleCode]`. When the stored code
+ * matches a major that has exactly one middle child — which covers the five
+ * old single-leaf majors `C16/C21/C31/C42/D46` that used to be stored as a
+ * major-level code — the path is auto-promoted to that middle so the leaf
+ * cascader can render and persist a valid 中类 code.
+ */
+export function resolveIndustryPath(
+  code: string | undefined | null,
+  lookup?: Map<string, { code: string; name: string; fullPath: string[] }>,
+): string[] {
+  const normalized = normalizeIndustryCode(code)
+  if (!normalized) return []
+  const map = lookup ?? buildIndustryLookup()
+  const entry = map.get(normalized)
+  if (!entry) return []
+  const path = [...entry.fullPath]
+  if (path.length === 1) {
+    const major = INDUSTRY_CLASSIFICATION.find((m) => m.value === path[0])
+    if (major?.children?.length === 1) {
+      path.push(major.children[0].value)
+    }
+  }
+  return path
+}

@@ -5,7 +5,7 @@ import { getEnterpriseSetting, upsertEnterpriseSetting, type EnterpriseSetting }
 import {
   INDUSTRY_CLASSIFICATION,
   buildIndustryLookup,
-  normalizeIndustryCode,
+  resolveIndustryPath,
   type IndustryNode,
 } from '@/config/industry-classification'
 import { notifyEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
@@ -65,16 +65,6 @@ const industryOptions: IndustryNode[] = INDUSTRY_CLASSIFICATION
 /** Current cascader selection path, e.g. ['28', '281'] */
 const industryCascaderValue = ref<string[]>([])
 
-/** Resolve stored industryCode back to cascader path on load. Strips any
- *  legacy 门类 letter prefix (e.g. `C281` → `281`) so historical records
- *  with the previous coding still backfill correctly. */
-function resolveIndustryPath(code: string | undefined | null): string[] {
-  const normalized = normalizeIndustryCode(code)
-  if (!normalized) return []
-  const entry = industryLookup.get(normalized)
-  return entry ? [...entry.fullPath] : []
-}
-
 /** Handle cascader selection change */
 function onIndustryChange(value: string[] | null) {
   if (!value || value.length === 0) {
@@ -106,7 +96,7 @@ async function loadData() {
     form.value.energyUsageType = normalizeEnergyUsageType(form.value.energyUsageType) ?? undefined
     // Restore cascader path from stored industry code (normalising legacy
     // prefixed values like `C281` to the canonical `281`).
-    const path = resolveIndustryPath(form.value.industryCode)
+    const path = resolveIndustryPath(form.value.industryCode, industryLookup)
     industryCascaderValue.value = path
     if (path.length > 0) {
       // Re-stamp the normalised code/category onto the form so a subsequent
