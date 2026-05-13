@@ -908,11 +908,19 @@ export function buildIndustryLookup(): Map<string, { code: string; name: string;
 
 /**
  * Resolve a stored industry code (possibly with a legacy 门类 letter prefix)
- * back to a cascader path `[majorCode, middleCode]`. When the stored code
- * matches a major that has exactly one middle child — which covers the five
- * old single-leaf majors `C16/C21/C31/C42/D46` that used to be stored as a
- * major-level code — the path is auto-promoted to that middle so the leaf
- * cascader can render and persist a valid 中类 code.
+ * back to a leaf cascader path `[majorCode, middleCode]`.
+ *
+ * The resolver only ever returns a leaf path or an empty path:
+ *
+ *  - Stored 中类 code (e.g. `281` or `C281`) → `[majorCode, middleCode]`.
+ *  - Stored major that has exactly one middle child (the five legacy
+ *    single-leaf majors `C16/C21/C31/C42/D46`) → auto-promoted to its sole
+ *    `[major, middle]` pair.
+ *  - Stored major with multiple middle children (ambiguous, e.g. `28` or
+ *    legacy `C28`) → `[]`. The page treats this as "needs reselection" and
+ *    clears `industryCode` so the form's `required` rule forces the user
+ *    to pick a 中类 before saving.
+ *  - Unknown / blank code → `[]`.
  */
 export function resolveIndustryPath(
   code: string | undefined | null,
@@ -924,11 +932,13 @@ export function resolveIndustryPath(
   const entry = map.get(normalized)
   if (!entry) return []
   const path = [...entry.fullPath]
-  if (path.length === 1) {
-    const major = INDUSTRY_CLASSIFICATION.find((m) => m.value === path[0])
-    if (major?.children?.length === 1) {
-      path.push(major.children[0].value)
-    }
+  if (path.length >= 2) return path
+  // path.length === 1 — stored a major code. Only safe to promote if the
+  // major has exactly one middle child; otherwise the 中类 is ambiguous and
+  // we must surface this to the user as an empty selection.
+  const major = INDUSTRY_CLASSIFICATION.find((m) => m.value === path[0])
+  if (major?.children?.length === 1) {
+    return [path[0], major.children[0].value]
   }
-  return path
+  return []
 }

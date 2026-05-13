@@ -95,20 +95,29 @@ async function loadData() {
     // the renamed option label (GRA-68) without manual reselection.
     form.value.energyUsageType = normalizeEnergyUsageType(form.value.energyUsageType) ?? undefined
     // Restore cascader path from stored industry code (normalising legacy
-    // prefixed values like `C281` to the canonical `281`).
+    // prefixed values like `C281` to the canonical `281`). The resolver only
+    // returns leaf paths — ambiguous legacy major codes such as `C28` or an
+    // unknown code resolve to `[]`, in which case we clear the industry
+    // fields so the form's `required` rule forces the user to pick a 中类
+    // rather than silently saving a non-leaf major as `industryCode`.
     const path = resolveIndustryPath(form.value.industryCode, industryLookup)
     industryCascaderValue.value = path
-    if (path.length > 0) {
+    if (path.length >= 2) {
       // Re-stamp the normalised code/category onto the form so a subsequent
       // save persists the canonical value rather than the legacy prefixed one.
-      const entry = industryLookup.get(path[path.length - 1])
+      const leafCode = path[path.length - 1]
+      const entry = industryLookup.get(leafCode)
       if (entry) {
-        form.value.industryCode = path[path.length - 1]
+        form.value.industryCode = leafCode
         form.value.industryCategory = path[0]
         if (!form.value.industryName) {
           form.value.industryName = entry.name.replace(/^\S+\s+/, '')
         }
       }
+    } else {
+      form.value.industryCode = undefined
+      form.value.industryName = undefined
+      form.value.industryCategory = undefined
     }
   } finally {
     loading.value = false

@@ -92,10 +92,16 @@ describe('resolveIndustryPath', () => {
     expect(resolveIndustryPath('D46')).toEqual(['46', '460'])
   })
 
-  it('does not promote a major that has multiple middle children', () => {
-    // 28 has 3 middles (281/282/283), so a stored bare `28` must NOT be
-    // auto-promoted because we cannot pick the user's intended 中类.
-    expect(resolveIndustryPath('28')).toEqual(['28'])
+  it('returns [] for an ambiguous bare/legacy major with multiple 中类 children', () => {
+    // 28 has 3 middles (281/282/283), so a stored bare `28` (or legacy
+    // `C28`) must resolve to an empty path. The page then clears the
+    // industry fields and the form's `required` rule blocks save until the
+    // user picks a 中类.
+    expect(resolveIndustryPath('28')).toEqual([])
+    expect(resolveIndustryPath('C28')).toEqual([])
+    // 13 (7 middles) and 44 (3 middles) — same expectation.
+    expect(resolveIndustryPath('13')).toEqual([])
+    expect(resolveIndustryPath('D44')).toEqual([])
   })
 
   it('returns an empty path for an unknown / empty code', () => {
@@ -103,5 +109,21 @@ describe('resolveIndustryPath', () => {
     expect(resolveIndustryPath('')).toEqual([])
     expect(resolveIndustryPath(null)).toEqual([])
     expect(resolveIndustryPath(undefined)).toEqual([])
+  })
+
+  it('only ever returns a leaf or empty path', () => {
+    // Sanity check across the whole tree: for every known 中类 code, the
+    // resolved path is always length 2, and for every major code, the
+    // resolved path is either length 2 (auto-promoted single-leaf) or
+    // length 0 (ambiguous multi-leaf).
+    const lookup = buildIndustryLookup()
+    for (const [code, entry] of lookup) {
+      const path = resolveIndustryPath(code)
+      if (entry.fullPath.length === 2) {
+        expect(path).toHaveLength(2)
+      } else {
+        expect([0, 2]).toContain(path.length)
+      }
+    }
   })
 })
