@@ -37,16 +37,17 @@ const columns: RegColumn[] = [
   },
 ]
 
-const LEVEL_PREFIX: Record<number, 'inOut' | 'secondary' | 'equipment'> = {
-  1: 'inOut',
-  2: 'secondary',
-  3: 'equipment',
-}
+const LEVEL_PREFIX = ['inOut', 'secondary', 'equipment'] as const
+type LevelPrefix = typeof LEVEL_PREFIX[number]
 
 function toNumber(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
+}
+
+function formatNumeric(v: number | null): number | string {
+  return v === null ? '' : v
 }
 
 function computeRate(actual: number | null, required: number | null): string {
@@ -58,6 +59,31 @@ function toIdOrInf(v: unknown): number {
   if (v === null || v === undefined || v === '') return Infinity
   const n = Number(v)
   return Number.isFinite(n) ? n : Infinity
+}
+
+function combineEnergyKey(energyType: string, energySubType: string): string {
+  return energySubType ? `${energyType}-${energySubType}` : energyType
+}
+
+function adaptWideRow(r: Record<string, unknown>): Record<string, unknown> | null {
+  const energyType = String(r.energy_type ?? '').trim()
+  if (!energyType) return null
+  const energySubType = String(r.energy_sub_type ?? '').trim()
+  const key = combineEnergyKey(energyType, energySubType)
+  const out: Record<string, unknown> = { energyType: key }
+  for (let i = 0; i < LEVEL_PREFIX.length; i++) {
+    const prefix: LevelPrefix = LEVEL_PREFIX[i]
+    const level = i + 1
+    const standard = toNumber(r[`l${level}_standard_rate`])
+    const required = toNumber(r[`l${level}_required_count`])
+    const actual = toNumber(r[`l${level}_actual_count`])
+    const dbRate = toNumber(r[`l${level}_actual_rate`])
+    if (standard !== null) out[`${prefix}Standard`] = standard
+    out[`${prefix}Required`] = formatNumeric(required)
+    out[`${prefix}Actual`] = formatNumeric(actual)
+    out[`${prefix}Rate`] = dbRate !== null ? dbRate.toFixed(2) : computeRate(actual, required)
+  }
+  return out
 }
 
 function buildRows(dbRows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -75,38 +101,31 @@ function buildRows(dbRows: Record<string, unknown>[]): Record<string, unknown>[]
     })
     .map(({ r }) => r)
 
-  // Group DB rows by energy_type and pivot by level_type.
-  const grouped = new Map<string, Record<string, unknown>>()
+  // Wide-table rows: one row per (energy_type, energy_sub_type) with l1_*/l2_*/l3_*.
+  const adapted = new Map<string, Record<string, unknown>>()
   for (const r of sorted) {
-    const energyType = String(r.energy_type ?? '')
-    if (!energyType) continue
-    const levelType = Number(r.level_type)
-    const prefix = LEVEL_PREFIX[levelType]
-    if (!prefix) continue
-    const required = toNumber(r.required_count)
-    const actual = toNumber(r.actual_count)
-    const existing = grouped.get(energyType) ?? { energyType }
-    existing[`${prefix}Required`] = required ?? ''
-    existing[`${prefix}Actual`] = actual ?? ''
-    existing[`${prefix}Rate`] = computeRate(actual, required)
-    grouped.set(energyType, existing)
+    const row = adaptWideRow(r)
+    if (!row) continue
+    const key = row.energyType as string
+    // If duplicate composite keys exist, prefer the latest by id (sorted asc).
+    adapted.set(key, row)
   }
 
-  // Merge with default rows so standards and template row order are preserved,
-  // and unmatched extracted energy types are appended at the end.
+  // Merge with default rows so default standards and template row order are preserved.
   const result: Record<string, unknown>[] = []
   const used = new Set<string>()
   for (const def of defaults) {
+    const key = def.energyType as string
     const merged = { ...def }
-    const extracted = grouped.get(def.energyType as string)
+    const extracted = adapted.get(key)
     if (extracted) {
       Object.assign(merged, extracted)
-      used.add(def.energyType as string)
+      used.add(key)
     }
     result.push(merged)
   }
-  for (const [energyType, extracted] of grouped.entries()) {
-    if (!used.has(energyType)) {
+  for (const [key, extracted] of adapted.entries()) {
+    if (!used.has(key)) {
       result.push(extracted)
     }
   }
