@@ -197,6 +197,47 @@ describe('classifyFiveYearRow', () => {
     expect(classifyFiveYearRow({ section_type: 'summary' })).toBe('summary')
     expect(classifyFiveYearRow({ section_type: 'yearly', target_name: '能耗', y2030: 1 })).toBe('annual')
   })
+
+  // ---- positive-signal-only guards ----
+
+  it('returns null for Sheet20 年度目标 rows with only text labels and blank year columns', () => {
+    // SpreadsheetDataExtractor preserves a row when any mapped cell is
+    // non-null. So even when y2025..y2030 are all blank, a Sheet20 row may
+    // still emit {year_label, target_name, measurement_unit} text. These
+    // would have fallen through to summary under the old default-summary
+    // policy; under positive-signal-only they classify as null and are
+    // dropped by splitFiveYearRows.
+    expect(classifyFiveYearRow({ year_label: '2025' })).toBeNull()
+    expect(classifyFiveYearRow({ target_name: '某个指标' })).toBeNull()
+    expect(
+      classifyFiveYearRow({ target_name: '某个指标', measurement_unit: '%' }),
+    ).toBeNull()
+  })
+
+  it('returns null for Sheet20 产品碳峰-shape rows with only text labels and blank numerics', () => {
+    // Sheet20_产品碳峰 mapping (sql/33-0427v2-template-tag-mappings.sql:436)
+    // writes year_label as text. If product_output / gross_output / emission
+    // / unit_strength / intensity_drop are all blank, the row still surfaces
+    // because year_label is non-null. Must be dropped.
+    expect(classifyFiveYearRow({ year_label: '某产品' })).toBeNull()
+  })
+
+  it('returns null for completely unknown / irrelevant rows', () => {
+    expect(classifyFiveYearRow({})).toBeNull()
+    expect(classifyFiveYearRow({ foo: 'bar', bar: 1 })).toBeNull()
+  })
+
+  it('returns null for Sheet20 marker rows even with an inconsistent Sheet21 section_type', () => {
+    // Defense in depth: if a row was somehow tagged section_type="summary"
+    // but also has product_output (Sheet20 marker), the Sheet20 marker wins
+    // and the row is dropped.
+    expect(
+      classifyFiveYearRow({ section_type: 'summary', product_output: 100 }),
+    ).toBeNull()
+    expect(
+      classifyFiveYearRow({ section_type: '产品碳峰', target_name: 'foo', y2026: 1 }),
+    ).toBeNull()
+  })
 })
 
 describe('splitFiveYearRows', () => {
@@ -235,6 +276,50 @@ describe('splitFiveYearRows', () => {
     const allIds = [...out.summary, ...out.product, ...out.annual].map((r) => r.id)
     expect(allIds).not.toContain(10) // Sheet20 产品碳峰
     expect(allIds).not.toContain(11) // Sheet20 年度目标
+  })
+
+  it('excludes Sheet20 rows even when their numeric columns are blank (text labels only)', () => {
+    // Reviewer scenario: Sheet20 产品碳峰 / 年度目标 rows can emit
+    // {year_label} or {target_name (+measurement_unit)} text with every
+    // numeric cell blank. Under the previous default-to-summary policy,
+    // these polluted the table17 summary section. Under positive-signal-only
+    // they must NOT appear in any section.
+    const rows = [
+      // Sheet20 产品碳峰 row, only text label (mimics the customer screenshot)
+      { id: 30, year_label: '产品名称' },
+      // Sheet20 年度目标 row, only text labels
+      { id: 31, target_name: '能耗下降率', measurement_unit: '%' },
+      // Sheet20 年度目标 row, target_name only
+      { id: 32, target_name: '某指标' },
+      // Sheet21 总览 row (only Sheet21 row in the input)
+      { id: 40, ...sheet21SummaryRow },
+    ]
+    const out = splitFiveYearRows(rows)
+    expect(out.summary).toHaveLength(1)
+    expect(out.summary[0].id).toBe(40)
+    expect(out.product).toHaveLength(0)
+    expect(out.annual).toHaveLength(0)
+    const allIds = [...out.summary, ...out.product, ...out.annual].map((r) => r.id)
+    expect(allIds).not.toContain(30)
+    expect(allIds).not.toContain(31)
+    expect(allIds).not.toContain(32)
+  })
+
+  it('preserves Sheet21 summary/product/annual rows in a mixed input alongside text-only Sheet20 rows', () => {
+    // Comprehensive regression: even when the input is dominated by text-only
+    // Sheet20 rows, every legit Sheet21 row still ends up in the correct
+    // section.
+    const rows = [
+      { id: 50, year_label: '2025' }, // Sheet20 text-only 产品碳峰
+      { id: 51, target_name: 'X', measurement_unit: '%' }, // Sheet20 text-only 年度目标
+      { id: 52, ...sheet21SummaryRow },
+      { id: 53, ...sheet21ProductRow },
+      { id: 54, ...sheet21AnnualRow },
+    ]
+    const out = splitFiveYearRows(rows)
+    expect(out.summary.map((r) => r.id)).toEqual([52])
+    expect(out.product.map((r) => r.id)).toEqual([53])
+    expect(out.annual.map((r) => r.id)).toEqual([54])
   })
 
   it('routes Sheet21 产品单耗 to product (not annual) even with target_name + y2030', () => {
