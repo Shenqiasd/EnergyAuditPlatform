@@ -95,8 +95,11 @@ function buildRows(dbRows: Record<string, unknown>[]): Record<string, unknown>[]
   const sorted = [...dbRows]
     .map((r, i) => ({ r, i }))
     .sort((a, b) => {
-      const idDiff = toIdOrInf(a.r.id) - toIdOrInf(b.r.id)
-      if (idDiff !== 0) return idDiff
+      // Use explicit < / > so Infinity - Infinity (both ids blank) does not
+      // short-circuit on NaN before reaching the original-index fallback.
+      const idA = toIdOrInf(a.r.id)
+      const idB = toIdOrInf(b.r.id)
+      if (idA !== idB) return idA < idB ? -1 : 1
       return a.i - b.i
     })
     .map(({ r }) => r)

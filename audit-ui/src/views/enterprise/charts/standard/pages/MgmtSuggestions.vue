@@ -29,10 +29,14 @@ function sortByTemplateOrder(items: Record<string, unknown>[]): Record<string, u
   return items
     .map((r, i) => ({ r, i }))
     .sort((a, b) => {
-      const seqDiff = toNumOrInf(a.r.seq_no) - toNumOrInf(b.r.seq_no)
-      if (seqDiff !== 0) return seqDiff
-      const idDiff = toNumOrInf(a.r.id) - toNumOrInf(b.r.id)
-      if (idDiff !== 0) return idDiff
+      // Use explicit < / > on each tier so Infinity - Infinity (both keys blank)
+      // does not short-circuit on NaN before reaching the id / index fallback.
+      const seqA = toNumOrInf(a.r.seq_no)
+      const seqB = toNumOrInf(b.r.seq_no)
+      if (seqA !== seqB) return seqA < seqB ? -1 : 1
+      const idA = toNumOrInf(a.r.id)
+      const idB = toNumOrInf(b.r.id)
+      if (idA !== idB) return idA < idB ? -1 : 1
       return a.i - b.i
     })
     .map(({ r }) => r)
