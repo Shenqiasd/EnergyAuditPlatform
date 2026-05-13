@@ -88,6 +88,7 @@ onMounted(async () => {
       :loading="loading"
       export-filename="十五五节能目标-总览"
       title="2025年实际 vs 2030年目标"
+      grouped-export
     />
 
     <RegulationTable
@@ -104,6 +105,7 @@ onMounted(async () => {
       :loading="loading"
       export-filename="十五五节能目标-年度"
       title="年度目标进度（2026-2030年）"
+      grouped-export
     />
   </div>
 </template>

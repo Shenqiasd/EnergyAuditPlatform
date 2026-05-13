@@ -29,6 +29,66 @@ vi.mock('xlsx', () => {
   return { utils, writeFile, default: { utils, writeFile } }
 })
 
+describe('flattenColumns', () => {
+  it('passes flat columns through unchanged', async () => {
+    const { flattenColumns } = await import('./export')
+    const out = flattenColumns([
+      { prop: 'a', label: 'A' },
+      { prop: 'b', label: 'B' },
+    ])
+    expect(out).toEqual([
+      { prop: 'a', label: 'A' },
+      { prop: 'b', label: 'B' },
+    ])
+  })
+
+  it('drops group bands and keeps only leaf columns (used by non-grouped-export pages like 表 7)', async () => {
+    const { flattenColumns } = await import('./export')
+    const out = flattenColumns([
+      { prop: 'name', label: '名称' },
+      {
+        prop: '_band',
+        label: '分组',
+        children: [
+          { prop: 'a', label: 'A' },
+          { prop: 'b', label: 'B' },
+        ],
+      },
+      { prop: 'c', label: 'C' },
+    ])
+    expect(out).toEqual([
+      { prop: 'name', label: '名称' },
+      { prop: 'a', label: 'A' },
+      { prop: 'b', label: 'B' },
+      { prop: 'c', label: 'C' },
+    ])
+  })
+
+  it('recursively flattens nested group bands', async () => {
+    const { flattenColumns } = await import('./export')
+    const out = flattenColumns([
+      {
+        prop: '_top',
+        label: '顶层',
+        children: [
+          {
+            prop: '_mid',
+            label: '中层',
+            children: [
+              { prop: 'x', label: 'X' },
+              { prop: 'y', label: 'Y' },
+            ],
+          },
+        ],
+      },
+    ])
+    expect(out).toEqual([
+      { prop: 'x', label: 'X' },
+      { prop: 'y', label: 'Y' },
+    ])
+  })
+})
+
 describe('exportTableToExcel', () => {
   it('flattens single-row headers when no children are provided', async () => {
     const xlsx: any = await import('xlsx')

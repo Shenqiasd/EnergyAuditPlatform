@@ -3,10 +3,64 @@ import {
   classifyFiveYearRow,
   classifyGhgRow,
   dedupByKey,
+  isSheet20FiveYearRow,
   sortByIdAsc,
   splitFiveYearRows,
   splitGhgRows,
 } from './regulated-rows'
+
+// ----- Real Sheet20 / Sheet21 mapping shapes -----
+// Field shapes mirror sql/33-0427v2-template-tag-mappings.sql:
+//   line 436: 表 20_产品碳峰 → product_output / gross_output / emission / ...
+//   line 438: 表 20_年度目标 → target_name / measurement_unit / y2025..y2030
+//   line 447: 表 21_产品单耗 → product_name / indicator_name / indicator_value / actual_value / target_name / year_label / y2030 / unit_energy_equal / decline_rate
+//   line 449: 表 21_年度节能 → target_name / measurement_unit / y2026..y2030
+const sheet20PeakRow = {
+  year_label: '2025',
+  product_output: 1200,
+  gross_output: 5000,
+  emission: 800,
+  unit_strength: 0.16,
+  intensity_drop: 12.5,
+}
+const sheet20AnnualRow = {
+  target_name: '营业收入年均增长',
+  measurement_unit: '%',
+  y2025: 5,
+  y2026: 6,
+  y2027: 7,
+  y2028: 8,
+  y2029: 9,
+  y2030: 10,
+}
+const sheet21ProductRow = {
+  product_name: '电石',
+  indicator_name: '单位能耗',
+  indicator_value: 1.2,
+  actual_value: 1.18,
+  target_name: '电石',
+  year_label: '单位能耗',
+  y2030: 1.05,
+  unit_energy_equal: 1.05,
+  decline_rate: 8,
+}
+const sheet21AnnualRow = {
+  target_name: '万元产值能耗下降率',
+  measurement_unit: '%',
+  y2026: 1.2,
+  y2027: 2.4,
+  y2028: 3.6,
+  y2029: 4.8,
+  y2030: 6.0,
+}
+const sheet21SummaryRow = {
+  gross_output_actual2025: 12345,
+  gross_output_target2030: 18000,
+  energy_equiv_actual2025: 4500,
+  energy_equiv_target2030: 5200,
+  energy_equal_actual2025: 4600,
+  energy_equal_target2030: 5300,
+}
 
 describe('sortByIdAsc', () => {
   it('returns rows in ascending id order (template extraction order)', () => {
@@ -90,31 +144,58 @@ describe('splitGhgRows', () => {
   })
 })
 
-describe('classifyFiveYearRow', () => {
-  it('classifies annual rows by year columns + target_name', () => {
-    expect(
-      classifyFiveYearRow({ target_name: '能耗下降率', measurement_unit: '%', y2026: 1.2 }),
-    ).toBe('annual')
+describe('isSheet20FiveYearRow', () => {
+  it('flags Sheet20 产品碳峰 rows via Sheet20-only fields', () => {
+    expect(isSheet20FiveYearRow(sheet20PeakRow)).toBe(true)
   })
 
-  it('classifies product rows by product_name + indicator_name', () => {
+  it('flags Sheet20 年度目标 rows via the y2025 column (Sheet21 年度节能 has y2026..y2030 only)', () => {
+    expect(isSheet20FiveYearRow(sheet20AnnualRow)).toBe(true)
+  })
+
+  it('does NOT flag Sheet21 product / annual / summary rows', () => {
+    expect(isSheet20FiveYearRow(sheet21ProductRow)).toBe(false)
+    expect(isSheet20FiveYearRow(sheet21AnnualRow)).toBe(false)
+    expect(isSheet20FiveYearRow(sheet21SummaryRow)).toBe(false)
+  })
+
+  it('honors explicit section_type = carbon_peak / contains "碳峰"', () => {
+    expect(isSheet20FiveYearRow({ section_type: 'carbon_peak' })).toBe(true)
+    expect(isSheet20FiveYearRow({ section_type: '产品碳峰' })).toBe(true)
+  })
+})
+
+describe('classifyFiveYearRow', () => {
+  it('classifies summary rows by Sheet21 wide-table scalar fields', () => {
+    expect(classifyFiveYearRow(sheet21SummaryRow)).toBe('summary')
+  })
+
+  it('classifies Sheet21 产品单耗 rows as product even when they also carry target_name + y2030', () => {
+    // sheet21ProductRow has target_name=“电石” AND y2030=1.05, which the old
+    // annual-first ordering misrouted to annualRows. Product must win first.
+    expect(classifyFiveYearRow(sheet21ProductRow)).toBe('product')
+  })
+
+  it('classifies Sheet21 年度节能 rows as annual', () => {
+    expect(classifyFiveYearRow(sheet21AnnualRow)).toBe('annual')
+  })
+
+  it('rejects a misclassified-as-annual product row even by explicit field combinations', () => {
+    // Sheet21 single-product row without indicator_value; still must be product.
     expect(
-      classifyFiveYearRow({ product_name: '电石', indicator_name: '吨产品综合能耗' }),
+      classifyFiveYearRow({
+        product_name: '生铁',
+        indicator_name: '单位能耗',
+        target_name: '生铁',
+        y2030: 1.4,
+      }),
     ).toBe('product')
   })
 
-  it('classifies summary rows by wide-table scalar fields', () => {
-    expect(
-      classifyFiveYearRow({
-        gross_output_actual2025: 1000,
-        energy_equiv_actual2025: 500,
-      }),
-    ).toBe('summary')
-  })
-
-  it('honors explicit section_type', () => {
+  it('honors explicit section_type override', () => {
     expect(classifyFiveYearRow({ section_type: 'product', y2026: 1 })).toBe('product')
     expect(classifyFiveYearRow({ section_type: 'summary' })).toBe('summary')
+    expect(classifyFiveYearRow({ section_type: 'yearly', target_name: '能耗', y2030: 1 })).toBe('annual')
   })
 })
 
@@ -132,6 +213,38 @@ describe('splitFiveYearRows', () => {
     expect(out.product).toHaveLength(1)
     expect(out.annual).toHaveLength(2)
     expect(out.annual.map((r) => r.id)).toEqual([3, 4])
+  })
+
+  it('excludes Sheet20 产品碳峰 + Sheet20 年度目标 rows from all sections', () => {
+    // Real mapping mix: 2 Sheet20 rows + 3 Sheet21 rows. Only the Sheet21
+    // rows should survive in any section.
+    const rows = [
+      { id: 10, ...sheet20PeakRow },
+      { id: 11, ...sheet20AnnualRow },
+      { id: 20, ...sheet21SummaryRow },
+      { id: 21, ...sheet21ProductRow },
+      { id: 22, ...sheet21AnnualRow },
+    ]
+    const out = splitFiveYearRows(rows)
+    expect(out.summary).toHaveLength(1)
+    expect(out.summary[0].id).toBe(20)
+    expect(out.product).toHaveLength(1)
+    expect(out.product[0].id).toBe(21)
+    expect(out.annual).toHaveLength(1)
+    expect(out.annual[0].id).toBe(22)
+    const allIds = [...out.summary, ...out.product, ...out.annual].map((r) => r.id)
+    expect(allIds).not.toContain(10) // Sheet20 产品碳峰
+    expect(allIds).not.toContain(11) // Sheet20 年度目标
+  })
+
+  it('routes Sheet21 产品单耗 to product (not annual) even with target_name + y2030', () => {
+    const rows = [
+      { id: 100, ...sheet21ProductRow },
+      { id: 101, ...sheet21AnnualRow },
+    ]
+    const out = splitFiveYearRows(rows)
+    expect(out.product.map((r) => r.id)).toEqual([100])
+    expect(out.annual.map((r) => r.id)).toEqual([101])
   })
 
   it('returns empty arrays for each section when given empty input', () => {

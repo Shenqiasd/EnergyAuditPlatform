@@ -6,6 +6,24 @@ export interface ExportColumn {
   children?: ExportColumn[]
 }
 
+/**
+ * Drop the `children` group bands from a column tree and keep only leaf
+ * columns. Used by callers that opt OUT of multi-row grouped Excel headers
+ * (e.g. existing regulated pages like 表 7 / MeterRate which only use
+ * `children` for on-screen grouping, not in their exports).
+ */
+export function flattenColumns(cols: ExportColumn[]): ExportColumn[] {
+  const out: ExportColumn[] = []
+  for (const c of cols) {
+    if (c.children && c.children.length > 0) {
+      out.push(...flattenColumns(c.children))
+    } else {
+      out.push({ prop: c.prop, label: c.label })
+    }
+  }
+  return out
+}
+
 interface CellRange {
   s: { r: number; c: number }
   e: { r: number; c: number }
