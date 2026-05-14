@@ -1268,6 +1268,18 @@ function isValidDateString(s: string): boolean {
 function normalizeDateValue(raw: unknown): string | null {
   if (raw == null || raw === '') return null
 
+  // Native Date object (SpreadJS DateTimePicker may inject this)
+  if (raw instanceof Date) {
+    if (!isNaN(raw.getTime())) {
+      const y = raw.getFullYear()
+      const m = String(raw.getMonth() + 1).padStart(2, '0')
+      const d = String(raw.getDate()).padStart(2, '0')
+      const result = `${y}-${m}-${d}`
+      if (isValidDateString(result)) return result
+    }
+    return null
+  }
+
   // OADate number (SpreadJS internal) → JS Date
   if (typeof raw === 'number') {
     // SpreadJS OADate epoch: 1899-12-30
@@ -1340,7 +1352,8 @@ function isDateFieldCell(sheetIndex: number, row: number, col: number): boolean 
 }
 
 /**
- * EA-CUST-041: Apply date pickers + date validators to all editable date fields.
+ * EA-CUST-041: Apply DateTimePicker dropdowns + date validators to all editable
+ * date fields.
  *
  * Identification strategy (in priority order):
  *  1. Column field name is in DATE_FIELD_NAMES set (from columnMappings JSON)
@@ -1349,8 +1362,11 @@ function isDateFieldCell(sheetIndex: number, row: number, col: number): boolean 
  *
  * For each identified date column/cell:
  *  - Set cell formatter to 'yyyy-MM-dd'
- *  - Apply a date DataValidator (stop-style) that rejects non-date input
- *  - Bind CellChanged to normalize values to yyyy-MM-dd string format
+ *  - Attach a SpreadJS DateTimePicker dropdown (showTime=false) so users get a
+ *    calendar popup via GC.Spread.Sheets.ButtonImageType.dropdown +
+ *    command "openDateTimePicker" + DropDownType.dateTimePicker
+ *  - Bind CellChanged to normalize values (Date objects / OADate numbers /
+ *    string inputs) to yyyy-MM-dd string format; reject invalid dates
  *
  * Enterprise-setting SCALAR tags (Sheet 2 B5 registeredDate, D15 certPassDate)
  * are SKIPPED — they are read-only prefill and must not get date picker editors.
@@ -1589,21 +1605,43 @@ function normalizeDateFieldsBeforeSave(wb: import('@/types/spreadjs').GCSpreadWo
 }
 
 /**
- * Build a cell style with date formatter applied on top of the existing style.
+ * Build a cell style with date formatter + DateTimePicker dropdown applied on
+ * top of the existing style.  The picker gives users a calendar popup; the
+ * formatter ensures display as yyyy-MM-dd.
  */
 function buildDateCellStyle(
   sheet: import('@/types/spreadjs').GCSpreadSheet,
   row: number,
   col: number,
-): unknown {
+): import('@/types/spreadjs').GCStyle | null {
   try {
-    const StyleCtor = window.GC?.Spread?.Sheets?.Style as undefined | (new () => {
-      locked?: boolean; backColor?: string | null; formatter?: string; clone?: () => unknown
-    })
+    const GCSpreads = window.GC?.Spread?.Sheets
+    const StyleCtor = GCSpreads?.Style
     if (!StyleCtor) return null
-    const existing = sheet.getStyle(row, col) as { locked?: boolean; backColor?: string | null; formatter?: string; clone?: () => unknown } | null
+    const existing = sheet.getStyle(row, col)
     const style = existing?.clone?.() ?? new StyleCtor()
-    ;(style as { formatter?: string }).formatter = 'yyyy-MM-dd'
+    style.formatter = 'yyyy-MM-dd'
+
+    // EA-CUST-041: attach DateTimePicker dropdown button so users get a
+    // calendar popup when clicking the cell.  showTime=false → date only.
+    const ButtonImageType = GCSpreads?.ButtonImageType
+    const DropDownType = GCSpreads?.DropDownType
+    if (ButtonImageType && DropDownType) {
+      style.cellButtons = [
+        {
+          imageType: ButtonImageType.dropdown,
+          command: 'openDateTimePicker',
+          useButtonStyle: true,
+        },
+      ]
+      style.dropDowns = [
+        {
+          type: DropDownType.dateTimePicker,
+          option: { showTime: false },
+        },
+      ]
+    }
+
     return style
   } catch {
     return null

@@ -116,9 +116,25 @@ export interface GCDefaultStyle {
  * has many more fields (font, borders, alignment, etc.) that are consumed
  * only by the engine itself.
  */
+/** SpreadJS cell-button descriptor (dropdown trigger, etc.) */
+export interface GCCellButton {
+  imageType?: number
+  command?: string
+  useButtonStyle?: boolean
+}
+
+/** SpreadJS cell-dropdown descriptor (dateTimePicker, list, etc.) */
+export interface GCCellDropDown {
+  type?: number
+  option?: Record<string, unknown>
+}
+
 export interface GCStyle {
   locked?: boolean
   backColor?: string | null
+  formatter?: string
+  cellButtons?: GCCellButton[]
+  dropDowns?: GCCellDropDown[]
   clone?(): GCStyle
 }
 
@@ -185,6 +201,24 @@ export interface GCSpreadSheetsEvents {
   ClipboardPasted?: string
 }
 
+/** Enum-like maps exposed on GC.Spread.Sheets at runtime. */
+export interface GCButtonImageType {
+  dropdown: number
+  [key: string]: number
+}
+
+export interface GCDropDownType {
+  dateTimePicker: number
+  monthPicker: number
+  timePicker: number
+  colorPicker: number
+  list: number
+  slider: number
+  calculator: number
+  workflowList: number
+  [key: string]: number
+}
+
 export interface GCSpreadSheets {
   Workbook: GCSpreadSheetsWorkbookConstructor
   Designer:
@@ -202,6 +236,8 @@ export interface GCSpreadSheets {
   Events: GCSpreadSheetsEvents
   LicenseKey: string
   Style: GCStyleConstructor
+  ButtonImageType?: GCButtonImageType
+  DropDownType?: GCDropDownType
 }
 
 export interface GCSpread {
