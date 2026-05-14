@@ -18,6 +18,7 @@ import { convertBoolFieldForDisplay } from '@/utils/bool-display'
 import { getDataByTypes, type DictData } from '@/api/dict'
 import { initSpreadJSLicense } from '@/utils/spreadjs-license'
 import { onEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
+import { normalizeDateValue } from '@/utils/date-normalize'
 
 const props = defineProps<{
   templateId: number
@@ -1251,79 +1252,7 @@ const NON_DATE_FIELD_NAMES = new Set([
   'annual_runtime_hours', // 年运行时间(h) — numeric, not a date
 ])
 
-/** Strict yyyy-MM-dd pattern */
-const DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
-
-/** Validate a string is a legal yyyy-MM-dd date (including day-of-month check) */
-function isValidDateString(s: string): boolean {
-  if (!DATE_REGEX.test(s)) return false
-  const [y, m, d] = s.split('-').map(Number)
-  const dt = new Date(y, m - 1, d)
-  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
-}
-
-/** Try to parse a loose date input into yyyy-MM-dd.
- *  Accepts: yyyy-MM-dd, yyyy/MM/dd, yyyyMMdd, yyyy.MM.dd, JS Date serial (OADate number).
- *  Returns null if unparseable or invalid. */
-function normalizeDateValue(raw: unknown): string | null {
-  if (raw == null || raw === '') return null
-
-  // Native Date object (SpreadJS DateTimePicker may inject this)
-  if (raw instanceof Date) {
-    if (!isNaN(raw.getTime())) {
-      const y = raw.getFullYear()
-      const m = String(raw.getMonth() + 1).padStart(2, '0')
-      const d = String(raw.getDate()).padStart(2, '0')
-      const result = `${y}-${m}-${d}`
-      if (isValidDateString(result)) return result
-    }
-    return null
-  }
-
-  // OADate number (SpreadJS internal) → JS Date
-  if (typeof raw === 'number') {
-    // SpreadJS OADate epoch: 1899-12-30
-    const epoch = new Date(1899, 11, 30)
-    const ms = epoch.getTime() + raw * 86400000
-    const dt = new Date(ms)
-    if (!isNaN(dt.getTime())) {
-      const y = dt.getFullYear()
-      const m = String(dt.getMonth() + 1).padStart(2, '0')
-      const d = String(dt.getDate()).padStart(2, '0')
-      const result = `${y}-${m}-${d}`
-      if (isValidDateString(result)) return result
-    }
-    return null
-  }
-
-  const str = String(raw).trim()
-  if (str === '') return null
-
-  // Already yyyy-MM-dd
-  if (isValidDateString(str)) return str
-
-  // Try yyyy/MM/dd or yyyy.MM.dd
-  const slashDot = str.replace(/[/.]/g, '-')
-  if (isValidDateString(slashDot)) return slashDot
-
-  // Try yyyyMMdd
-  if (/^\d{8}$/.test(str)) {
-    const candidate = `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`
-    if (isValidDateString(candidate)) return candidate
-  }
-
-  // Try JS Date parse as last resort (handles "2026-1-5" etc.)
-  const parsed = new Date(str)
-  if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 1900 && parsed.getFullYear() <= 2200) {
-    const y = parsed.getFullYear()
-    const m = String(parsed.getMonth() + 1).padStart(2, '0')
-    const d = String(parsed.getDate()).padStart(2, '0')
-    const result = `${y}-${m}-${d}`
-    if (isValidDateString(result)) return result
-  }
-
-  return null
-}
+// isValidDateString and normalizeDateValue are imported from @/utils/date-normalize
 
 /** Tracks which cells are date fields: Map<sheetIndex, Set<"row,col">> for SCALAR
  *  and Map<sheetIndex, Set<colIndex>> for TABLE date columns */
