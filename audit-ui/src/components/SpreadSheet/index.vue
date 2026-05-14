@@ -315,6 +315,13 @@ async function initWorkbook() {
               cpTrace('applyConfigPrefill.done')
             }
 
+            // EA-CUST-039: hide heat / electricity rows in Sheet 15 based on
+            // active energy configuration (runs even when configPrefillData is
+            // null — the function handles that gracefully).
+            cpTrace('applyGhgRowVisibility.start')
+            applyGhgRowVisibility(wb, configPrefillData)
+            cpTrace('applyGhgRowVisibility.done')
+
             // Inject dictionary-based dropdown validators (uses pre-fetched tags)
             cpTrace('applyDictValidators.start')
             console.time('[perf] applyDictValidators')
@@ -486,7 +493,10 @@ async function refreshEnterpriseSettingPrefill() {
   const wb = workbook
   const loadId = loadSeq
   try {
-    const prefillData = await getEnterpriseSettingPrefill()
+    const [prefillData, freshConfigData] = await Promise.all([
+      getEnterpriseSettingPrefill(),
+      getConfigPrefillData().catch(() => null),
+    ])
     if (!prefillData || isLoadStale(loadId, wb)) return
 
     wb.suspendPaint()
@@ -494,6 +504,9 @@ async function refreshEnterpriseSettingPrefill() {
     suspendCalcServiceSafe(wb)
     try {
       applyPrefill(wb, cachedTags, prefillData, true)
+      // EA-CUST-039: re-evaluate heat / electricity row visibility after
+      // energy configuration changes (e.g. user enabled / disabled heat).
+      applyGhgRowVisibility(wb, freshConfigData)
     } finally {
       resumeCalcServiceSafe(wb)
       resumeEventSafe(wb)
@@ -541,6 +554,69 @@ function applyConfigPrefill(
   } catch (e) {
     console.warn('[config-prefill] failed:', e)
   }
+}
+
+/**
+ * EA-CUST-039: Control row visibility in Sheet 15 (温室气体排放汇总)
+ * for the heat / electricity section (TABLE range A39:E42).
+ *
+ * Row mapping (1-based → 0-based):
+ *   Row 39 (idx 38): 净购入使用的热力排放量  → visible when HEAT active
+ *   Row 40 (idx 39): 净购入使用电力的排放量  → visible when ELECTRICITY active
+ *   Row 41 (idx 40): 购买绿电抵消排放量      → visible when ELECTRICITY active
+ *   Row 42 (idx 41): 间接排放小计            → visible when HEAT or ELECTRICITY active
+ *
+ * Product decision: the subtotal row (42) is shown whenever at least one of
+ * heat / electricity is active; hidden only when both are inactive.
+ * The green-electricity offset row (41) follows electricity because the
+ * offset concept only applies to purchased electricity.
+ */
+function applyGhgRowVisibility(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  configData: ConfigPrefillData | null,
+) {
+  if (!configData) return
+
+  // Locate Sheet 15 by name substring match
+  const count = wb.getSheetCount()
+  let sheet: import('@/types/spreadjs').GCSpreadSheet | null = null
+  for (let i = 0; i < count; i++) {
+    const s = wb.getSheet(i)
+    const name = s.name() ?? ''
+    if (name.includes('15') && name.includes('温室气体')) {
+      sheet = s
+      break
+    }
+  }
+  if (!sheet) {
+    console.log('[ghg-row-vis] Sheet 15 (温室气体) not found — skipping')
+    return
+  }
+
+  // The config-prefill API only returns active energies (isActive=1).
+  // If an energy with category '热力' or '电力' exists in the list, it is active.
+  const energies = configData.bs_energy ?? []
+  const hasActiveHeat = energies.some(
+    (e: Record<string, unknown>) => e.category === '热力',
+  )
+  const hasActiveElectricity = energies.some(
+    (e: Record<string, unknown>) => e.category === '电力',
+  )
+
+  console.log(
+    `[ghg-row-vis] heat=${hasActiveHeat}, electricity=${hasActiveElectricity}`,
+  )
+
+  // 0-based row indices for the A39:E42 range
+  const ROW_HEAT = 38       // A39 — heat emission
+  const ROW_ELEC = 39       // A40 — electricity emission
+  const ROW_GREEN = 40      // A41 — green electricity offset
+  const ROW_SUBTOTAL = 41   // A42 — indirect emission subtotal
+
+  sheet.setRowVisible(ROW_HEAT, hasActiveHeat)
+  sheet.setRowVisible(ROW_ELEC, hasActiveElectricity)
+  sheet.setRowVisible(ROW_GREEN, hasActiveElectricity)
+  sheet.setRowVisible(ROW_SUBTOTAL, hasActiveHeat || hasActiveElectricity)
 }
 
 /** Column definition type for CONFIG_PREFILL mappings */
