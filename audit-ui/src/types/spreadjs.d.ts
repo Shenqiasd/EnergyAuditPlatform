@@ -91,6 +91,8 @@ export interface GCSpreadSheet {
   getRange(row: number, col: number, rowCount: number, colCount: number): GCRange
   setDataValidator(row: number, col: number, validator: GCDataValidator): void
   getDataValidator(row: number, col: number): GCDataValidator | null
+  setFormula(row: number, col: number, formula: string): void
+  getFormula(row: number, col: number): string | null
   addRows(row: number, count: number): void
   deleteRows(row: number, count: number): void
   getSelections(): Array<{ row: number; col: number; rowCount: number; colCount: number }>
