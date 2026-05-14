@@ -346,6 +346,10 @@ async function initWorkbook() {
               console.timeEnd('[perf] applyDataEntryProtection')
               cpTrace('applyDataEntryProtection.done')
             }
+
+            // Bind derivedWhen rules for TABLE tags (e.g. table 8 工艺设备 → K = '-')
+            if (isLoadStale(loadId, wb)) return
+            applyTableDerivedWhenRules(wb, tags)
           } finally {
             cpTrace('phase2.resume.start')
             resumeCalcServiceSafe(wb)
@@ -557,6 +561,10 @@ interface ConfigPrefillColDef {
    *  Example: { "masterCol": "A", "lookupField": "name" } */
   linkedTo?: { masterCol: string; lookupField: string }
   extraSources?: Array<{ table: string; field: string; filter?: Record<string, unknown> }>
+  /** Conditional value derivation rules. When the source column's value matches
+   *  `equals`, this column is auto-set to the specified `value`.
+   *  Example: [{ "sourceCol": 2, "equals": "工艺设备", "value": "-" }] */
+  derivedWhen?: Array<{ sourceCol: string | number; equals: string; value: string }>
   /** Synthetic string values to inject into the dropdown list (e.g. "外购" / "产出" virtual nodes
    *  in Sheet 11 能源流程图). These are NOT records in any table — they are literal sentinels
    *  that the downstream business logic recognizes. See EnergyFlowPostProcessor. */
@@ -1581,6 +1589,26 @@ function unlockScalarCell(
     return
   }
 
+  // Handle multi-cell SCALAR ranges (e.g. A43:F51 for merged description areas).
+  // resolveSingleCellRange returns null when start ≠ end; unlock the full area.
+  if (tag.cellRange) {
+    const multiRange = parseCellRangeToObj(tag.cellRange)
+    if (multiRange) {
+      const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+      if (sheet) {
+        const rowCount = multiRange.endRow - multiRange.startRow + 1
+        const colCount = multiRange.endCol - multiRange.startCol + 1
+        if (rowCount > 0 && colCount > 0) {
+          sheet.getRange(multiRange.startRow, multiRange.startCol, rowCount, colCount).locked(false)
+        }
+        if (tag.required === 1) {
+          markCellRequired(sheet.getCell(multiRange.startRow, multiRange.startCol), hint)
+        }
+        return
+      }
+    }
+  }
+
   // Use pre-built cell-tag index for O(1) lookup
   if (tag.tagName) {
     const found = lookupCellTag(wb, tag.tagName, tag.sheetName, tag.sheetIndex)
@@ -1680,6 +1708,95 @@ function unlockTableRange(
   if (tag.required === 1) {
     const cell = sheet.getCell(startRow, startCol)
     markCellRequired(cell, `${tag.tagName ?? tag.targetTable ?? '此表格'} (至少填写1行)`)
+  }
+}
+
+/**
+ * Bind derivedWhen rules for TABLE / EQUIPMENT_BENCHMARK tags.
+ *
+ * For each column that declares `derivedWhen` in its columnMappings JSON,
+ * this function:
+ *   1. Applies the rule to all existing rows (initial load).
+ *   2. Binds a CellChanged handler so the rule fires on live edits.
+ *
+ * When C (source column) changes away from the trigger value, the derived
+ * column keeps its current value (no clear) — the user or product can decide
+ * to add an explicit clear rule later if needed.
+ */
+function applyTableDerivedWhenRules(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tags: TplTagMapping[],
+) {
+  const Events = window.GC?.Spread?.Sheets?.Events
+  if (!Events?.CellChanged) return
+
+  const tableTags = tags.filter(t => {
+    const mt = t.mappingType ?? 'SCALAR'
+    return (mt === 'TABLE' || mt === 'EQUIPMENT_BENCHMARK') && t.columnMappings
+  })
+
+  for (const tag of tableTags) {
+    let columns: ConfigPrefillColDef[]
+    try {
+      const parsed = JSON.parse(tag.columnMappings!)
+      columns = Array.isArray(parsed) ? parsed : parsed.columns ?? []
+    } catch { continue }
+
+    const derivedCols = columns.filter(c => c.derivedWhen?.length)
+    if (!derivedCols.length) continue
+
+    const range = getDynamicRange(tag)
+    if (!range) continue
+
+    const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+    if (!sheet) continue
+
+    const resolveCol = (col: string | number) => {
+      if (typeof col === 'string' && /^[A-Za-z]+$/.test(col)) {
+        return letterToColIndex(col.toUpperCase())
+      }
+      return range.startCol + Number(col)
+    }
+
+    // 1. Apply initial derivation for rows that already have the trigger value
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (const colDef of derivedCols) {
+        const targetColIndex = resolveCol(colDef.col)
+        for (const rule of colDef.derivedWhen!) {
+          const srcColIndex = resolveCol(rule.sourceCol)
+          const srcVal = sheet.getValue(r, srcColIndex)
+          if (srcVal != null && String(srcVal) === rule.equals) {
+            sheet.setValue(r, targetColIndex, rule.value)
+          }
+        }
+      }
+    }
+
+    // 2. Bind CellChanged for live derivation
+    sheet.bind(Events.CellChanged, (
+      _sender: unknown,
+      args: { row: number; col: number; newValue: unknown },
+    ) => {
+      const { row, col: changedCol, newValue } = args
+      const currentRange = getDynamicRange(tag)
+      if (!currentRange || row < currentRange.startRow || row > currentRange.endRow) return
+
+      for (const colDef of derivedCols) {
+        for (const rule of colDef.derivedWhen!) {
+          const srcColIndex = resolveCol(rule.sourceCol)
+          if (changedCol !== srcColIndex) continue
+          const newValStr = newValue != null ? String(newValue) : ''
+          if (newValStr === rule.equals) {
+            const targetColIndex = resolveCol(colDef.col)
+            sheet.setValue(row, targetColIndex, rule.value)
+          }
+        }
+      }
+    })
+
+    console.log(
+      `[derivedWhen] "${tag.tagName}": bound ${derivedCols.length} derived column(s)`,
+    )
   }
 }
 
