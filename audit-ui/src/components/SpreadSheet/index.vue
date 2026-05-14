@@ -14,6 +14,7 @@ import {
   type TplTagMapping,
 } from '@/api/template'
 import { getEnterpriseSettingPrefill, getConfigPrefillData, type ConfigPrefillData } from '@/api/enterpriseSetting'
+import { convertBoolFieldForDisplay } from '@/utils/bool-display'
 import { getDataByTypes, type DictData } from '@/api/dict'
 import { initSpreadJSLicense } from '@/utils/spreadjs-license'
 import { onEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
@@ -473,7 +474,8 @@ function applyPrefill(
         const value = prefillData[fieldName]
         if (value == null || value === '') continue
 
-        const filled = fillTaggedCell(wb, tag, value, lockFilledCells)
+        const displayValue = convertBoolFieldForDisplay(fieldName, value)
+        const filled = fillTaggedCell(wb, tag, displayValue, lockFilledCells)
         if (!filled) {
           console.debug(`[prefill] could not locate cell for tag "${tag.tagName}"`)
         }
