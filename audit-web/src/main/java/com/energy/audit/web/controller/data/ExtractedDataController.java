@@ -214,4 +214,80 @@ public class ExtractedDataController {
 
         return R.ok(PageResult.of(total, rows));
     }
+
+    /**
+     * Read selected scalar fields from the generic {@code de_submission_field}
+     * fallback storage.
+     *
+     * <p>Some template SCALAR mappings (e.g. {@code heatEmission},
+     * {@code elecEmission}, {@code totalEmission}, {@code directEmission},
+     * {@code indirectEmission}, {@code greenElecOffset} for 表 8) target a
+     * business table that does NOT have a matching column, so the persister
+     * falls back to generic storage (see
+     * {@link BusinessTablePersister#persistScalar}). The regulated-chart pages
+     * use this endpoint to surface those fallback values without requiring
+     * a schema migration.
+     *
+     * <p>Returns a flat {@code Map<fieldName, value>} for the most recent
+     * non-deleted submission record per field.
+     */
+    @Operation(summary = "查询通用存储中的标量字段值")
+    @GetMapping("/scalars")
+    public R<Map<String, Object>> queryScalars(
+            @RequestParam(required = false) Integer auditYear,
+            @RequestParam(required = false) Long enterpriseId,
+            @RequestParam String fieldNames) {
+        Long resolvedId = resolveEnterpriseId(enterpriseId);
+
+        // Parse + sanitize the requested field names. Reject anything that
+        // doesn't look like a safe camelCase identifier to keep the IN-clause
+        // bind list opaque to injection attempts.
+        List<String> requested = new ArrayList<>();
+        for (String raw : fieldNames.split(",")) {
+            String name = raw.trim();
+            if (name.isEmpty()) continue;
+            if (!SAFE_FIELD_NAME.matcher(name).matches()) {
+                throw new BusinessException(400, "非法字段名: " + name);
+            }
+            requested.add(name);
+        }
+        if (requested.isEmpty()) {
+            return R.ok(new LinkedHashMap<>());
+        }
+
+        MapSqlParameterSource params = new MapSqlParameterSource();
+        params.addValue("enterpriseId", resolvedId);
+        params.addValue("fieldNames", requested);
+
+        StringBuilder where = new StringBuilder(
+                " WHERE enterprise_id = :enterpriseId AND deleted = 0"
+                + " AND field_name IN (:fieldNames)");
+        if (auditYear != null) {
+            where.append(" AND audit_year = :auditYear");
+            params.addValue("auditYear", auditYear);
+        }
+
+        // Latest record per field_name (highest id wins) so re-submissions
+        // override older values.
+        String sql = "SELECT field_name, value_number, value_text"
+                + " FROM de_submission_field"
+                + where
+                + " ORDER BY id ASC";
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, params);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (String name : requested) {
+            result.put(name, null);
+        }
+        for (Map<String, Object> row : rows) {
+            String name = (String) row.get("field_name");
+            Object num = row.get("value_number");
+            Object txt = row.get("value_text");
+            result.put(name, num != null ? num : txt);
+        }
+        return R.ok(result);
+    }
+
+    private static final java.util.regex.Pattern SAFE_FIELD_NAME =
+            java.util.regex.Pattern.compile("^[a-zA-Z][a-zA-Z0-9_]{0,63}$");
 }

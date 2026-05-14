@@ -72,6 +72,9 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
         Set<String> clearedBusinessTables = new HashSet<>();
         for (TplTagMapping mapping : mappings) {
             String targetTable = mapping.getTargetTable();
+            if (ENT_ENTERPRISE_SETTING.equalsIgnoreCase(targetTable)) {
+                continue;
+            }
             if (targetTable != null && !targetTable.isBlank()
                     && businessTablePersister.isBusinessTable(targetTable)
                     && !clearedBusinessTables.contains(targetTable)) {

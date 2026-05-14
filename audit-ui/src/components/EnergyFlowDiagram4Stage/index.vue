@@ -9,7 +9,7 @@ import type { BsUnit, BsEnergy } from '@/api/setting'
  * Columns (left → right):
  *   ① 购入储存环节  — circle nodes for each purchased energy (raw materials entering the plant)
  *   ② 加工转换环节  — rectangle nodes for bs_unit.unit_type = 1
- *   ③ 分配输送环节  — rectangle nodes for bs_unit.unit_type = 2
+ *   ③ 输送分配环节  — rectangle nodes for bs_unit.unit_type = 2
  *   ④ 终端使用环节  — rectangle nodes for bs_unit.unit_type = 3 (+ virtual "产出")
  *
  * Edges are routed with strictly horizontal / vertical polylines (Z-shape),
@@ -150,7 +150,7 @@ function layerForUnit(name: string): Layer | null {
   // 1) Energy product names live in column 1 (purchase) as circular source nodes
   const energy = props.energies.find(e => e.name === name)
   if (energy) return 1
-  // 2) bs_unit.unit_type (1=加工转换, 2=分配输送, 3=终端使用)
+  // 2) bs_unit.unit_type (1=加工转换, 2=输送分配, 3=终端使用)
   const unit = props.units.find(u => u.name === name)
   if (unit) return (unit.unitType + 1) as Layer
   return null
@@ -461,7 +461,7 @@ function fitView() {
 // ------------------------------------------------------------
 // Header labels
 // ------------------------------------------------------------
-const HEADER_LABELS = ['购入储存环节', '加工转换环节', '分配输送环节', '终端使用环节']
+const HEADER_LABELS = ['购入储存环节', '加工转换环节', '输送分配环节', '终端使用环节']
 </script>
 
 <template>

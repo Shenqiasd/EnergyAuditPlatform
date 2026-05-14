@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { exportTableToExcel } from '@/utils/export'
+import { exportTableToExcel, flattenColumns, type ExportColumn } from '@/utils/export'
 
 export interface RegColumn {
   prop: string
@@ -9,29 +9,30 @@ export interface RegColumn {
   children?: RegColumn[]
 }
 
-const props = defineProps<{
-  columns: RegColumn[]
-  data: Record<string, unknown>[]
-  loading?: boolean
-  exportFilename?: string
-  title?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    columns: RegColumn[]
+    data: Record<string, unknown>[]
+    loading?: boolean
+    exportFilename?: string
+    title?: string
+    /**
+     * Opt in to multi-row grouped Excel headers (parent + child bands) for
+     * pages whose template intentionally exports group labels like
+     * “2025年实际 / 2030年目标”. Default `false` keeps the pre-existing
+     * flat-header export behavior for shared regulated pages (表 7 / MeterRate
+     * etc.) that already use `children` only for on-screen grouping.
+     */
+    groupedExport?: boolean
+  }>(),
+  { groupedExport: false },
+)
 
 function handleExport() {
-  const flatCols = flattenColumns(props.columns)
-  exportTableToExcel(flatCols, props.data, props.exportFilename || props.title || '导出数据')
-}
-
-function flattenColumns(cols: RegColumn[]): RegColumn[] {
-  const result: RegColumn[] = []
-  for (const col of cols) {
-    if (col.children?.length) {
-      result.push(...flattenColumns(col.children))
-    } else {
-      result.push(col)
-    }
-  }
-  return result
+  const cols: ExportColumn[] = props.groupedExport
+    ? (props.columns as ExportColumn[])
+    : flattenColumns(props.columns as ExportColumn[])
+  exportTableToExcel(cols, props.data, props.exportFilename || props.title || '导出数据')
 }
 </script>
 

@@ -16,6 +16,7 @@ import {
 import { getEnterpriseSettingPrefill, getConfigPrefillData, type ConfigPrefillData } from '@/api/enterpriseSetting'
 import { getDataByTypes, type DictData } from '@/api/dict'
 import { initSpreadJSLicense } from '@/utils/spreadjs-license'
+import { onEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
 
 const props = defineProps<{
   templateId: number
@@ -48,6 +49,9 @@ let workbook: import('@/types/spreadjs').GCSpreadWorkbook | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let publishedVersion: TplTemplateVersion | null = null
 let currentSubmission: TplSubmission | null = null
+let disposed = false
+let loadSeq = 0
+let stopEnterpriseSettingUpdatedListener: (() => void) | null = null
 
 /**
  * ownsLock is initialised from props.hasLock at mount time (before any async work),
@@ -112,6 +116,9 @@ function calculateAllSafe(wb: WB) {
     if (typeof fn === 'function') fn.call(wb, calcType)
   } catch { /* best-effort */ }
 }
+function isLoadStale(loadId: number, wb: WB): boolean {
+  return disposed || loadId !== loadSeq || workbook !== wb
+}
 
 // ── Persistent trace helper for diagnosing main-thread freezes ─────────
 // When Phase 2 mutation hangs the browser, normal console logs are lost
@@ -155,22 +162,31 @@ watch(
 )
 
 onMounted(() => {
+  disposed = false
   ownsLock = props.hasLock
+  stopEnterpriseSettingUpdatedListener = onEnterpriseSettingUpdated(() => {
+    refreshEnterpriseSettingPrefill()
+  })
   initWorkbook()
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  loadSeq++
+  stopEnterpriseSettingUpdatedListener?.()
+  stopEnterpriseSettingUpdatedListener = null
   stopHeartbeat()
   releaseLockIfOwned()
   window.removeEventListener('resize', onWindowResize)
   document.removeEventListener('click', onDocumentClickDismissCtxMenu)
   if (spreadRef.value) {
-    spreadRef.value.removeEventListener('contextmenu', onSpreadContextMenu)
+    spreadRef.value.removeEventListener('contextmenu', onSpreadContextMenu, true)
   }
   if (statusUpdateTimer) clearTimeout(statusUpdateTimer)
   if (resizeTimer) clearTimeout(resizeTimer)
-  workbook?.destroy()
+  const wb = workbook
   workbook = null
+  wb?.destroy()
 })
 
 async function initWorkbook() {
@@ -185,20 +201,24 @@ async function initWorkbook() {
   initSpreadJSLicense()
   loading.value = true
   errorMsg.value = ''
+  const loadId = ++loadSeq
+  let wb: WB | null = null
   try {
-    workbook = new window.GC.Spread.Sheets.Workbook(spreadRef.value)
+    wb = new window.GC.Spread.Sheets.Workbook(spreadRef.value)
+    workbook = wb
 
     // ── Phase 1: fetch template version + submission in parallel ──────
     const [fetchedVersion, fetchedSubmission] = await Promise.all([
       getPublishedVersion(props.templateId),
       getSubmission(props.templateId, props.auditYear),
     ])
+    if (isLoadStale(loadId, wb)) return
     publishedVersion = fetchedVersion
     currentSubmission = fetchedSubmission
 
     if (!publishedVersion?.templateJson) {
       errorMsg.value = '该模板尚未发布有效版本，请联系管理员'
-      workbook.destroy()
+      wb.destroy()
       workbook = null
       releaseLockIfOwned()
       return
@@ -214,11 +234,16 @@ async function initWorkbook() {
     // after all Phase 2 mutations complete, avoiding repeated full-workbook
     // recomputation on templates with heavy cross-sheet formulas.
     console.time('[perf] fromJSON')
-    ;(workbook.fromJSON as unknown as (data: unknown, opts?: Record<string, unknown>) => void)(
+    if (isLoadStale(loadId, wb)) return
+    ;(wb.fromJSON as unknown as (data: unknown, opts?: Record<string, unknown>) => void)(
       jsonObj,
       { doNotRecalculateAfterLoad: true },
     )
     console.timeEnd('[perf] fromJSON')
+    if (isLoadStale(loadId, wb)) return
+    // Must run after fromJSON: the deserialized template restores workbook
+    // options, which would otherwise overwrite allowContextMenu back to true.
+    disableNativeContextMenu(wb)
 
     // ── Phase 2: fetch tags + prefill data in parallel (one listTags call) ─
     // Wrapped in its own try-catch so that a failure in supplementary features
@@ -232,21 +257,22 @@ async function initWorkbook() {
     try {
       if (publishedVersion.id) {
         try {
+          const versionId = publishedVersion.id
           cpTrace('phase2.fetch.start')
           console.time('[perf] phase2-fetch')
           const [tags, prefillData, configPrefillData] = await Promise.all([
-            listTags(publishedVersion.id).catch(e => {
+            listTags(versionId).catch(e => {
               console.warn('[phase2] listTags failed:', e)
               return [] as TplTagMapping[]
             }),
-            !currentSubmission
-              ? getEnterpriseSettingPrefill().catch(() => null)
-              : Promise.resolve(null),
+            getEnterpriseSettingPrefill().catch(() => null),
             // Always fetch config data — dropdowns need it even for existing submissions
             getConfigPrefillData().catch(() => null),
           ])
           console.timeEnd('[perf] phase2-fetch')
+          if (isLoadStale(loadId, wb)) return
           cpTrace('phase2.fetch.done', { tagCount: tags.length })
+          cachedTags = tags
 
           // Master suspend envelope for all Phase 2 mutations — prevents the
           // ~1000 setValue/setStyle/setDataValidator calls below from each
@@ -254,9 +280,9 @@ async function initWorkbook() {
           // Nested suspend calls inside individual apply* functions are still
           // safe (SpreadJS reference-counts suspend depth).
           console.time('[perf] phase2-mutate')
-          workbook.suspendPaint()
-          suspendEventSafe(workbook)
-          suspendCalcServiceSafe(workbook)
+          wb.suspendPaint()
+          suspendEventSafe(wb)
+          suspendCalcServiceSafe(wb)
           cpTrace('phase2.mutate.suspended')
           try {
             // Build cell-tag index ONCE for O(1) lookups (replaces O(tags ×
@@ -264,15 +290,17 @@ async function initWorkbook() {
             // applyConfigPrefill / applyDataEntryProtection since they all use
             // fillTaggedCell / unlockScalarCell which rely on the index.
             console.time('[perf] buildCellTagIndex')
-            buildCellTagIndex(workbook)
+            if (isLoadStale(loadId, wb)) return
+            buildCellTagIndex(wb)
             console.timeEnd('[perf] buildCellTagIndex')
             cpTrace('buildCellTagIndex.done')
 
             // Pre-fill enterprise settings (uses pre-fetched tags + prefillData)
-            if (!currentSubmission && prefillData) {
+            if (prefillData) {
               cpTrace('applyPrefill.start')
               console.time('[perf] applyPrefill')
-              applyPrefill(workbook, tags, prefillData)
+              if (isLoadStale(loadId, wb)) return
+              applyPrefill(wb, tags, prefillData)
               console.timeEnd('[perf] applyPrefill')
               cpTrace('applyPrefill.done')
             }
@@ -281,23 +309,34 @@ async function initWorkbook() {
             if (configPrefillData) {
               cpTrace('applyConfigPrefill.start')
               console.time('[perf] applyConfigPrefill')
-              applyConfigPrefill(workbook, tags, configPrefillData)
+              if (isLoadStale(loadId, wb)) return
+              applyConfigPrefill(wb, tags, configPrefillData)
               console.timeEnd('[perf] applyConfigPrefill')
               cpTrace('applyConfigPrefill.done')
             }
 
+            // EA-CUST-039: hide heat / electricity rows in Sheet 15 based on
+            // active energy configuration (runs even when configPrefillData is
+            // null — the function handles that gracefully).
+            cpTrace('applyGhgRowVisibility.start')
+            applyGhgRowVisibility(wb, configPrefillData)
+            cpTrace('applyGhgRowVisibility.done')
+
             // Inject dictionary-based dropdown validators (uses pre-fetched tags)
             cpTrace('applyDictValidators.start')
             console.time('[perf] applyDictValidators')
-            await applyDictValidators(workbook, tags)
+            if (isLoadStale(loadId, wb)) return
+            await applyDictValidators(wb, tags)
+            if (isLoadStale(loadId, wb)) return
             console.timeEnd('[perf] applyDictValidators')
             cpTrace('applyDictValidators.done')
 
             // Bind ValidationError event on every sheet
             cpTrace('bindValidationErrorDialogs.start')
             console.time('[perf] bindValidationErrorDialogs')
-            bindValidationErrorDialogs(workbook)
-            bindClipboardPasteValidation(workbook)
+            if (isLoadStale(loadId, wb)) return
+            bindValidationErrorDialogs(wb)
+            bindClipboardPasteValidation(wb)
             console.timeEnd('[perf] bindValidationErrorDialogs')
             cpTrace('bindValidationErrorDialogs.done')
 
@@ -309,41 +348,51 @@ async function initWorkbook() {
             if (publishedVersion.protectionEnabled !== 0) {
               cpTrace('applyDataEntryProtection.start')
               console.time('[perf] applyDataEntryProtection')
-              applyDataEntryProtection(workbook, tags)
+              if (isLoadStale(loadId, wb)) return
+              applyDataEntryProtection(wb, tags)
               console.timeEnd('[perf] applyDataEntryProtection')
               cpTrace('applyDataEntryProtection.done')
             }
+
+            // Bind derivedWhen rules for TABLE tags (e.g. table 8 工艺设备 → K = '-')
+            if (isLoadStale(loadId, wb)) return
+            applyTableDerivedWhenRules(wb, tags)
           } finally {
             cpTrace('phase2.resume.start')
-            resumeCalcServiceSafe(workbook)
+            resumeCalcServiceSafe(wb)
             cpTrace('phase2.resumeCalcService.done')
-            resumeEventSafe(workbook)
+            resumeEventSafe(wb)
             cpTrace('phase2.resumeEvent.done')
-            workbook.resumePaint()
+            wb.resumePaint()
             cpTrace('phase2.resumePaint.done')
             console.timeEnd('[perf] phase2-mutate')
           }
         } catch (e) {
+          if (isLoadStale(loadId, wb)) return
           console.warn('[phase2] failed to load tags / apply features:', e)
           // Still bind validation error dialogs as fallback
-          bindValidationErrorDialogs(workbook)
-          bindClipboardPasteValidation(workbook)
+          bindValidationErrorDialogs(wb)
+          bindClipboardPasteValidation(wb)
         }
       } else {
-        bindValidationErrorDialogs(workbook)
-        bindClipboardPasteValidation(workbook)
+        if (isLoadStale(loadId, wb)) return
+        bindValidationErrorDialogs(wb)
+        bindClipboardPasteValidation(wb)
       }
     } finally {
       // Trigger a single recalculation now that all mutations are done (or
       // skipped / failed) — this MUST run to compensate for the
       // doNotRecalculateAfterLoad flag passed to fromJSON above. Otherwise
       // formula cells would render stale/unevaluated.
-      cpTrace('calculate.start')
-      console.time('[perf] calculate')
-      calculateAllSafe(workbook)
-      console.timeEnd('[perf] calculate')
-      cpTrace('calculate.done')
+      if (!isLoadStale(loadId, wb)) {
+        cpTrace('calculate.start')
+        console.time('[perf] calculate')
+        calculateAllSafe(wb)
+        console.timeEnd('[perf] calculate')
+        cpTrace('calculate.done')
+      }
     }
+    if (isLoadStale(loadId, wb)) return
 
     // Force readonly when:
     //  1. Parent explicitly says readonly (e.g. lock held by another user), OR
@@ -366,15 +415,16 @@ async function initWorkbook() {
 
     // ── Sheet navigation setup ──────────────────────────────────────────
     cpTrace('postcalc.bindSheetNavEvents.start')
-    bindSheetNavEvents(workbook)
+    bindSheetNavEvents(wb)
     cpTrace('postcalc.bindSheetNavEvents.done')
-    activeSheetIndex.value = workbook.getActiveSheetIndex()
+    activeSheetIndex.value = wb.getActiveSheetIndex()
     cpTrace('postcalc.computeAllSheetStatuses.start')
     computeAllSheetStatuses()
     cpTrace('postcalc.computeAllSheetStatuses.done')
     // Auto-fit the initial sheet after a tick to allow layout to settle
     cpTrace('postcalc.nextTick.start')
     await nextTick()
+    if (isLoadStale(loadId, wb)) return
     cpTrace('postcalc.nextTick.done')
     cpTrace('postcalc.autoFitCurrentSheet.start')
     autoFitCurrentSheet()
@@ -382,17 +432,20 @@ async function initWorkbook() {
     window.addEventListener('resize', onWindowResize)
     // Bind right-click context menu for add/delete row
     if (spreadRef.value) {
-      spreadRef.value.addEventListener('contextmenu', onSpreadContextMenu)
+      spreadRef.value.addEventListener('contextmenu', onSpreadContextMenu, { capture: true })
     }
     document.addEventListener('click', onDocumentClickDismissCtxMenu)
     cpTrace('postcalc.allDone')
   } catch (e: any) {
+    if (wb && isLoadStale(loadId, wb)) return
     errorMsg.value = '加载模板失败：' + (e?.message ?? '未知错误')
     cpTrace('initWorkbook.catch', { err: String(e?.message ?? e) })
     releaseLockIfOwned()
   } finally {
     cpTrace('initWorkbook.finally.loadingFalse')
-    loading.value = false
+    if (!wb || !isLoadStale(loadId, wb)) {
+      loading.value = false
+    }
   }
 }
 
@@ -404,16 +457,12 @@ function applyPrefill(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tags: TplTagMapping[],
   prefillData: Record<string, unknown>,
+  lockFilledCells = false,
 ) {
   try {
     if (!prefillData || Object.keys(prefillData).length === 0) return
 
-    // Filter to only ent_enterprise_setting SCALAR mappings
-    const entTags = tags.filter(
-      (t: TplTagMapping) =>
-        t.targetTable === 'ent_enterprise_setting' &&
-        (!t.mappingType || t.mappingType === 'SCALAR'),
-    )
+    const entTags = tags.filter(isEnterpriseSettingScalarTag)
     if (entTags.length === 0) return
 
     wb.suspendPaint()
@@ -424,7 +473,7 @@ function applyPrefill(
         const value = prefillData[fieldName]
         if (value == null || value === '') continue
 
-        const filled = fillTaggedCell(wb, tag, value)
+        const filled = fillTaggedCell(wb, tag, value, lockFilledCells)
         if (!filled) {
           console.debug(`[prefill] could not locate cell for tag "${tag.tagName}"`)
         }
@@ -435,6 +484,44 @@ function applyPrefill(
   } catch (e) {
     // Pre-fill is best-effort; don't block template loading
     console.warn('[prefill] failed to pre-fill enterprise settings:', e)
+  }
+}
+
+function isEnterpriseSettingScalarTag(tag: TplTagMapping): boolean {
+  return tag.targetTable === 'ent_enterprise_setting' &&
+    (!tag.mappingType || tag.mappingType === 'SCALAR')
+}
+
+async function refreshEnterpriseSettingPrefill() {
+  if (!workbook || disposed) return
+  const wb = workbook
+  const loadId = loadSeq
+  try {
+    const [prefillData, freshConfigData] = await Promise.all([
+      getEnterpriseSettingPrefill(),
+      getConfigPrefillData().catch(() => null),
+    ])
+    if (!prefillData || isLoadStale(loadId, wb)) return
+
+    wb.suspendPaint()
+    suspendEventSafe(wb)
+    suspendCalcServiceSafe(wb)
+    try {
+      applyPrefill(wb, cachedTags, prefillData, true)
+      // EA-CUST-039: re-evaluate heat / electricity row visibility after
+      // energy configuration changes (e.g. user enabled / disabled heat).
+      applyGhgRowVisibility(wb, freshConfigData)
+    } finally {
+      resumeCalcServiceSafe(wb)
+      resumeEventSafe(wb)
+      wb.resumePaint()
+    }
+
+    if (isLoadStale(loadId, wb)) return
+    calculateAllSafe(wb)
+    computeAllSheetStatuses()
+  } catch (e) {
+    console.warn('[prefill] failed to refresh enterprise settings:', e)
   }
 }
 
@@ -473,6 +560,69 @@ function applyConfigPrefill(
   }
 }
 
+/**
+ * EA-CUST-039: Control row visibility in Sheet 15 (温室气体排放汇总)
+ * for the heat / electricity section (TABLE range A39:E42).
+ *
+ * Row mapping (1-based → 0-based):
+ *   Row 39 (idx 38): 净购入使用的热力排放量  → visible when HEAT active
+ *   Row 40 (idx 39): 净购入使用电力的排放量  → visible when ELECTRICITY active
+ *   Row 41 (idx 40): 购买绿电抵消排放量      → visible when ELECTRICITY active
+ *   Row 42 (idx 41): 间接排放小计            → visible when HEAT or ELECTRICITY active
+ *
+ * Product decision: the subtotal row (42) is shown whenever at least one of
+ * heat / electricity is active; hidden only when both are inactive.
+ * The green-electricity offset row (41) follows electricity because the
+ * offset concept only applies to purchased electricity.
+ */
+function applyGhgRowVisibility(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  configData: ConfigPrefillData | null,
+) {
+  if (!configData) return
+
+  // Locate Sheet 15 by name substring match
+  const count = wb.getSheetCount()
+  let sheet: import('@/types/spreadjs').GCSpreadSheet | null = null
+  for (let i = 0; i < count; i++) {
+    const s = wb.getSheet(i)
+    const name = s.name() ?? ''
+    if (name.includes('15') && name.includes('温室气体')) {
+      sheet = s
+      break
+    }
+  }
+  if (!sheet) {
+    console.log('[ghg-row-vis] Sheet 15 (温室气体) not found — skipping')
+    return
+  }
+
+  // The config-prefill API only returns active energies (isActive=1).
+  // If an energy with category '热力' or '电力' exists in the list, it is active.
+  const energies = configData.bs_energy ?? []
+  const hasActiveHeat = energies.some(
+    (e: Record<string, unknown>) => e.category === '热力',
+  )
+  const hasActiveElectricity = energies.some(
+    (e: Record<string, unknown>) => e.category === '电力',
+  )
+
+  console.log(
+    `[ghg-row-vis] heat=${hasActiveHeat}, electricity=${hasActiveElectricity}`,
+  )
+
+  // 0-based row indices for the A39:E42 range
+  const ROW_HEAT = 38       // A39 — heat emission
+  const ROW_ELEC = 39       // A40 — electricity emission
+  const ROW_GREEN = 40      // A41 — green electricity offset
+  const ROW_SUBTOTAL = 41   // A42 — indirect emission subtotal
+
+  sheet.setRowVisible(ROW_HEAT, hasActiveHeat)
+  sheet.setRowVisible(ROW_ELEC, hasActiveElectricity)
+  sheet.setRowVisible(ROW_GREEN, hasActiveElectricity)
+  sheet.setRowVisible(ROW_SUBTOTAL, hasActiveHeat || hasActiveElectricity)
+}
+
 /** Column definition type for CONFIG_PREFILL mappings */
 interface ConfigPrefillColDef {
   col: string | number
@@ -487,6 +637,10 @@ interface ConfigPrefillColDef {
    *  Example: { "masterCol": "A", "lookupField": "name" } */
   linkedTo?: { masterCol: string; lookupField: string }
   extraSources?: Array<{ table: string; field: string; filter?: Record<string, unknown> }>
+  /** Conditional value derivation rules. When the source column's value matches
+   *  `equals`, this column is auto-set to the specified `value`.
+   *  Example: [{ "sourceCol": 2, "equals": "工艺设备", "value": "-" }] */
+  derivedWhen?: Array<{ sourceCol: string | number; equals: string; value: string }>
   /** Synthetic string values to inject into the dropdown list (e.g. "外购" / "产出" virtual nodes
    *  in Sheet 11 能源流程图). These are NOT records in any table — they are literal sentinels
    *  that the downstream business logic recognizes. See EnergyFlowPostProcessor. */
@@ -880,6 +1034,7 @@ function fillTaggedCell(
   wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tag: TplTagMapping,
   value: unknown,
+  lockFilledCell = false,
 ): boolean {
   const sheetCount = wb.getSheetCount()
 
@@ -909,21 +1064,23 @@ function fillTaggedCell(
     }
   }
 
-  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
-  if (tag.tagName) {
-    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
-    if (found) {
-      const sheet = wb.getSheet(found.sheetIndex)
-      sheet.setValue(found.row, found.col, value)
-      return true
-    }
-  }
-
   const rangeTarget = resolveSingleCellRange(wb, tag)
   if (rangeTarget) {
     const sheet = wb.getSheet(rangeTarget.sheetIndex)
     sheet.setValue(rangeTarget.row, rangeTarget.col, value)
+    if (lockFilledCell) sheet.getCell(rangeTarget.row, rangeTarget.col).locked(true)
     return true
+  }
+
+  // Use pre-built cell-tag index for O(1) lookup
+  if (tag.tagName) {
+    const found = lookupCellTag(wb, tag.tagName, tag.sheetName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      sheet.setValue(found.row, found.col, value)
+      if (lockFilledCell) sheet.getCell(found.row, found.col).locked(true)
+      return true
+    }
   }
 
   return false
@@ -1398,8 +1555,8 @@ function applyDataEntryProtection(
       // getTag scans that used to live in unlockScalarCell/fillTaggedCell
       // (addressed by the cell-tag index in a separate PR), and (b) the suspend
       // envelope / single-recalc changes in this PR. We deliberately keep the
-      // original "brute-force lock-all" semantics here because `setDefaultStyle`
-      // alone does NOT override per-cell explicit `locked=false`.
+      // original lock-all semantics here because `setDefaultStyle` alone does
+      // NOT override per-cell explicit `locked=false`.
       for (let si = 0; si < sheetCount; si++) {
         const sheet = wb.getSheet(si)
         const rows = sheet.getRowCount()
@@ -1415,6 +1572,7 @@ function applyDataEntryProtection(
       let failed = 0
       for (const tag of tags) {
         try {
+          if (isEnterpriseSettingScalarTag(tag)) continue
           const mappingType = tag.mappingType ?? 'SCALAR'
 
           if (mappingType === 'SCALAR') {
@@ -1498,18 +1656,6 @@ function unlockScalarCell(
     }
   }
 
-  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
-  if (tag.tagName) {
-    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
-    if (found) {
-      const sheet = wb.getSheet(found.sheetIndex)
-      const cell = sheet.getCell(found.row, found.col)
-      cell.locked(false)
-      if (tag.required === 1) markCellRequired(cell, hint)
-      return
-    }
-  }
-
   const rangeTarget = resolveSingleCellRange(wb, tag)
   if (rangeTarget) {
     const sheet = wb.getSheet(rangeTarget.sheetIndex)
@@ -1517,6 +1663,38 @@ function unlockScalarCell(
     cell.locked(false)
     if (tag.required === 1) markCellRequired(cell, hint)
     return
+  }
+
+  // Handle multi-cell SCALAR ranges (e.g. A43:F51 for merged description areas).
+  // resolveSingleCellRange returns null when start ≠ end; unlock the full area.
+  if (tag.cellRange) {
+    const multiRange = parseCellRangeToObj(tag.cellRange)
+    if (multiRange) {
+      const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+      if (sheet) {
+        const rowCount = multiRange.endRow - multiRange.startRow + 1
+        const colCount = multiRange.endCol - multiRange.startCol + 1
+        if (rowCount > 0 && colCount > 0) {
+          sheet.getRange(multiRange.startRow, multiRange.startCol, rowCount, colCount).locked(false)
+        }
+        if (tag.required === 1) {
+          markCellRequired(sheet.getCell(multiRange.startRow, multiRange.startCol), hint)
+        }
+        return
+      }
+    }
+  }
+
+  // Use pre-built cell-tag index for O(1) lookup
+  if (tag.tagName) {
+    const found = lookupCellTag(wb, tag.tagName, tag.sheetName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      const cell = sheet.getCell(found.row, found.col)
+      cell.locked(false)
+      if (tag.required === 1) markCellRequired(cell, hint)
+      return
+    }
   }
   console.warn(
     `[protection] SCALAR tag 未找到匹配单元格: ${tag.tagName}`,
@@ -1610,6 +1788,95 @@ function unlockTableRange(
 }
 
 /**
+ * Bind derivedWhen rules for TABLE / EQUIPMENT_BENCHMARK tags.
+ *
+ * For each column that declares `derivedWhen` in its columnMappings JSON,
+ * this function:
+ *   1. Applies the rule to all existing rows (initial load).
+ *   2. Binds a CellChanged handler so the rule fires on live edits.
+ *
+ * When C (source column) changes away from the trigger value, the derived
+ * column keeps its current value (no clear) — the user or product can decide
+ * to add an explicit clear rule later if needed.
+ */
+function applyTableDerivedWhenRules(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tags: TplTagMapping[],
+) {
+  const Events = window.GC?.Spread?.Sheets?.Events
+  if (!Events?.CellChanged) return
+
+  const tableTags = tags.filter(t => {
+    const mt = t.mappingType ?? 'SCALAR'
+    return (mt === 'TABLE' || mt === 'EQUIPMENT_BENCHMARK') && t.columnMappings
+  })
+
+  for (const tag of tableTags) {
+    let columns: ConfigPrefillColDef[]
+    try {
+      const parsed = JSON.parse(tag.columnMappings!)
+      columns = Array.isArray(parsed) ? parsed : parsed.columns ?? []
+    } catch { continue }
+
+    const derivedCols = columns.filter(c => c.derivedWhen?.length)
+    if (!derivedCols.length) continue
+
+    const range = getDynamicRange(tag)
+    if (!range) continue
+
+    const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+    if (!sheet) continue
+
+    const resolveCol = (col: string | number) => {
+      if (typeof col === 'string' && /^[A-Za-z]+$/.test(col)) {
+        return letterToColIndex(col.toUpperCase())
+      }
+      return range.startCol + Number(col)
+    }
+
+    // 1. Apply initial derivation for rows that already have the trigger value
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (const colDef of derivedCols) {
+        const targetColIndex = resolveCol(colDef.col)
+        for (const rule of colDef.derivedWhen!) {
+          const srcColIndex = resolveCol(rule.sourceCol)
+          const srcVal = sheet.getValue(r, srcColIndex)
+          if (srcVal != null && String(srcVal) === rule.equals) {
+            sheet.setValue(r, targetColIndex, rule.value)
+          }
+        }
+      }
+    }
+
+    // 2. Bind CellChanged for live derivation
+    sheet.bind(Events.CellChanged, (
+      _sender: unknown,
+      args: { row: number; col: number; newValue: unknown },
+    ) => {
+      const { row, col: changedCol, newValue } = args
+      const currentRange = getDynamicRange(tag)
+      if (!currentRange || row < currentRange.startRow || row > currentRange.endRow) return
+
+      for (const colDef of derivedCols) {
+        for (const rule of colDef.derivedWhen!) {
+          const srcColIndex = resolveCol(rule.sourceCol)
+          if (changedCol !== srcColIndex) continue
+          const newValStr = newValue != null ? String(newValue) : ''
+          if (newValStr === rule.equals) {
+            const targetColIndex = resolveCol(colDef.col)
+            sheet.setValue(row, targetColIndex, rule.value)
+          }
+        }
+      }
+    })
+
+    console.log(
+      `[derivedWhen] "${tag.tagName}": bound ${derivedCols.length} derived column(s)`,
+    )
+  }
+}
+
+/**
  * Apply required field visual indicator: light orange background + comment tooltip.
  */
 function markCellRequired(
@@ -1698,17 +1965,22 @@ function buildCellTagIndex(wb: import('@/types/spreadjs').GCSpreadWorkbook): voi
  * Returns {sheetIndex, row, col} or null if not found.
  */
 function lookupCellTag(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
   tagName: string,
+  sheetName?: string | null,
   sheetIndex?: number | null,
 ): { sheetIndex: number; row: number; col: number } | null {
   if (!cellTagIndex) return null
-  if (sheetIndex != null) {
-    const sheetMap = cellTagIndex.get(sheetIndex)
-    if (sheetMap) {
-      const pos = sheetMap.get(tagName)
-      if (pos) return { sheetIndex, ...pos }
+  if (sheetName || sheetIndex != null) {
+    const resolvedSheetIndex = resolveSheetIndexByNameOrIndex(wb, sheetName, sheetIndex)
+    if (resolvedSheetIndex != null) {
+      const sheetMap = cellTagIndex.get(resolvedSheetIndex)
+      if (sheetMap) {
+        const pos = sheetMap.get(tagName)
+        if (pos) return { sheetIndex: resolvedSheetIndex, ...pos }
+      }
+      return null
     }
-    return null
   }
   // Search all sheets
   for (const [si, sheetMap] of cellTagIndex) {
@@ -1746,21 +2018,21 @@ function isScalarCellEmpty(
     }
   }
 
-  // Use pre-built cell-tag index for O(1) lookup (replaces O(rows × cols) scan)
-  if (tag.tagName) {
-    const found = lookupCellTag(tag.tagName, tag.sheetIndex)
-    if (found) {
-      const sheet = wb.getSheet(found.sheetIndex)
-      const val = sheet.getValue(found.row, found.col)
-      return val == null || val === ''
-    }
-  }
-
   const rangeTarget = resolveSingleCellRange(wb, tag)
   if (rangeTarget) {
     const sheet = wb.getSheet(rangeTarget.sheetIndex)
     const val = sheet.getValue(rangeTarget.row, rangeTarget.col)
     return val == null || val === ''
+  }
+
+  // Use pre-built cell-tag index for O(1) lookup
+  if (tag.tagName) {
+    const found = lookupCellTag(wb, tag.tagName, tag.sheetName, tag.sheetIndex)
+    if (found) {
+      const sheet = wb.getSheet(found.sheetIndex)
+      const val = sheet.getValue(found.row, found.col)
+      return val == null || val === ''
+    }
   }
   return true // if we can't find the cell, treat as empty
 }
@@ -1878,24 +2150,34 @@ function findSheet(
   sheetName?: string,
   sheetIndex?: number,
 ): import('@/types/spreadjs').GCSpreadSheet | null {
+  const resolvedSheetIndex = resolveSheetIndexByNameOrIndex(wb, sheetName, sheetIndex)
+  if (resolvedSheetIndex != null) return wb.getSheet(resolvedSheetIndex)
+  console.warn(`[protection] findSheet 失败: name=${sheetName}, index=${sheetIndex}, sheetCount=${wb.getSheetCount()}`)
+  return null
+}
+
+function resolveSheetIndexByNameOrIndex(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  sheetName?: string | null,
+  sheetIndex?: number | null,
+): number | null {
   const count = wb.getSheetCount()
   if (sheetName) {
     const target = sheetName.trim()
     // Exact match first
     for (let i = 0; i < count; i++) {
       const s = wb.getSheet(i)
-      if (s.name() === target) return s
+      if (s.name() === target) return i
     }
-    // Trimmed / case-insensitive fallback (handles encoding or whitespace diffs)
+    // Trimmed / case-insensitive fallback
     const targetLower = target.toLowerCase()
     for (let i = 0; i < count; i++) {
       const s = wb.getSheet(i)
-      if (s.name().trim().toLowerCase() === targetLower) return s
+      if (s.name().trim().toLowerCase() === targetLower) return i
     }
   }
   const idx = sheetIndex ?? 0
-  if (idx >= 0 && idx < count) return wb.getSheet(idx)
-  console.warn(`[protection] findSheet 失败: name=${sheetName}, index=${sheetIndex}, sheetCount=${count}`)
+  if (idx >= 0 && idx < count) return idx
   return null
 }
 
@@ -2379,9 +2661,52 @@ function validateRequiredFieldsBySheet(): SheetValidationError[] {
 
 // ── Add Row Feature: context menu + insert/delete/reset ────────────────
 
+/** Disable SpreadJS/browser native right-click menus on the data-entry workbook. */
+function disableNativeContextMenu(wb: WB) {
+  try {
+    wb.options.allowContextMenu = false
+  } catch {
+    // Best-effort only; the DOM contextmenu handler below still suppresses the menu.
+  }
+}
+
+function resolveContextMenuTarget(e: MouseEvent): { sheetIndex: number; row: number } | null {
+  if (!workbook) return null
+
+  try {
+    const hit = (workbook as unknown as {
+      hitTest?: (x: number, y: number) => {
+        worksheet?: import('@/types/spreadjs').GCSpreadSheet
+        row?: number
+        col?: number
+      } | null
+    }).hitTest?.(e.pageX, e.pageY)
+
+    if (hit?.worksheet && hit.row != null && hit.row >= 0) {
+      const count = workbook.getSheetCount()
+      for (let i = 0; i < count; i++) {
+        if (workbook.getSheet(i) === hit.worksheet) {
+          return { sheetIndex: i, row: hit.row }
+        }
+      }
+    }
+  } catch {
+    // Fall through to the active selection fallback.
+  }
+
+  const sheet = workbook.getActiveSheet()
+  const selections = sheet.getSelections()
+  if (!selections || selections.length === 0) return null
+  const row = selections[0].row
+  if (row < 0) return null
+  return { sheetIndex: workbook.getActiveSheetIndex(), row }
+}
+
 /** Handle right-click on spreadsheet to show add/delete row context menu */
 function onSpreadContextMenu(e: MouseEvent) {
   e.preventDefault()
+  e.stopPropagation()
+  e.stopImmediatePropagation()
   ctxMenuVisible.value = false
 
   if (!workbook) return
@@ -2389,14 +2714,9 @@ function onSpreadContextMenu(e: MouseEvent) {
   const isSubmittedOrApproved = submissionStatus === 1 || submissionStatus === 2
   if (props.readonly || isSubmittedOrApproved) return
 
-  const sheet = workbook.getActiveSheet()
-  const sheetIndex = workbook.getActiveSheetIndex()
-
-  // Use active selection to determine clicked row
-  const selections = sheet.getSelections()
-  if (!selections || selections.length === 0) return
-  const row = selections[0].row
-  if (row < 0) return
+  const target = resolveContextMenuTarget(e)
+  if (!target) return
+  const { sheetIndex, row } = target
 
   // Find TABLE tag at this row
   const tag = findTableTagAtCell(sheetIndex, row)
