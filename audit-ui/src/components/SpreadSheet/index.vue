@@ -317,6 +317,11 @@ async function initWorkbook() {
               cpTrace('applyConfigPrefill.done')
             }
 
+            // EA-CUST-053: split Sheet 14 product rows from Sheet 12 products
+            cpTrace('applySheet14ProductSplit.start')
+            applySheet14ProductSplit(wb, configPrefillData)
+            cpTrace('applySheet14ProductSplit.done')
+
             // EA-CUST-039: hide heat / electricity rows in Sheet 15 based on
             // active energy configuration (runs even when configPrefillData is
             // null — the function handles that gracefully).
@@ -632,6 +637,121 @@ function applyGhgRowVisibility(
   sheet.setRowVisible(ROW_ELEC, hasActiveElectricity)
   sheet.setRowVisible(ROW_GREEN, hasActiveElectricity)
   sheet.setRowVisible(ROW_SUBTOTAL, hasActiveHeat || hasActiveElectricity)
+}
+
+/**
+ * EA-CUST-053: Generate per-product rows in Sheet 14 (节能量计算数据)
+ * from Sheet 12 (单位产品能耗数据) product configuration.
+ *
+ * For each product in bs_product, two rows are generated:
+ *   - {name}产量（{unit}）   → cross-sheet formulas to Sheet 12 G / J columns
+ *   - {name}单耗（千克/{unit}） → cross-sheet formulas to Sheet 12 E / H columns
+ *
+ * Idempotent: detects existing product rows via the "产值单耗" anchor,
+ * removes stale rows, and regenerates from the current product list.
+ */
+function applySheet14ProductSplit(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  configData: ConfigPrefillData | null,
+) {
+  if (!configData) return
+
+  const products = configData.bs_product ?? []
+  if (products.length === 0) {
+    console.log('[sheet14-product-split] no products — skipping')
+    return
+  }
+
+  // 1. Find Sheet 12 and Sheet 14 by name substring
+  const sheetCount = wb.getSheetCount()
+  let sheet12: import('@/types/spreadjs').GCSpreadSheet | null = null
+  let sheet14: import('@/types/spreadjs').GCSpreadSheet | null = null
+  for (let i = 0; i < sheetCount; i++) {
+    const s = wb.getSheet(i)
+    const name = s.name() ?? ''
+    if (!sheet12 && name.includes('12') && name.includes('单位产品能耗')) sheet12 = s
+    if (!sheet14 && name.includes('14') && name.includes('节能量')) sheet14 = s
+    if (sheet12 && sheet14) break
+  }
+  if (!sheet12 || !sheet14) {
+    console.log('[sheet14-product-split] Sheet 12 or 14 not found — skipping')
+    return
+  }
+
+  const sheet12Name = sheet12.name()
+
+  // 2. Locate the "产值单耗" anchor row — first row after the product area
+  const PRODUCT_AREA_START = 5 // 0-indexed (1-based row 6)
+  let anchorRow = -1
+  const rowCount = sheet14.getRowCount()
+  for (let r = PRODUCT_AREA_START; r < Math.min(rowCount, PRODUCT_AREA_START + 100); r++) {
+    const val = sheet14.getValue(r, 0)
+    if (val && String(val).includes('产值单耗')) {
+      anchorRow = r
+      break
+    }
+  }
+  if (anchorRow < 0) {
+    console.warn('[sheet14-product-split] "产值单耗" anchor row not found — skipping')
+    return
+  }
+
+  // 3. Calculate row delta
+  const existingProductRows = anchorRow - PRODUCT_AREA_START
+  const neededProductRows = products.length * 2 // 2 rows per product (产量 + 单耗)
+  const diff = neededProductRows - existingProductRows
+
+  if (diff > 0) {
+    sheet14.addRows(anchorRow, diff)
+  } else if (diff < 0) {
+    sheet14.deleteRows(PRODUCT_AREA_START + neededProductRows, -diff)
+  }
+
+  // 4. Sheet 12 CONFIG_PREFILL tag range starts at row 5 (1-based)
+  const SHEET12_PRODUCT_START = 5
+
+  // 5. Fill product rows with labels + cross-sheet formulas
+  for (let i = 0; i < products.length; i++) {
+    const product = products[i]
+    const productName = String(product.name ?? '')
+    const rawUnit = String(product.measurementUnit ?? '')
+    const unit = normalizeProductUnit(rawUnit)
+
+    const s12Row = SHEET12_PRODUCT_START + i // 1-based for formula refs
+    const outputRow = PRODUCT_AREA_START + i * 2       // 产量 (0-indexed)
+    const consumptionRow = PRODUCT_AREA_START + i * 2 + 1 // 单耗 (0-indexed)
+
+    // 产量 row: B = current output (G), C = base output (J)
+    sheet14.setValue(outputRow, 0, `${productName}产量（${unit}）`)
+    sheet14.setFormula(outputRow, 1, `'${sheet12Name}'!G${s12Row}`)
+    sheet14.setFormula(outputRow, 2, `'${sheet12Name}'!J${s12Row}`)
+
+    // 单耗 row: B = current unit consumption (E), C = base unit consumption (H)
+    sheet14.setValue(consumptionRow, 0, `${productName}单耗（千克/${unit}）`)
+    sheet14.setFormula(consumptionRow, 1, `'${sheet12Name}'!E${s12Row}`)
+    sheet14.setFormula(consumptionRow, 2, `'${sheet12Name}'!H${s12Row}`)
+
+    // Lock all generated cells — derived data, user should not edit
+    for (const r of [outputRow, consumptionRow]) {
+      for (let c = 0; c <= 2; c++) {
+        const style = buildLockedStyle(sheet14, r, c)
+        if (style) {
+          try { sheet14.setStyle(r, c, style) } catch { /* ignore */ }
+        }
+      }
+    }
+  }
+
+  console.log(
+    `[sheet14-product-split] generated ${products.length} product(s), ` +
+    `${neededProductRows} rows (was ${existingProductRows})`,
+  )
+}
+
+function normalizeProductUnit(unit: string): string {
+  const lower = unit.toLowerCase().trim()
+  if (lower === 't' || lower === '吨') return '吨'
+  return unit.trim() || '吨'
 }
 
 /** Column definition type for CONFIG_PREFILL mappings */
