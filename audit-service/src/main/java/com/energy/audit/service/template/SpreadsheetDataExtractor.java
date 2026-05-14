@@ -487,6 +487,12 @@ public class SpreadsheetDataExtractor {
             cm.field = item.path("field").asText(null);
             cm.type = item.path("type").asText(null);
             if (cm.field != null && !cm.field.isBlank()) {
+                // EA-CUST-041: Apply field name aliases
+                String alias = FIELD_NAME_ALIASES.get(cm.field);
+                if (alias != null) {
+                    log.info("Field name alias applied: '{}' → '{}'", cm.field, alias);
+                    cm.field = alias;
+                }
                 result.add(cm);
             }
         }
@@ -675,7 +681,7 @@ public class SpreadsheetDataExtractor {
             Number num = (Number) value;
             return switch (dataType.toUpperCase()) {
                 case "NUMBER" -> num;
-                case "DATE"   -> num.toString();
+                case "DATE"   -> normalizeDate(num);
                 case "DICT"   -> num.toString();
                 default       -> num.toString();
             };
@@ -684,7 +690,7 @@ public class SpreadsheetDataExtractor {
         try {
             return switch (dataType.toUpperCase()) {
                 case "NUMBER" -> str.contains(".") ? Double.parseDouble(str) : Long.parseLong(str);
-                case "DATE"   -> str;
+                case "DATE"   -> validateDateString(str);
                 case "DICT"   -> str;
                 default       -> str;
             };
@@ -693,6 +699,59 @@ public class SpreadsheetDataExtractor {
             return str;
         }
     }
+
+    /**
+     * EA-CUST-041: Validate a date string and return it only if it is a legal date.
+     * Accepts yyyy-MM-dd, yyyy/MM/dd, yyyyMMdd and normalizes to yyyy-MM-dd.
+     * Returns null for invalid date strings to prevent them from reaching the DB.
+     */
+    private String validateDateString(String str) {
+        if (str == null || str.isBlank()) return null;
+        str = str.trim();
+        // Already yyyy-MM-dd
+        if (DATE_PATTERN.matcher(str).matches() && isLegalDate(str)) return str;
+        // Try yyyy/MM/dd or yyyy.MM.dd
+        String normalized = str.replace('/', '-').replace('.', '-');
+        if (DATE_PATTERN.matcher(normalized).matches() && isLegalDate(normalized)) return normalized;
+        // Try yyyyMMdd
+        if (str.matches("\\d{8}")) {
+            String candidate = str.substring(0, 4) + "-" + str.substring(4, 6) + "-" + str.substring(6, 8);
+            if (DATE_PATTERN.matcher(candidate).matches() && isLegalDate(candidate)) return candidate;
+        }
+        log.warn("Invalid date string rejected: '{}'", str);
+        return null;
+    }
+
+    /**
+     * EA-CUST-041: Convert an OADate number (SpreadJS internal) to yyyy-MM-dd string.
+     */
+    private String normalizeDate(Number oaDate) {
+        try {
+            // OADate epoch: 1899-12-30
+            long daysSinceEpoch = oaDate.longValue();
+            java.time.LocalDate date = java.time.LocalDate.of(1899, 12, 30).plusDays(daysSinceEpoch);
+            String result = date.toString(); // ISO-8601 yyyy-MM-dd
+            if (date.getYear() < 1900 || date.getYear() > 2200) {
+                log.warn("OADate {} produced out-of-range date: {}", oaDate, result);
+                return null;
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("Failed to convert OADate number {} to date: {}", oaDate, e.getMessage());
+            return oaDate.toString();
+        }
+    }
+
+    private boolean isLegalDate(String dateStr) {
+        try {
+            java.time.LocalDate.parse(dateStr);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static final Pattern DATE_PATTERN = Pattern.compile("\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])");
 
     private int[] parseCellRange(String cellRange) {
         Matcher m = CELL_RANGE_PATTERN.matcher(cellRange.toUpperCase().trim());
@@ -714,6 +773,14 @@ public class SpreadsheetDataExtractor {
         return col - 1;
     }
 
+    /**
+     * EA-CUST-041: Field name aliases — legacy template field names that must
+     * be mapped to their canonical backend column names during extraction.
+     */
+    private static final Map<String, String> FIELD_NAME_ALIASES = Map.of(
+            "plan_complete_date", "planned_retire_date"
+    );
+
     private List<ColumnMapping> parseColumnMappings(String json) {
         if (json == null || json.isBlank()) return List.of();
         try {
@@ -722,6 +789,12 @@ public class SpreadsheetDataExtractor {
                 ColumnMapping cm = mappings.get(i);
                 if (cm.field == null || cm.field.isBlank()) {
                     throw new BusinessException("columnMappings 中第 " + (i + 1) + " 项 (col=" + cm.col + ") 缺少 field 属性");
+                }
+                // EA-CUST-041: Apply field name aliases
+                String alias = FIELD_NAME_ALIASES.get(cm.field);
+                if (alias != null) {
+                    log.info("Field name alias applied: '{}' → '{}'", cm.field, alias);
+                    cm.field = alias;
                 }
             }
             return mappings;

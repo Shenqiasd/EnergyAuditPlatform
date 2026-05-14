@@ -332,6 +332,14 @@ async function initWorkbook() {
             console.timeEnd('[perf] applyDictValidators')
             cpTrace('applyDictValidators.done')
 
+            // EA-CUST-041: Apply date pickers + validators on date columns
+            cpTrace('applyDatePickersAndValidators.start')
+            console.time('[perf] applyDatePickersAndValidators')
+            if (isLoadStale(loadId, wb)) return
+            applyDatePickersAndValidators(wb, tags)
+            console.timeEnd('[perf] applyDatePickersAndValidators')
+            cpTrace('applyDatePickersAndValidators.done')
+
             // Bind ValidationError event on every sheet
             cpTrace('bindValidationErrorDialogs.start')
             console.time('[perf] bindValidationErrorDialogs')
@@ -1219,6 +1227,389 @@ async function applyDictValidators(
   }
 }
 
+// ── EA-CUST-041: Date picker & validation ──────────────────────────────────
+
+/** Set of field names known to be date fields — used to identify date columns
+ *  in TABLE / EQUIPMENT_BENCHMARK column mappings. Built from schema-registry
+ *  and explicit product decisions. `annual_runtime_hours` is explicitly excluded. */
+const DATE_FIELD_NAMES = new Set([
+  'completion_date',     // 表1 已实施节能技改项目
+  'publish_date',        // 表6 能源管理制度
+  'valid_period',        // 表6 能源管理制度 (Pete confirmed as date)
+  'test_date',           // 表9 重点设备测试数据
+  'start_use_date',      // 表10 淘汰目录
+  'planned_retire_date', // 表10 淘汰目录 (canonical backend name)
+  'plan_complete_date',  // 表10 淘汰目录 (legacy template name → alias)
+  'rectify_date',        // 表19 节能整改措施
+  'start_date',          // 重点用能设备 启用日期
+  'manufacture_date',    // 重点用能设备 出厂日期
+  'completion_time',     // 已实施节能技改项目 (old name variant)
+])
+
+/** Fields that must NEVER be treated as date fields even if label contains 日期/时间 */
+const NON_DATE_FIELD_NAMES = new Set([
+  'annual_runtime_hours', // 年运行时间(h) — numeric, not a date
+])
+
+/** Strict yyyy-MM-dd pattern */
+const DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
+
+/** Validate a string is a legal yyyy-MM-dd date (including day-of-month check) */
+function isValidDateString(s: string): boolean {
+  if (!DATE_REGEX.test(s)) return false
+  const [y, m, d] = s.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
+}
+
+/** Try to parse a loose date input into yyyy-MM-dd.
+ *  Accepts: yyyy-MM-dd, yyyy/MM/dd, yyyyMMdd, yyyy.MM.dd, JS Date serial (OADate number).
+ *  Returns null if unparseable or invalid. */
+function normalizeDateValue(raw: unknown): string | null {
+  if (raw == null || raw === '') return null
+
+  // OADate number (SpreadJS internal) → JS Date
+  if (typeof raw === 'number') {
+    // SpreadJS OADate epoch: 1899-12-30
+    const epoch = new Date(1899, 11, 30)
+    const ms = epoch.getTime() + raw * 86400000
+    const dt = new Date(ms)
+    if (!isNaN(dt.getTime())) {
+      const y = dt.getFullYear()
+      const m = String(dt.getMonth() + 1).padStart(2, '0')
+      const d = String(dt.getDate()).padStart(2, '0')
+      const result = `${y}-${m}-${d}`
+      if (isValidDateString(result)) return result
+    }
+    return null
+  }
+
+  const str = String(raw).trim()
+  if (str === '') return null
+
+  // Already yyyy-MM-dd
+  if (isValidDateString(str)) return str
+
+  // Try yyyy/MM/dd or yyyy.MM.dd
+  const slashDot = str.replace(/[/.]/g, '-')
+  if (isValidDateString(slashDot)) return slashDot
+
+  // Try yyyyMMdd
+  if (/^\d{8}$/.test(str)) {
+    const candidate = `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`
+    if (isValidDateString(candidate)) return candidate
+  }
+
+  // Try JS Date parse as last resort (handles "2026-1-5" etc.)
+  const parsed = new Date(str)
+  if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 1900 && parsed.getFullYear() <= 2200) {
+    const y = parsed.getFullYear()
+    const m = String(parsed.getMonth() + 1).padStart(2, '0')
+    const d = String(parsed.getDate()).padStart(2, '0')
+    const result = `${y}-${m}-${d}`
+    if (isValidDateString(result)) return result
+  }
+
+  return null
+}
+
+/** Tracks which cells are date fields: Map<sheetIndex, Set<"row,col">> for SCALAR
+ *  and Map<sheetIndex, Set<colIndex>> for TABLE date columns */
+interface DateFieldRegistry {
+  /** SCALAR date cells: sheetIndex → Set<"row,col"> */
+  scalarCells: Map<number, Set<string>>
+  /** TABLE date columns: sheetIndex → Set<colIndex> */
+  tableColumns: Map<number, Set<number>>
+  /** TABLE date column ranges: sheetIndex → Array<{col, startRow, endRow}> */
+  tableColumnRanges: Map<number, Array<{ col: number; startRow: number; endRow: number }>>
+}
+let dateFieldRegistry: DateFieldRegistry | null = null
+
+/** Check if a cell is a registered date field */
+function isDateFieldCell(sheetIndex: number, row: number, col: number): boolean {
+  if (!dateFieldRegistry) return false
+  const scalarSet = dateFieldRegistry.scalarCells.get(sheetIndex)
+  if (scalarSet?.has(`${row},${col}`)) return true
+  const ranges = dateFieldRegistry.tableColumnRanges.get(sheetIndex)
+  if (ranges) {
+    for (const r of ranges) {
+      if (col === r.col && row >= r.startRow && row <= r.endRow) return true
+    }
+  }
+  return false
+}
+
+/**
+ * EA-CUST-041: Apply date pickers + date validators to all editable date fields.
+ *
+ * Identification strategy (in priority order):
+ *  1. Column field name is in DATE_FIELD_NAMES set (from columnMappings JSON)
+ *  2. Tag dataType === 'DATE' (from tag mapping metadata)
+ *  3. Field name is NOT in NON_DATE_FIELD_NAMES exclusion set
+ *
+ * For each identified date column/cell:
+ *  - Set cell formatter to 'yyyy-MM-dd'
+ *  - Apply a date DataValidator (stop-style) that rejects non-date input
+ *  - Bind CellChanged to normalize values to yyyy-MM-dd string format
+ *
+ * Enterprise-setting SCALAR tags (Sheet 2 B5 registeredDate, D15 certPassDate)
+ * are SKIPPED — they are read-only prefill and must not get date picker editors.
+ */
+function applyDatePickersAndValidators(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tags: TplTagMapping[],
+) {
+  try {
+    const DataValidation = window.GC?.Spread?.Sheets?.DataValidation
+    const Events = window.GC?.Spread?.Sheets?.Events
+    if (!DataValidation || !Events?.CellChanged) {
+      console.warn('[date-picker] SpreadJS DataValidation or Events not available')
+      return
+    }
+
+    const registry: DateFieldRegistry = {
+      scalarCells: new Map(),
+      tableColumns: new Map(),
+      tableColumnRanges: new Map(),
+    }
+
+    wb.suspendPaint()
+    try {
+      // ── Process TABLE / EQUIPMENT_BENCHMARK tags ─────────────────────
+      for (const tag of tags) {
+        const mt = tag.mappingType ?? 'SCALAR'
+        if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
+        if (!tag.columnMappings || !tag.cellRange) continue
+
+        let columns: Array<{ col: number | string; field: string; type?: string }>
+        try {
+          const parsed = JSON.parse(tag.columnMappings)
+          if (Array.isArray(parsed)) {
+            columns = parsed
+          } else {
+            // EQUIPMENT_BENCHMARK format: { commonColumns: [...], typeColumns: {...} }
+            const common = parsed.commonColumns ?? []
+            const typeColArrays = parsed.typeColumns ? Object.values(parsed.typeColumns) : []
+            columns = [...common]
+            for (const arr of typeColArrays) {
+              if (Array.isArray(arr)) columns.push(...(arr as typeof columns))
+            }
+          }
+        } catch { continue }
+
+        const range = getDynamicRange(tag)
+        if (!range) continue
+
+        const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+        if (!sheet) continue
+
+        // Resolve actual sheet index by comparing sheet references
+        let sheetIndex = tag.sheetIndex ?? 0
+        for (let si = 0; si < wb.getSheetCount(); si++) {
+          if (wb.getSheet(si) === sheet) { sheetIndex = si; break }
+        }
+
+        const resolveCol = (col: string | number) => {
+          if (typeof col === 'string' && /^[A-Za-z]+$/.test(col)) {
+            return letterToColIndex(col.toUpperCase())
+          }
+          return range.startCol + Number(col)
+        }
+
+        // Find date columns
+        for (const colDef of columns) {
+          const fieldName = colDef.field
+          if (!fieldName) continue
+          if (NON_DATE_FIELD_NAMES.has(fieldName)) continue
+
+          const isDateField = DATE_FIELD_NAMES.has(fieldName) ||
+            (colDef.type?.toUpperCase() === 'DATE') ||
+            (tag.dataType?.toUpperCase() === 'DATE' && DATE_FIELD_NAMES.has(fieldName))
+
+          if (!isDateField) continue
+
+          const absCol = resolveCol(colDef.col)
+
+          // Track in registry
+          if (!registry.tableColumns.has(sheetIndex)) {
+            registry.tableColumns.set(sheetIndex, new Set())
+          }
+          registry.tableColumns.get(sheetIndex)!.add(absCol)
+
+          if (!registry.tableColumnRanges.has(sheetIndex)) {
+            registry.tableColumnRanges.set(sheetIndex, [])
+          }
+          registry.tableColumnRanges.get(sheetIndex)!.push({
+            col: absCol,
+            startRow: range.startRow,
+            endRow: range.endRow,
+          })
+
+          // Apply date formatter to each cell in the column.
+          // Validation is handled by the CellChanged handler + paste handler.
+          for (let r = range.startRow; r <= range.endRow; r++) {
+            sheet.setStyle(r, absCol, buildDateCellStyle(sheet, r, absCol))
+          }
+        }
+
+        console.log(
+          `[date-picker] TABLE "${tag.tagName}": processed date columns`,
+        )
+      }
+
+      // ── Process SCALAR date tags (non-enterprise-setting) ────────────
+      for (const tag of tags) {
+        if ((tag.mappingType ?? 'SCALAR') !== 'SCALAR') continue
+        if (isEnterpriseSettingScalarTag(tag)) continue // B5/D15 read-only
+
+        const fieldName = tag.fieldName
+        if (!fieldName) continue
+        if (NON_DATE_FIELD_NAMES.has(fieldName)) continue
+
+        const isDateField = DATE_FIELD_NAMES.has(fieldName) ||
+          tag.dataType?.toUpperCase() === 'DATE'
+        if (!isDateField) continue
+
+        // Resolve cell position
+        const rangeTarget = resolveSingleCellRange(wb, tag)
+        if (!rangeTarget) continue
+
+        const sheetIndex = rangeTarget.sheetIndex
+        const { row, col } = rangeTarget
+
+        if (!registry.scalarCells.has(sheetIndex)) {
+          registry.scalarCells.set(sheetIndex, new Set())
+        }
+        registry.scalarCells.get(sheetIndex)!.add(`${row},${col}`)
+
+        const sheet = wb.getSheet(sheetIndex)
+        sheet.setStyle(row, col, buildDateCellStyle(sheet, row, col))
+      }
+
+      dateFieldRegistry = registry
+
+      // ── Bind CellChanged: normalize date values ──────────────────────
+      const sheetCount = wb.getSheetCount()
+      for (let si = 0; si < sheetCount; si++) {
+        const sheet = wb.getSheet(si)
+        const capturedSi = si
+        sheet.bind(Events.CellChanged, (_sender: unknown, args: {
+          row: number; col: number; newValue: unknown; propertyName?: string
+        }) => {
+          if (args.propertyName !== 'value') return
+          if (!isDateFieldCell(capturedSi, args.row, args.col)) return
+
+          const raw = args.newValue
+          if (raw == null || raw === '') return
+
+          const normalized = normalizeDateValue(raw)
+          if (normalized !== null && normalized !== String(raw)) {
+            // Update to normalized format
+            sheet.setValue(args.row, args.col, normalized)
+          } else if (normalized === null && raw !== '') {
+            // Invalid date — clear the cell and show error
+            sheet.setValue(args.row, args.col, null)
+            ElMessageBox.alert(
+              `"${raw}" 不是合法的日期格式，请输入 yyyy-MM-dd 格式的日期（如 2026-01-15）`,
+              '日期格式错误',
+              { type: 'error', confirmButtonText: '确定' },
+            )
+          }
+        })
+      }
+
+      // Log summary
+      let totalScalar = 0
+      registry.scalarCells.forEach(s => { totalScalar += s.size })
+      let totalTableCols = 0
+      registry.tableColumnRanges.forEach(r => { totalTableCols += r.length })
+      console.log(
+        `[date-picker] registered ${totalScalar} SCALAR date cells, ${totalTableCols} TABLE date column ranges`,
+      )
+    } finally {
+      wb.resumePaint()
+    }
+  } catch (e) {
+    console.warn('[date-picker] failed to apply date pickers:', e)
+  }
+}
+
+/**
+ * Pre-save pass: scan all registered date cells and normalize / reject values.
+ * Invalid date values are cleared to prevent them from reaching the backend.
+ */
+function normalizeDateFieldsBeforeSave(wb: import('@/types/spreadjs').GCSpreadWorkbook) {
+  if (!dateFieldRegistry) return
+  let normalized = 0
+  let cleared = 0
+
+  wb.suspendPaint()
+  suspendEventSafe(wb)
+  try {
+    // Scalar date cells
+    for (const [si, cells] of dateFieldRegistry.scalarCells) {
+      const sheet = wb.getSheet(si)
+      for (const key of cells) {
+        const [r, c] = key.split(',').map(Number)
+        const val = sheet.getValue(r, c)
+        if (val == null || val === '') continue
+        const norm = normalizeDateValue(val)
+        if (norm !== null) {
+          if (norm !== String(val)) { sheet.setValue(r, c, norm); normalized++ }
+        } else {
+          sheet.setValue(r, c, null)
+          cleared++
+        }
+      }
+    }
+    // Table date column ranges
+    for (const [si, ranges] of dateFieldRegistry.tableColumnRanges) {
+      const sheet = wb.getSheet(si)
+      for (const range of ranges) {
+        for (let r = range.startRow; r <= range.endRow; r++) {
+          const val = sheet.getValue(r, range.col)
+          if (val == null || val === '') continue
+          const norm = normalizeDateValue(val)
+          if (norm !== null) {
+            if (norm !== String(val)) { sheet.setValue(r, range.col, norm); normalized++ }
+          } else {
+            sheet.setValue(r, range.col, null)
+            cleared++
+          }
+        }
+      }
+    }
+  } finally {
+    resumeEventSafe(wb)
+    wb.resumePaint()
+  }
+  if (normalized > 0 || cleared > 0) {
+    console.log(`[date-picker] pre-save: normalized ${normalized}, cleared ${cleared} invalid date values`)
+  }
+}
+
+/**
+ * Build a cell style with date formatter applied on top of the existing style.
+ */
+function buildDateCellStyle(
+  sheet: import('@/types/spreadjs').GCSpreadSheet,
+  row: number,
+  col: number,
+): unknown {
+  try {
+    const StyleCtor = window.GC?.Spread?.Sheets?.Style as undefined | (new () => {
+      locked?: boolean; backColor?: string | null; formatter?: string; clone?: () => unknown
+    })
+    if (!StyleCtor) return null
+    const existing = sheet.getStyle(row, col) as { locked?: boolean; backColor?: string | null; formatter?: string; clone?: () => unknown } | null
+    const style = existing?.clone?.() ?? new StyleCtor()
+    ;(style as { formatter?: string }).formatter = 'yyyy-MM-dd'
+    return style
+  } catch {
+    return null
+  }
+}
+
 /**
  * Bind the SpreadJS ValidationError event on every sheet so that entering an
  * invalid value in a cell with DataValidation (e.g. a dropdown list) shows an
@@ -1421,6 +1812,7 @@ function bindClipboardPasteValidation(
     })
 
     // ── ClipboardPasted: validate pasted values ─────────────────────
+    const capturedSheetIndex = i
     sheet.bind(Events.ClipboardPasted, (_sender: unknown, args: {
       cellRange: { row: number; col: number; rowCount: number; colCount: number }
     }) => {
@@ -1429,9 +1821,34 @@ function bindClipboardPasteValidation(
       prePasteSnapshot = null
 
       const invalidCells: Array<{ row: number; col: number; value: unknown; message: string }> = []
+      const dateCellsToNormalize: Array<{ row: number; col: number; normalized: string }> = []
+      const invalidDateCells: Array<{ row: number; col: number; value: unknown; message: string }> = []
 
       for (let r = row; r < row + rowCount; r++) {
         for (let c = col; c < col + colCount; c++) {
+          const value = sheet.getValue(r, c)
+
+          // EA-CUST-041: Validate + normalize pasted date values
+          if (isDateFieldCell(capturedSheetIndex, r, c)) {
+            if (value != null && value !== '') {
+              const normalized = normalizeDateValue(value)
+              if (normalized !== null) {
+                if (normalized !== String(value)) {
+                  dateCellsToNormalize.push({ row: r, col: c, normalized })
+                }
+              } else {
+                invalidDateCells.push({
+                  row: r,
+                  col: c,
+                  value,
+                  message: `单元格 ${colIndexToLetter(c)}${r + 1} 的值 "${value}" 不是合法日期格式`,
+                })
+              }
+            }
+            continue // date cells handled separately from DataValidator
+          }
+
+          // Existing DataValidator check for non-date cells
           const dv = (sheet as unknown as {
             getDataValidator?: (r: number, c: number) => {
               isValid?: (val: unknown, r: number, c: number) => boolean
@@ -1441,7 +1858,6 @@ function bindClipboardPasteValidation(
           }).getDataValidator?.(r, c)
           if (!dv) continue
 
-          const value = sheet.getValue(r, c)
           if (value == null || value === '') continue
 
           let isValid = true
@@ -1473,6 +1889,37 @@ function bindClipboardPasteValidation(
         }
       }
 
+      // Normalize valid date cells to yyyy-MM-dd
+      if (dateCellsToNormalize.length > 0) {
+        suspendEventSafe(wb)
+        for (const cell of dateCellsToNormalize) {
+          sheet.setValue(cell.row, cell.col, cell.normalized)
+        }
+        resumeEventSafe(wb)
+      }
+
+      // Revert invalid date cells
+      if (invalidDateCells.length > 0) {
+        suspendEventSafe(wb)
+        for (const cell of invalidDateCells) {
+          const original = snapshot?.get(`${cell.row},${cell.col}`)
+          sheet.setValue(cell.row, cell.col, original ?? null)
+        }
+        resumeEventSafe(wb)
+
+        const maxShow = 5
+        const messages = invalidDateCells.slice(0, maxShow).map(c => c.message)
+        if (invalidDateCells.length > maxShow) {
+          messages.push(`...还有 ${invalidDateCells.length - maxShow} 个单元格`)
+        }
+        ElMessageBox.alert(
+          messages.join('\n'),
+          '粘贴日期校验失败',
+          { type: 'error', confirmButtonText: '确定' },
+        )
+      }
+
+      // Handle non-date DataValidator failures (existing logic)
       if (invalidCells.length === 0) return
 
       // Determine error style from first invalid cell's validator
@@ -2326,6 +2773,8 @@ async function save(options?: { skipExtraction?: boolean }): Promise<void> {
   }
   saving.value = true
   try {
+    // EA-CUST-041: normalize all date fields before serialization
+    normalizeDateFieldsBeforeSave(workbook)
     const jsonObj = workbook.toJSON() as Record<string, unknown>
     // Embed add-row dynamic ranges into the JSON for backend extraction
     if (dynamicRanges.size > 0) {
