@@ -26,3 +26,18 @@ export function queryExtractedTable(
 ): Promise<ExtractedTablePage> {
   return request.get<ExtractedTablePage>(`/extracted-data/${tableName}`, { params })
 }
+
+/**
+ * Fetch the most recent scalar values for a list of field names from the
+ * generic `de_submission_field` fallback storage. Returns a flat
+ * `{ fieldName: value | null }` map with `null` for fields without data.
+ */
+export function queryExtractedScalars(
+  fieldNames: string[],
+  params?: { auditYear?: number; enterpriseId?: number },
+): Promise<Record<string, number | string | null>> {
+  return request.get<Record<string, number | string | null>>(
+    '/extracted-data/scalars',
+    { params: { ...params, fieldNames: fieldNames.join(',') } },
+  )
+}

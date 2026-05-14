@@ -71,22 +71,15 @@ public class BusinessTablePersister {
 
         for (String table : ALLOWED_TABLES) {
             try {
-                List<Map<String, Object>> cols = jdbcTemplate.queryForList(
+                jdbcTemplate.queryForList(
                         "SELECT * FROM " + table + " WHERE 1=0",
                         new MapSqlParameterSource());
-                // cols is empty list but the metadata is available from column names
-                Set<String> colNames = new HashSet<>();
-                try {
-                    // Use INFORMATION_SCHEMA for reliable column discovery
-                    List<Map<String, Object>> infoRows = jdbcTemplate.queryForList(
-                            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = :table",
-                            new MapSqlParameterSource("table", table));
-                    for (Map<String, Object> row : infoRows) {
-                        Object cn = row.get("COLUMN_NAME");
-                        if (cn != null) colNames.add(cn.toString().toLowerCase());
-                    }
-                } catch (Exception e) {
-                    log.debug("INFORMATION_SCHEMA probe failed for '{}', skipping column filter", table);
+                Set<String> colNames = probeColumnNamesViaJdbcMetaData(table);
+                if (colNames.isEmpty()) {
+                    // Fall back to INFORMATION_SCHEMA in case the driver did
+                    // not surface ResultSetMetaData column names
+                    // (defensive — JdbcTemplate normally provides them).
+                    colNames = probeColumnNamesViaInformationSchema(table);
                 }
                 if (!colNames.isEmpty()) {
                     columnMap.put(table, colNames);
@@ -106,6 +99,68 @@ public class BusinessTablePersister {
                 confirmedSid.size(), ALLOWED_TABLES.size());
     }
 
+    /**
+     * Discover column names for {@code table} from JDBC ResultSet metadata.
+     * Works on both MySQL and H2 (MODE=MySQL) regardless of identifier
+     * case-folding because the driver reports the column names as the
+     * server returned them — there is no schema-name guesswork involved.
+     *
+     * <p>We use {@link org.springframework.jdbc.core.ResultSetExtractor} so
+     * that ResultSetMetaData is read even when the result set is empty
+     * (which it is for {@code WHERE 1=0}).
+     */
+    private Set<String> probeColumnNamesViaJdbcMetaData(String table) {
+        try {
+            Set<String> result = jdbcTemplate.getJdbcTemplate().query(
+                    "SELECT * FROM " + table + " WHERE 1=0",
+                    (java.sql.ResultSet rs) -> {
+                        Set<String> names = new HashSet<>();
+                        java.sql.ResultSetMetaData md = rs.getMetaData();
+                        for (int i = 1; i <= md.getColumnCount(); i++) {
+                            String name = md.getColumnLabel(i);
+                            if (name == null || name.isEmpty()) {
+                                name = md.getColumnName(i);
+                            }
+                            if (name != null && !name.isEmpty()) {
+                                names.add(name.toLowerCase());
+                            }
+                        }
+                        return names;
+                    });
+            return result != null ? result : Collections.emptySet();
+        } catch (Exception e) {
+            log.debug("ResultSetMetaData probe failed for '{}': {}", table, e.getMessage());
+            return Collections.emptySet();
+        }
+    }
+
+    /**
+     * Discover column names via INFORMATION_SCHEMA scoped to the current
+     * database. The {@code TABLE_SCHEMA = DATABASE()} filter prevents cross-
+     * database pollution: in a multi-tenant MySQL server where the same
+     * table name exists in another schema with different columns, an
+     * unscoped query would union those columns and could cause INSERT
+     * statements to reference columns that do not exist in the current
+     * database's copy of the table.
+     */
+    private Set<String> probeColumnNamesViaInformationSchema(String table) {
+        Set<String> colNames = new HashSet<>();
+        try {
+            List<Map<String, Object>> infoRows = jdbcTemplate.queryForList(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS " +
+                            "WHERE LOWER(TABLE_NAME) = LOWER(:table) " +
+                            "AND (TABLE_SCHEMA = DATABASE() OR DATABASE() IS NULL)",
+                    new MapSqlParameterSource("table", table));
+            for (Map<String, Object> row : infoRows) {
+                Object cn = row.get("COLUMN_NAME");
+                if (cn != null) colNames.add(cn.toString().toLowerCase());
+            }
+        } catch (Exception e) {
+            log.debug("INFORMATION_SCHEMA probe failed for '{}': {}", table, e.getMessage());
+        }
+        return colNames;
+    }
+
     private boolean hasSubmissionId(String tableName) {
         return tablesWithSubmissionId.contains(tableName.toLowerCase());
     }
@@ -121,6 +176,22 @@ public class BusinessTablePersister {
     private boolean isKnownColumn(String tableName, String columnName) {
         Set<String> cols = knownColumnsByTable.get(tableName.toLowerCase());
         if (cols == null) return true; // no metadata — assume column exists
+        return cols.contains(columnName.toLowerCase());
+    }
+
+    /**
+     * Return true only when the metadata probe has positively confirmed that
+     * {@code columnName} exists on {@code tableName}. Unlike
+     * {@link #isKnownColumn(String, String)} this does <em>not</em> fall back
+     * to "assume exists" when the probe yielded no metadata — callers that
+     * use this method to decide whether to inject an opt-in column (e.g.
+     * {@code row_seq}) must avoid speculative writes into tables where the
+     * probe could not confirm the column's presence, otherwise the entire
+     * batch INSERT fails and rows fall through to {@code de_submission_table}.
+     */
+    private boolean isColumnConfirmed(String tableName, String columnName) {
+        Set<String> cols = knownColumnsByTable.get(tableName.toLowerCase());
+        if (cols == null) return false;
         return cols.contains(columnName.toLowerCase());
     }
 
@@ -217,6 +288,7 @@ public class BusinessTablePersister {
 
         boolean hasSid = hasSubmissionId(tableName);
         List<Map<String, Object>> dbRows = new ArrayList<>();
+        int skippedEmpty = 0;
         for (Map<String, Object> row : rows) {
             Map<String, Object> dbRow = new HashMap<>();
             if (hasSid) {
@@ -228,10 +300,17 @@ public class BusinessTablePersister {
             dbRow.put("update_by", operator);
             dbRow.put("deleted", 0);
             Object rowIndex = row.get("_rowIndex");
-            if (rowIndex instanceof Number && isKnownColumn(tableName, "row_seq")) {
+            // Only inject row_seq when the metadata probe positively confirmed
+            // the column exists. Falling back to "assume exists" here would
+            // make the entire batch INSERT fail for tables that legitimately
+            // do not have a row_seq column (e.g. de_tech_reform_history),
+            // forcing every row into the de_submission_table fallback and
+            // making them invisible to /api/extracted-data/{tableName}.
+            if (rowIndex instanceof Number && isColumnConfirmed(tableName, "row_seq")) {
                 dbRow.put("row_seq", rowIndex);
             }
 
+            boolean hasBusinessValue = false;
             for (Map.Entry<String, Object> entry : row.entrySet()) {
                 String key = entry.getKey();
                 if (key.startsWith("_")) continue;
@@ -245,13 +324,29 @@ public class BusinessTablePersister {
                         log.debug("Skipping unknown column '{}' for table '{}'", colName, tableName);
                         continue;
                     }
-                    dbRow.put(colName, convertValue(entry.getValue()));
+                    // convertValue() already coerces blank/whitespace-only strings to null
+                    // (see convertValue) so a row of empty strings registers as empty here.
+                    Object normalized = convertValue(entry.getValue());
+                    if (normalized != null) hasBusinessValue = true;
+                    dbRow.put(colName, normalized);
                 }
+            }
+            // Skip rows where every mapped business column is null/blank — these
+            // are spreadsheet placeholder rows produced by SpreadJS style/validation
+            // metadata, not real user input. row_seq alone (without any business
+            // value) is not enough to keep the row.
+            if (!hasBusinessValue) {
+                skippedEmpty++;
+                continue;
             }
             // Fill required year columns AFTER user data so putIfAbsent
             // restores the default when extraction provides null
             fillRequiredYearColumns(tableName, dbRow, auditYear);
             dbRows.add(dbRow);
+        }
+        if (skippedEmpty > 0) {
+            log.debug("persistTableRows: skipped {} all-empty placeholder row(s) for table '{}'",
+                    skippedEmpty, tableName);
         }
 
         if (dbRows.isEmpty()) return true;

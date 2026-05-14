@@ -23,14 +23,53 @@ const columns: RegColumn[] = [
   { prop: 'remark', label: '备注', minWidth: 100 },
 ]
 
+function toNumOrInf(v: unknown): number {
+  if (v === null || v === undefined || v === '') return Infinity
+  const n = Number(v)
+  return Number.isFinite(n) ? n : Infinity
+}
+
+function sortByTemplateOrder(items: Record<string, unknown>[]): Record<string, unknown>[] {
+  return items
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      // Use explicit < / > on each tier so Infinity - Infinity (both keys blank)
+      // does not short-circuit on NaN before reaching the id / index fallback.
+      const seqA = toNumOrInf(a.r.seq_no)
+      const seqB = toNumOrInf(b.r.seq_no)
+      if (seqA !== seqB) return seqA < seqB ? -1 : 1
+      const idA = toNumOrInf(a.r.id)
+      const idB = toNumOrInf(b.r.id)
+      if (idA !== idB) return idA < idB ? -1 : 1
+      return a.i - b.i
+    })
+    .map(({ r }) => r)
+}
+
+function adaptRow(r: Record<string, unknown>, index: number): Record<string, unknown> {
+  return {
+    seqNo: r.seq_no ?? index + 1,
+    projectName: r.project_name ?? '',
+    projectType: r.project_type ?? '',
+    mainContent: r.main_content ?? '',
+    investment: r.investment ?? '',
+    annualSaving: r.designed_saving ?? '',
+    paybackPeriod: r.payback_period ?? '',
+    completionDate: r.completion_date ?? '',
+    actualSaving: r.actual_saving ?? '',
+    isContractManagement: r.is_contract_energy ?? '',
+    remark: r.remark ?? '',
+  }
+}
+
 onMounted(async () => {
   loading.value = true
   try {
-    const data = await queryExtractedTable('de_retrofit_project', { pageSize: 200 }).catch((e: Error) => {
+    const data = await queryExtractedTable('de_tech_reform_history', { pageSize: 200 }).catch((e: Error) => {
       tableError.value = e.message?.includes('404') ? '数据表尚未对接' : ''
       return { rows: [], total: 0 }
     })
-    rows.value = (data.rows || []).map((r, i) => ({ ...r, seqNo: i + 1 }))
+    rows.value = sortByTemplateOrder(data.rows || []).map(adaptRow)
   } finally {
     loading.value = false
   }

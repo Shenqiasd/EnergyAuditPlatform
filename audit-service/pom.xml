@@ -59,5 +59,14 @@
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml-full</artifactId>
         </dependency>
+
+        <!-- H2 in-memory database for persistence-layer tests (test scope only).
+             The same H2 (MODE=MySQL) configuration audit-web uses for the
+             "dev" profile, scoped to test to keep production classpath clean. -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

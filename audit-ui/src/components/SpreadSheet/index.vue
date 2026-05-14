@@ -180,7 +180,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   document.removeEventListener('click', onDocumentClickDismissCtxMenu)
   if (spreadRef.value) {
-    spreadRef.value.removeEventListener('contextmenu', onSpreadContextMenu)
+    spreadRef.value.removeEventListener('contextmenu', onSpreadContextMenu, true)
   }
   if (statusUpdateTimer) clearTimeout(statusUpdateTimer)
   if (resizeTimer) clearTimeout(resizeTimer)
@@ -241,6 +241,9 @@ async function initWorkbook() {
     )
     console.timeEnd('[perf] fromJSON')
     if (isLoadStale(loadId, wb)) return
+    // Must run after fromJSON: the deserialized template restores workbook
+    // options, which would otherwise overwrite allowContextMenu back to true.
+    disableNativeContextMenu(wb)
 
     // ── Phase 2: fetch tags + prefill data in parallel (one listTags call) ─
     // Wrapped in its own try-catch so that a failure in supplementary features
@@ -312,6 +315,13 @@ async function initWorkbook() {
               cpTrace('applyConfigPrefill.done')
             }
 
+            // EA-CUST-039: hide heat / electricity rows in Sheet 15 based on
+            // active energy configuration (runs even when configPrefillData is
+            // null — the function handles that gracefully).
+            cpTrace('applyGhgRowVisibility.start')
+            applyGhgRowVisibility(wb, configPrefillData)
+            cpTrace('applyGhgRowVisibility.done')
+
             // Inject dictionary-based dropdown validators (uses pre-fetched tags)
             cpTrace('applyDictValidators.start')
             console.time('[perf] applyDictValidators')
@@ -343,6 +353,10 @@ async function initWorkbook() {
               console.timeEnd('[perf] applyDataEntryProtection')
               cpTrace('applyDataEntryProtection.done')
             }
+
+            // Bind derivedWhen rules for TABLE tags (e.g. table 8 工艺设备 → K = '-')
+            if (isLoadStale(loadId, wb)) return
+            applyTableDerivedWhenRules(wb, tags)
           } finally {
             cpTrace('phase2.resume.start')
             resumeCalcServiceSafe(wb)
@@ -418,7 +432,7 @@ async function initWorkbook() {
     window.addEventListener('resize', onWindowResize)
     // Bind right-click context menu for add/delete row
     if (spreadRef.value) {
-      spreadRef.value.addEventListener('contextmenu', onSpreadContextMenu)
+      spreadRef.value.addEventListener('contextmenu', onSpreadContextMenu, { capture: true })
     }
     document.addEventListener('click', onDocumentClickDismissCtxMenu)
     cpTrace('postcalc.allDone')
@@ -483,7 +497,10 @@ async function refreshEnterpriseSettingPrefill() {
   const wb = workbook
   const loadId = loadSeq
   try {
-    const prefillData = await getEnterpriseSettingPrefill()
+    const [prefillData, freshConfigData] = await Promise.all([
+      getEnterpriseSettingPrefill(),
+      getConfigPrefillData().catch(() => null),
+    ])
     if (!prefillData || isLoadStale(loadId, wb)) return
 
     wb.suspendPaint()
@@ -491,6 +508,9 @@ async function refreshEnterpriseSettingPrefill() {
     suspendCalcServiceSafe(wb)
     try {
       applyPrefill(wb, cachedTags, prefillData, true)
+      // EA-CUST-039: re-evaluate heat / electricity row visibility after
+      // energy configuration changes (e.g. user enabled / disabled heat).
+      applyGhgRowVisibility(wb, freshConfigData)
     } finally {
       resumeCalcServiceSafe(wb)
       resumeEventSafe(wb)
@@ -540,6 +560,69 @@ function applyConfigPrefill(
   }
 }
 
+/**
+ * EA-CUST-039: Control row visibility in Sheet 15 (温室气体排放汇总)
+ * for the heat / electricity section (TABLE range A39:E42).
+ *
+ * Row mapping (1-based → 0-based):
+ *   Row 39 (idx 38): 净购入使用的热力排放量  → visible when HEAT active
+ *   Row 40 (idx 39): 净购入使用电力的排放量  → visible when ELECTRICITY active
+ *   Row 41 (idx 40): 购买绿电抵消排放量      → visible when ELECTRICITY active
+ *   Row 42 (idx 41): 间接排放小计            → visible when HEAT or ELECTRICITY active
+ *
+ * Product decision: the subtotal row (42) is shown whenever at least one of
+ * heat / electricity is active; hidden only when both are inactive.
+ * The green-electricity offset row (41) follows electricity because the
+ * offset concept only applies to purchased electricity.
+ */
+function applyGhgRowVisibility(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  configData: ConfigPrefillData | null,
+) {
+  if (!configData) return
+
+  // Locate Sheet 15 by name substring match
+  const count = wb.getSheetCount()
+  let sheet: import('@/types/spreadjs').GCSpreadSheet | null = null
+  for (let i = 0; i < count; i++) {
+    const s = wb.getSheet(i)
+    const name = s.name() ?? ''
+    if (name.includes('15') && name.includes('温室气体')) {
+      sheet = s
+      break
+    }
+  }
+  if (!sheet) {
+    console.log('[ghg-row-vis] Sheet 15 (温室气体) not found — skipping')
+    return
+  }
+
+  // The config-prefill API only returns active energies (isActive=1).
+  // If an energy with category '热力' or '电力' exists in the list, it is active.
+  const energies = configData.bs_energy ?? []
+  const hasActiveHeat = energies.some(
+    (e: Record<string, unknown>) => e.category === '热力',
+  )
+  const hasActiveElectricity = energies.some(
+    (e: Record<string, unknown>) => e.category === '电力',
+  )
+
+  console.log(
+    `[ghg-row-vis] heat=${hasActiveHeat}, electricity=${hasActiveElectricity}`,
+  )
+
+  // 0-based row indices for the A39:E42 range
+  const ROW_HEAT = 38       // A39 — heat emission
+  const ROW_ELEC = 39       // A40 — electricity emission
+  const ROW_GREEN = 40      // A41 — green electricity offset
+  const ROW_SUBTOTAL = 41   // A42 — indirect emission subtotal
+
+  sheet.setRowVisible(ROW_HEAT, hasActiveHeat)
+  sheet.setRowVisible(ROW_ELEC, hasActiveElectricity)
+  sheet.setRowVisible(ROW_GREEN, hasActiveElectricity)
+  sheet.setRowVisible(ROW_SUBTOTAL, hasActiveHeat || hasActiveElectricity)
+}
+
 /** Column definition type for CONFIG_PREFILL mappings */
 interface ConfigPrefillColDef {
   col: string | number
@@ -554,6 +637,10 @@ interface ConfigPrefillColDef {
    *  Example: { "masterCol": "A", "lookupField": "name" } */
   linkedTo?: { masterCol: string; lookupField: string }
   extraSources?: Array<{ table: string; field: string; filter?: Record<string, unknown> }>
+  /** Conditional value derivation rules. When the source column's value matches
+   *  `equals`, this column is auto-set to the specified `value`.
+   *  Example: [{ "sourceCol": 2, "equals": "工艺设备", "value": "-" }] */
+  derivedWhen?: Array<{ sourceCol: string | number; equals: string; value: string }>
   /** Synthetic string values to inject into the dropdown list (e.g. "外购" / "产出" virtual nodes
    *  in Sheet 11 能源流程图). These are NOT records in any table — they are literal sentinels
    *  that the downstream business logic recognizes. See EnergyFlowPostProcessor. */
@@ -1578,6 +1665,26 @@ function unlockScalarCell(
     return
   }
 
+  // Handle multi-cell SCALAR ranges (e.g. A43:F51 for merged description areas).
+  // resolveSingleCellRange returns null when start ≠ end; unlock the full area.
+  if (tag.cellRange) {
+    const multiRange = parseCellRangeToObj(tag.cellRange)
+    if (multiRange) {
+      const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+      if (sheet) {
+        const rowCount = multiRange.endRow - multiRange.startRow + 1
+        const colCount = multiRange.endCol - multiRange.startCol + 1
+        if (rowCount > 0 && colCount > 0) {
+          sheet.getRange(multiRange.startRow, multiRange.startCol, rowCount, colCount).locked(false)
+        }
+        if (tag.required === 1) {
+          markCellRequired(sheet.getCell(multiRange.startRow, multiRange.startCol), hint)
+        }
+        return
+      }
+    }
+  }
+
   // Use pre-built cell-tag index for O(1) lookup
   if (tag.tagName) {
     const found = lookupCellTag(wb, tag.tagName, tag.sheetName, tag.sheetIndex)
@@ -1677,6 +1784,95 @@ function unlockTableRange(
   if (tag.required === 1) {
     const cell = sheet.getCell(startRow, startCol)
     markCellRequired(cell, `${tag.tagName ?? tag.targetTable ?? '此表格'} (至少填写1行)`)
+  }
+}
+
+/**
+ * Bind derivedWhen rules for TABLE / EQUIPMENT_BENCHMARK tags.
+ *
+ * For each column that declares `derivedWhen` in its columnMappings JSON,
+ * this function:
+ *   1. Applies the rule to all existing rows (initial load).
+ *   2. Binds a CellChanged handler so the rule fires on live edits.
+ *
+ * When C (source column) changes away from the trigger value, the derived
+ * column keeps its current value (no clear) — the user or product can decide
+ * to add an explicit clear rule later if needed.
+ */
+function applyTableDerivedWhenRules(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tags: TplTagMapping[],
+) {
+  const Events = window.GC?.Spread?.Sheets?.Events
+  if (!Events?.CellChanged) return
+
+  const tableTags = tags.filter(t => {
+    const mt = t.mappingType ?? 'SCALAR'
+    return (mt === 'TABLE' || mt === 'EQUIPMENT_BENCHMARK') && t.columnMappings
+  })
+
+  for (const tag of tableTags) {
+    let columns: ConfigPrefillColDef[]
+    try {
+      const parsed = JSON.parse(tag.columnMappings!)
+      columns = Array.isArray(parsed) ? parsed : parsed.columns ?? []
+    } catch { continue }
+
+    const derivedCols = columns.filter(c => c.derivedWhen?.length)
+    if (!derivedCols.length) continue
+
+    const range = getDynamicRange(tag)
+    if (!range) continue
+
+    const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+    if (!sheet) continue
+
+    const resolveCol = (col: string | number) => {
+      if (typeof col === 'string' && /^[A-Za-z]+$/.test(col)) {
+        return letterToColIndex(col.toUpperCase())
+      }
+      return range.startCol + Number(col)
+    }
+
+    // 1. Apply initial derivation for rows that already have the trigger value
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (const colDef of derivedCols) {
+        const targetColIndex = resolveCol(colDef.col)
+        for (const rule of colDef.derivedWhen!) {
+          const srcColIndex = resolveCol(rule.sourceCol)
+          const srcVal = sheet.getValue(r, srcColIndex)
+          if (srcVal != null && String(srcVal) === rule.equals) {
+            sheet.setValue(r, targetColIndex, rule.value)
+          }
+        }
+      }
+    }
+
+    // 2. Bind CellChanged for live derivation
+    sheet.bind(Events.CellChanged, (
+      _sender: unknown,
+      args: { row: number; col: number; newValue: unknown },
+    ) => {
+      const { row, col: changedCol, newValue } = args
+      const currentRange = getDynamicRange(tag)
+      if (!currentRange || row < currentRange.startRow || row > currentRange.endRow) return
+
+      for (const colDef of derivedCols) {
+        for (const rule of colDef.derivedWhen!) {
+          const srcColIndex = resolveCol(rule.sourceCol)
+          if (changedCol !== srcColIndex) continue
+          const newValStr = newValue != null ? String(newValue) : ''
+          if (newValStr === rule.equals) {
+            const targetColIndex = resolveCol(colDef.col)
+            sheet.setValue(row, targetColIndex, rule.value)
+          }
+        }
+      }
+    })
+
+    console.log(
+      `[derivedWhen] "${tag.tagName}": bound ${derivedCols.length} derived column(s)`,
+    )
   }
 }
 
@@ -2465,9 +2661,52 @@ function validateRequiredFieldsBySheet(): SheetValidationError[] {
 
 // ── Add Row Feature: context menu + insert/delete/reset ────────────────
 
+/** Disable SpreadJS/browser native right-click menus on the data-entry workbook. */
+function disableNativeContextMenu(wb: WB) {
+  try {
+    wb.options.allowContextMenu = false
+  } catch {
+    // Best-effort only; the DOM contextmenu handler below still suppresses the menu.
+  }
+}
+
+function resolveContextMenuTarget(e: MouseEvent): { sheetIndex: number; row: number } | null {
+  if (!workbook) return null
+
+  try {
+    const hit = (workbook as unknown as {
+      hitTest?: (x: number, y: number) => {
+        worksheet?: import('@/types/spreadjs').GCSpreadSheet
+        row?: number
+        col?: number
+      } | null
+    }).hitTest?.(e.pageX, e.pageY)
+
+    if (hit?.worksheet && hit.row != null && hit.row >= 0) {
+      const count = workbook.getSheetCount()
+      for (let i = 0; i < count; i++) {
+        if (workbook.getSheet(i) === hit.worksheet) {
+          return { sheetIndex: i, row: hit.row }
+        }
+      }
+    }
+  } catch {
+    // Fall through to the active selection fallback.
+  }
+
+  const sheet = workbook.getActiveSheet()
+  const selections = sheet.getSelections()
+  if (!selections || selections.length === 0) return null
+  const row = selections[0].row
+  if (row < 0) return null
+  return { sheetIndex: workbook.getActiveSheetIndex(), row }
+}
+
 /** Handle right-click on spreadsheet to show add/delete row context menu */
 function onSpreadContextMenu(e: MouseEvent) {
   e.preventDefault()
+  e.stopPropagation()
+  e.stopImmediatePropagation()
   ctxMenuVisible.value = false
 
   if (!workbook) return
@@ -2475,14 +2714,9 @@ function onSpreadContextMenu(e: MouseEvent) {
   const isSubmittedOrApproved = submissionStatus === 1 || submissionStatus === 2
   if (props.readonly || isSubmittedOrApproved) return
 
-  const sheet = workbook.getActiveSheet()
-  const sheetIndex = workbook.getActiveSheetIndex()
-
-  // Use active selection to determine clicked row
-  const selections = sheet.getSelections()
-  if (!selections || selections.length === 0) return
-  const row = selections[0].row
-  if (row < 0) return
+  const target = resolveContextMenuTarget(e)
+  if (!target) return
+  const { sheetIndex, row } = target
 
   // Find TABLE tag at this row
   const tag = findTableTagAtCell(sheetIndex, row)

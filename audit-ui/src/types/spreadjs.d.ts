@@ -146,7 +146,11 @@ export interface GCSpreadWorkbook {
   calculate(fullRebuild?: number): void
   repaint(): void
   destroy(): void
-  options: GCSpreadWorkbookOptions & { tabStripVisible?: boolean }
+  options: GCSpreadWorkbookOptions & {
+    tabStripVisible?: boolean
+    /** Disable SpreadJS built-in right-click menu while keeping normal editing enabled. */
+    allowContextMenu?: boolean
+  }
   bind<A extends unknown[] = unknown[]>(eventType: string, handler: (...args: A) => void): void
 }
 

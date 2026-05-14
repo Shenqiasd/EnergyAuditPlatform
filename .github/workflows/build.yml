@@ -49,6 +49,114 @@ jobs:
       - name: Maven compile
         run: mvn -B -ntp -DskipTests compile
 
+  backend-tests:
+    name: Backend tests (JUnit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      - name: Run unit tests
+        run: mvn -B -ntp test
+
+      - name: Upload backend coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jacoco-reports
+          path: '**/target/site/jacoco/'
+          if-no-files-found: ignore
+
+  frontend-unit-tests:
+    name: Frontend unit tests (Vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: audit-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: audit-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+        env:
+          npm_config_registry: https://registry.npmmirror.com
+
+      - name: Run Vitest
+        run: npm run test:unit
+
+  frontend-e2e-smoke:
+    name: Frontend E2E smoke (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: audit-ui/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: audit-ui
+        run: npm install --no-audit --no-fund
+        env:
+          npm_config_registry: https://registry.npmmirror.com
+
+      - name: Install Playwright browser
+        working-directory: audit-ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Docker stack
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          JWT_SECRET: energy-audit-ci-secret-key-minimum-256-bits-long
+        run: docker compose up -d --build
+
+      - name: Wait for frontend
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1/login >/dev/null; then
+              echo "Frontend is ready"
+              exit 0
+            fi
+            echo "Waiting for frontend... ($i/60)"
+            sleep 5
+          done
+          docker compose logs
+          exit 1
+
+      - name: Run Playwright smoke tests
+        working-directory: audit-ui
+        env:
+          E2E_BASE_URL: http://127.0.0.1
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: audit-ui/playwright-report/
+          if-no-files-found: ignore
+
+      - name: Stop Docker stack
+        if: always()
+        run: docker compose down -v
+
   # ----------------------------------------------------------------------
   # ADVISORY — reported but does not block merges.
   # Intent: give visibility into drift (type errors / lint warnings / SQL

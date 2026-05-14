@@ -4,6 +4,7 @@ import { queryExtractedTable } from '@/api/extracted-data'
 import SectionTitle from '../components/SectionTitle.vue'
 import RegulationTable from '../components/RegulationTable.vue'
 import type { RegColumn } from '../components/RegulationTable.vue'
+import { adaptRow, sortByTemplateOrder } from '../utils/saving-potential-rows'
 
 const loading = ref(false)
 const rows = ref<Record<string, unknown>[]>([])
@@ -28,7 +29,7 @@ onMounted(async () => {
       tableError.value = e.message?.includes('404') ? '数据表尚未对接' : ''
       return { rows: [], total: 0 }
     })
-    rows.value = (data.rows || []).map((r, i) => ({ ...r, seqNo: i + 1 }))
+    rows.value = sortByTemplateOrder(data.rows || []).map(adaptRow)
   } finally {
     loading.value = false
   }
