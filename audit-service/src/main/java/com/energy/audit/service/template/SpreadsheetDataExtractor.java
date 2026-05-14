@@ -738,7 +738,7 @@ public class SpreadsheetDataExtractor {
             return result;
         } catch (Exception e) {
             log.warn("Failed to convert OADate number {} to date: {}", oaDate, e.getMessage());
-            return oaDate.toString();
+            return null;
         }
     }
 
