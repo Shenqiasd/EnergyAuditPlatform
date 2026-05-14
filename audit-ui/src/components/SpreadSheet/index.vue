@@ -1590,6 +1590,8 @@ function applyDataEntryProtection(
         console.warn(`[protection] ${failed}/${tags.length} 个 tag 解锁失败`)
       }
       console.log(`[protection] 解锁完成: 成功 ${unlocked}, 失败 ${failed}`)
+      const relockedFormulaCells = lockFormulaCells(wb)
+      console.log(`[protection] 公式单元格重新锁定: ${relockedFormulaCells}`)
 
       // Step 4: Enable sheet protection on every sheet
       for (let si = 0; si < sheetCount; si++) {
@@ -1616,6 +1618,38 @@ function applyDataEntryProtection(
     }
   } catch (e) {
     console.warn('[protection] failed to apply data entry protection:', e)
+  }
+}
+
+function lockFormulaCells(wb: import('@/types/spreadjs').GCSpreadWorkbook): number {
+  let locked = 0
+  for (let si = 0; si < wb.getSheetCount(); si++) {
+    const sheet = wb.getSheet(si)
+    const rows = sheet.getRowCount()
+    const cols = sheet.getColumnCount()
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        if (!hasFormula(sheet, row, col)) continue
+        sheet.getCell(row, col).locked(true)
+        locked++
+      }
+    }
+  }
+  return locked
+}
+
+function hasFormula(
+  sheet: import('@/types/spreadjs').GCSpreadSheet,
+  row: number,
+  col: number,
+): boolean {
+  try {
+    const formula = (sheet as typeof sheet & {
+      getFormula?: (row: number, col: number) => unknown
+    }).getFormula?.(row, col)
+    return formula != null && String(formula).trim() !== ''
+  } catch {
+    return false
   }
 }
 
