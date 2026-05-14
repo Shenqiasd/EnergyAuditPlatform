@@ -19,6 +19,13 @@ import { getDataByTypes, type DictData } from '@/api/dict'
 import { initSpreadJSLicense } from '@/utils/spreadjs-license'
 import { onEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
 import { normalizeDateValue } from '@/utils/date-normalize'
+import {
+  deriveProducts,
+  computeRowDelta,
+  generateOps,
+  findAnchorRow,
+  SHEET14_PRODUCT_AREA_START,
+} from '@/utils/sheet14-product-split'
 
 const props = defineProps<{
   templateId: number
@@ -656,11 +663,7 @@ function applySheet14ProductSplit(
 ) {
   if (!configData) return
 
-  const products = configData.bs_product ?? []
-  if (products.length === 0) {
-    console.log('[sheet14-product-split] no products — skipping')
-    return
-  }
+  const rawProducts = configData.bs_product ?? []
 
   // 1. Find Sheet 12 and Sheet 14 by name substring
   const sheetCount = wb.getSheetCount()
@@ -681,57 +684,43 @@ function applySheet14ProductSplit(
   const sheet12Name = sheet12.name()
 
   // 2. Locate the "产值单耗" anchor row — first row after the product area
-  const PRODUCT_AREA_START = 5 // 0-indexed (1-based row 6)
-  let anchorRow = -1
   const rowCount = sheet14.getRowCount()
-  for (let r = PRODUCT_AREA_START; r < Math.min(rowCount, PRODUCT_AREA_START + 100); r++) {
-    const val = sheet14.getValue(r, 0)
-    if (val && String(val).includes('产值单耗')) {
-      anchorRow = r
-      break
-    }
-  }
+  const anchorRow = findAnchorRow(
+    (r, c) => sheet14!.getValue(r, c),
+    rowCount,
+  )
   if (anchorRow < 0) {
     console.warn('[sheet14-product-split] "产值单耗" anchor row not found — skipping')
     return
   }
 
-  // 3. Calculate row delta
-  const existingProductRows = anchorRow - PRODUCT_AREA_START
-  const neededProductRows = products.length * 2 // 2 rows per product (产量 + 单耗)
-  const diff = neededProductRows - existingProductRows
+  // 3. Derive products capped to Sheet 12 tag range (A5:J20 → max 16 rows)
+  const products = deriveProducts(rawProducts)
 
-  if (diff > 0) {
-    sheet14.addRows(anchorRow, diff)
-  } else if (diff < 0) {
-    sheet14.deleteRows(PRODUCT_AREA_START + neededProductRows, -diff)
+  // 4. Calculate and apply row delta (handles both expansion and cleanup)
+  const existingProductRows = anchorRow - SHEET14_PRODUCT_AREA_START
+  const delta = computeRowDelta(existingProductRows, products.length)
+
+  if (delta.diff > 0 && delta.insertAt != null) {
+    sheet14.addRows(delta.insertAt, delta.diff)
+  } else if (delta.diff < 0 && delta.deleteAt != null && delta.deleteCount != null) {
+    sheet14.deleteRows(delta.deleteAt, delta.deleteCount)
   }
 
-  // 4. Sheet 12 CONFIG_PREFILL tag range starts at row 5 (1-based)
-  const SHEET12_PRODUCT_START = 5
+  // 5. Generate and apply cell operations
+  const ops = generateOps(products, sheet12Name)
+  for (const op of ops) {
+    if (op.type === 'setValue') {
+      sheet14.setValue(op.row, op.col, op.value)
+    } else {
+      sheet14.setFormula(op.row, op.col, op.value)
+    }
+  }
 
-  // 5. Fill product rows with labels + cross-sheet formulas
+  // 6. Lock all generated cells — derived data, user should not edit
   for (let i = 0; i < products.length; i++) {
-    const product = products[i]
-    const productName = String(product.name ?? '')
-    const rawUnit = String(product.measurementUnit ?? '')
-    const unit = normalizeProductUnit(rawUnit)
-
-    const s12Row = SHEET12_PRODUCT_START + i // 1-based for formula refs
-    const outputRow = PRODUCT_AREA_START + i * 2       // 产量 (0-indexed)
-    const consumptionRow = PRODUCT_AREA_START + i * 2 + 1 // 单耗 (0-indexed)
-
-    // 产量 row: B = current output (G), C = base output (J)
-    sheet14.setValue(outputRow, 0, `${productName}产量（${unit}）`)
-    sheet14.setFormula(outputRow, 1, `'${sheet12Name}'!G${s12Row}`)
-    sheet14.setFormula(outputRow, 2, `'${sheet12Name}'!J${s12Row}`)
-
-    // 单耗 row: B = current unit consumption (E), C = base unit consumption (H)
-    sheet14.setValue(consumptionRow, 0, `${productName}单耗（千克/${unit}）`)
-    sheet14.setFormula(consumptionRow, 1, `'${sheet12Name}'!E${s12Row}`)
-    sheet14.setFormula(consumptionRow, 2, `'${sheet12Name}'!H${s12Row}`)
-
-    // Lock all generated cells — derived data, user should not edit
+    const outputRow = SHEET14_PRODUCT_AREA_START + i * 2
+    const consumptionRow = SHEET14_PRODUCT_AREA_START + i * 2 + 1
     for (const r of [outputRow, consumptionRow]) {
       for (let c = 0; c <= 2; c++) {
         const style = buildLockedStyle(sheet14, r, c)
@@ -744,14 +733,8 @@ function applySheet14ProductSplit(
 
   console.log(
     `[sheet14-product-split] generated ${products.length} product(s), ` +
-    `${neededProductRows} rows (was ${existingProductRows})`,
+    `${delta.neededRows} rows (was ${existingProductRows})`,
   )
-}
-
-function normalizeProductUnit(unit: string): string {
-  const lower = unit.toLowerCase().trim()
-  if (lower === 't' || lower === '吨') return '吨'
-  return unit.trim() || '吨'
 }
 
 /** Column definition type for CONFIG_PREFILL mappings */
