@@ -26,6 +26,8 @@ export interface ProductRecord {
 export interface SheetProductRow {
   indicatorName?: string | null
   denominatorUnit?: string | null
+  /** 1-based row number in Sheet 12 when the row comes from workbook cells. */
+  sheet12Row?: number | null
 }
 
 export interface DerivedProduct {
@@ -92,7 +94,9 @@ export function deriveProductsFromSheetRows(
       return {
         name: resolveProductNameFromIndicator(indicatorName, i + 1),
         unit,
-        sheet12Row: SHEET12_PRODUCT_START_ROW + 1 + i,
+        sheet12Row: Number.isInteger(row.sheet12Row)
+          ? Number(row.sheet12Row)
+          : SHEET12_PRODUCT_START_ROW + 1 + i,
       }
     })
     .filter(p => p.name !== '')

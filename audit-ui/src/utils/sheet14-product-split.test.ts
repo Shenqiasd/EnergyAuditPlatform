@@ -128,6 +128,32 @@ describe('deriveProductsFromSheetRows', () => {
       { name: '铝', unit: 'kg', sheet12Row: 6 },
     ])
   })
+
+  it('keeps actual Sheet12 row references when blank rows create gaps', () => {
+    const result = deriveProductsFromSheetRows([
+      { indicatorName: '钢单产综合能耗', denominatorUnit: '吨', sheet12Row: 5 },
+      { indicatorName: '铝能耗', denominatorUnit: 'kg', sheet12Row: 7 },
+    ])
+
+    expect(result).toEqual([
+      { name: '钢', unit: '吨', sheet12Row: 5 },
+      { name: '铝', unit: 'kg', sheet12Row: 7 },
+    ])
+
+    const ops = generateOps(result, '12.单位产品能耗数据')
+    expect(ops).toContainEqual({
+      type: 'setFormula',
+      row: SHEET14_PRODUCT_AREA_START + 2,
+      col: 1,
+      value: "'12.单位产品能耗数据'!G7",
+    })
+    expect(ops).toContainEqual({
+      type: 'setFormula',
+      row: SHEET14_PRODUCT_AREA_START + 3,
+      col: 1,
+      value: "'12.单位产品能耗数据'!E7",
+    })
+  })
 })
 
 describe('resolveProductNameFromIndicator', () => {
