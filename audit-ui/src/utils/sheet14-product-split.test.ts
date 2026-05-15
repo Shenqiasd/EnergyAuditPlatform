@@ -264,6 +264,20 @@ describe('findAnchorRow', () => {
     expect(findAnchorRow(getValue, 20)).toBe(7)
   })
 
+  it('prefers saving-summary anchors when the template keeps 产值单耗 above product rows', () => {
+    const cells: Record<string, unknown> = {
+      '4,0': '产值单耗',
+      '5,0': '产品1产量（产品单位）',
+      '6,0': '产品1单耗（吨标煤/每单位产品）',
+      '7,0': '产品2产量（产品单位）',
+      '8,0': '产品2单耗（吨标煤/每单位产品）',
+      '9,0': '产值节能量（吨标煤）',
+    }
+    const getValue = (r: number, c: number) => cells[`${r},${c}`]
+
+    expect(findAnchorRow(getValue, 20)).toBe(9)
+  })
+
   it('returns -1 when anchor is not found', () => {
     const getValue = () => null
     expect(findAnchorRow(getValue, 20)).toBe(-1)

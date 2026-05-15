@@ -174,6 +174,12 @@ export function findAnchorRow(
   searchStart: number = SHEET14_PRODUCT_AREA_START,
 ): number {
   const limit = Math.min(rowCount, searchStart + 100)
+  for (const marker of ['产值节能量', '产品节能量']) {
+    for (let r = searchStart; r < limit; r++) {
+      const val = getCellValue(r, 0)
+      if (val && String(val).includes(marker)) return r
+    }
+  }
   for (let r = searchStart; r < limit; r++) {
     const val = getCellValue(r, 0)
     if (val && String(val).includes('产值单耗')) return r
