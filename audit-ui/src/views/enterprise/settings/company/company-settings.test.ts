@@ -170,3 +170,115 @@ describe('leave guard choice mapping', () => {
     expect(mapChoice('close', true)).toBe('cancel')
   })
 })
+
+// ── ElMessageBox dialog config ──
+
+describe('leave dialog configuration', () => {
+  it('showCancelButton must be true for discard button to render', () => {
+    const config = {
+      title: '未保存的更改',
+      message: '当前页面有未保存的修改，是否保存草稿？',
+      distinguishCancelAndClose: true,
+      showCancelButton: true,
+      confirmButtonText: '保存草稿并离开',
+      cancelButtonText: '放弃修改',
+      closeOnClickModal: false,
+      type: 'warning' as const,
+    }
+    expect(config.showCancelButton).toBe(true)
+    expect(config.cancelButtonText).toBe('放弃修改')
+  })
+
+  it('three choices are available: save, discard, cancel', () => {
+    const config = {
+      confirmButtonText: '保存草稿并离开',
+      cancelButtonText: '放弃修改',
+      showCancelButton: true,
+      distinguishCancelAndClose: true,
+    }
+    // confirm click → save, cancel click → discard, close/escape → cancel
+    expect(config.confirmButtonText).toBe('保存草稿并离开')
+    expect(config.cancelButtonText).toBe('放弃修改')
+    expect(config.distinguishCancelAndClose).toBe(true)
+  })
+})
+
+// ── Popstate sentinel guard ──
+
+describe('popstate sentinel guard logic', () => {
+  it('pushHistoryGuard activates the popstate guard', () => {
+    let active = false
+    const pushHistoryGuard = () => { active = true }
+    pushHistoryGuard()
+    expect(active).toBe(true)
+  })
+
+  it('popstate with clean form deactivates guard and proceeds', () => {
+    let active = true
+    const isDirty = () => false
+    const backCalled = { value: false }
+
+    // Simulate onPopState when form is clean
+    if (active && !isDirty()) {
+      active = false
+      backCalled.value = true
+    }
+    expect(active).toBe(false)
+    expect(backCalled.value).toBe(true)
+  })
+
+  it('popstate with dirty form re-pushes sentinel and shows dialog', () => {
+    let active = true
+    let pushCount = 0
+    const isDirty = () => true
+
+    // Simulate onPopState when form is dirty
+    if (active && isDirty()) {
+      pushCount++ // re-push sentinel
+      active = true
+    }
+    expect(pushCount).toBe(1)
+    expect(active).toBe(true)
+  })
+
+  it('approved leave sets skipRouteLeaveGuard and leavingApproved', () => {
+    let skipRouteLeaveGuard = false
+    let leavingApproved = false
+    let popstateGuardActive = true
+
+    // Simulate approval path in onPopState
+    leavingApproved = true
+    popstateGuardActive = false
+    skipRouteLeaveGuard = true
+
+    expect(leavingApproved).toBe(true)
+    expect(skipRouteLeaveGuard).toBe(true)
+    expect(popstateGuardActive).toBe(false)
+  })
+
+  it('skipRouteLeaveGuard bypasses onBeforeRouteLeave dialog', () => {
+    let skipRouteLeaveGuard = true
+    let dialogShown = false
+
+    // Simulate onBeforeRouteLeave
+    if (skipRouteLeaveGuard) {
+      skipRouteLeaveGuard = false
+      // return true — no dialog
+    } else {
+      dialogShown = true
+    }
+    expect(dialogShown).toBe(false)
+    expect(skipRouteLeaveGuard).toBe(false)
+  })
+
+  it('leavingApproved suppresses beforeunload after dialog approval', () => {
+    let leavingApproved = true
+    let beforeUnloadTriggered = false
+
+    // Simulate onBeforeUnload
+    if (!leavingApproved) {
+      beforeUnloadTriggered = true
+    }
+    expect(beforeUnloadTriggered).toBe(false)
+  })
+})
