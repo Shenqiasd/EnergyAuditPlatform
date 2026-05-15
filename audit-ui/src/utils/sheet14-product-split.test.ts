@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   normalizeProductUnit,
   deriveProducts,
+  deriveProductsFromSheetRows,
+  resolveProductNameFromIndicator,
   computeRowDelta,
   generateOps,
   findAnchorRow,
@@ -99,6 +101,39 @@ describe('deriveProducts', () => {
       { name: null, measurementUnit: '吨' },
     ]
     expect(deriveProducts(products)).toEqual([])
+  })
+})
+
+describe('deriveProductsFromSheetRows', () => {
+  it('preserves user-entered Sheet12 indicator labels by row', () => {
+    const result = deriveProductsFromSheetRows([
+      { indicatorName: '钢单产综合能耗', denominatorUnit: '吨' },
+      { indicatorName: 'EA052RT-产品B单位产量综合能耗', denominatorUnit: '件' },
+    ])
+
+    expect(result).toEqual([
+      { name: '钢', unit: '吨', sheet12Row: 5 },
+      { name: 'EA052RT-产品B', unit: '件', sheet12Row: 6 },
+    ])
+  })
+
+  it('falls back to product sequence only when the Sheet12 label is blank', () => {
+    const result = deriveProductsFromSheetRows([
+      { indicatorName: null, denominatorUnit: null },
+      { indicatorName: '铝能耗', denominatorUnit: 'kg' },
+    ])
+
+    expect(result).toEqual([
+      { name: '产品1', unit: '吨', sheet12Row: 5 },
+      { name: '铝', unit: 'kg', sheet12Row: 6 },
+    ])
+  })
+})
+
+describe('resolveProductNameFromIndicator', () => {
+  it('keeps the entered product prefix before common indicator suffixes', () => {
+    expect(resolveProductNameFromIndicator('EA052RT-产品B单位产量综合能耗', 2)).toBe('EA052RT-产品B')
+    expect(resolveProductNameFromIndicator('钢单产综合能耗', 1)).toBe('钢')
   })
 })
 
