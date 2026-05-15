@@ -71,12 +71,25 @@ describe('dirty tracking', () => {
   })
 })
 
-// ── Draft save API ──
+// ── Draft save API (undefined → null conversion) ──
+
+/**
+ * Mirrors the actual draftSaveEnterpriseSetting conversion logic:
+ * converts undefined values to null so they appear as explicit null
+ * in JSON rather than being omitted by JSON.stringify.
+ */
+function convertPatch(data: Record<string, unknown>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  for (const key of Object.keys(data)) {
+    patch[key] = data[key] === undefined ? null : data[key]
+  }
+  return patch
+}
 
 describe('draftSaveEnterpriseSetting API shape', () => {
   it('calls PUT /enterprise/setting/draft', async () => {
     const mockPut = vi.fn().mockResolvedValue(undefined)
-    const draftSave = (data: Record<string, unknown>) => mockPut('/enterprise/setting/draft', data)
+    const draftSave = (data: Record<string, unknown>) => mockPut('/enterprise/setting/draft', convertPatch(data))
 
     await draftSave({ fax: 'test-marker' })
 
@@ -85,10 +98,51 @@ describe('draftSaveEnterpriseSetting API shape', () => {
 
   it('does not require industryCode or industryName', async () => {
     const mockPut = vi.fn().mockResolvedValue(undefined)
-    const draftSave = (data: Record<string, unknown>) => mockPut('/enterprise/setting/draft', data)
+    const draftSave = (data: Record<string, unknown>) => mockPut('/enterprise/setting/draft', convertPatch(data))
 
     await expect(draftSave({ region: '上海市' })).resolves.toBeUndefined()
     expect(mockPut).toHaveBeenCalledWith('/enterprise/setting/draft', { region: '上海市' })
+  })
+
+  it('converts undefined industry fields to explicit null for cleared cascader', () => {
+    const formData: Record<string, unknown> = {
+      fax: '021-123',
+      industryCode: undefined,
+      industryName: undefined,
+      industryCategory: undefined,
+      region: '上海市',
+    }
+    const patch = convertPatch(formData)
+
+    // undefined → null so the key appears in JSON
+    expect(patch.industryCode).toBeNull()
+    expect(patch.industryName).toBeNull()
+    expect(patch.industryCategory).toBeNull()
+    // non-undefined values pass through
+    expect(patch.fax).toBe('021-123')
+    expect(patch.region).toBe('上海市')
+  })
+
+  it('preserves non-undefined values including zero and empty string', () => {
+    const formData: Record<string, unknown> = {
+      registeredCapital: 0,
+      fax: '',
+      region: '北京市',
+    }
+    const patch = convertPatch(formData)
+
+    expect(patch.registeredCapital).toBe(0)
+    expect(patch.fax).toBe('')
+    expect(patch.region).toBe('北京市')
+  })
+
+  it('omitted keys are not added to the patch', () => {
+    // Only keys present in the source object appear in the patch
+    const formData: Record<string, unknown> = { fax: 'test' }
+    const patch = convertPatch(formData)
+
+    expect(Object.keys(patch)).toEqual(['fax'])
+    expect(patch).not.toHaveProperty('industryCode')
   })
 })
 

@@ -73,26 +73,28 @@ public class EnterpriseSettingController {
         return R.ok();
     }
 
-    @Operation(summary = "Draft-save enterprise setting — partial/patch semantics, merges with existing record")
+    @Operation(summary = "Draft-save enterprise setting — JSON-patch semantics: present keys "
+            + "(including explicit null) are applied; omitted keys preserve existing values")
     @PutMapping("/draft")
     @SuppressWarnings("unchecked")
-    public R<Void> saveDraft(@RequestBody EntEnterpriseSetting setting) {
+    public R<Void> saveDraft(@RequestBody Map<String, Object> patch) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
-        setting.setEnterpriseId(enterpriseId);
 
-        // Merge incoming non-null fields onto the existing record so that a
-        // sparse payload (e.g. only {fax}) does not wipe other columns to NULL.
+        // Start from existing record (or empty map for brand-new enterprises).
         EntEnterpriseSetting existing = settingService.get(enterpriseId);
-        EntEnterpriseSetting merged;
-        if (existing != null) {
-            Map<String, Object> base = objectMapper.convertValue(existing, Map.class);
-            Map<String, Object> incoming = objectMapper.convertValue(setting, Map.class);
-            incoming.values().removeIf(v -> v == null);
-            base.putAll(incoming);
-            merged = objectMapper.convertValue(base, EntEnterpriseSetting.class);
-        } else {
-            merged = setting;
+        Map<String, Object> base = existing != null
+                ? objectMapper.convertValue(existing, Map.class)
+                : new HashMap<>();
+
+        // Overlay only keys that are *present* in the incoming JSON.
+        // - present key with value  → user changed the field → write new value
+        // - present key with null   → user explicitly cleared → write null
+        // - omitted key             → not in patch.keySet()  → keep existing
+        for (String key : patch.keySet()) {
+            base.put(key, patch.get(key));
         }
+
+        EntEnterpriseSetting merged = objectMapper.convertValue(base, EntEnterpriseSetting.class);
         merged.setEnterpriseId(enterpriseId);
         settingService.save(merged);
         return R.ok();

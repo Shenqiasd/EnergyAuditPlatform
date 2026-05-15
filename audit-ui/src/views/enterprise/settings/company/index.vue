@@ -146,7 +146,7 @@ async function loadData() {
   }
 }
 
-/** Draft save — no full validation, allows partial data */
+/** Draft save — no full validation, allows partial data (patch semantics) */
 async function handleDraftSave(): Promise<boolean> {
   form.value.energyUsageType = normalizeEnergyUsageType(form.value.energyUsageType) ?? undefined
   saving.value = true

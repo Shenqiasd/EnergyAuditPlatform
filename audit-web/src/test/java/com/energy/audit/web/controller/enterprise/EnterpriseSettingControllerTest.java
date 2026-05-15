@@ -9,6 +9,7 @@ import com.energy.audit.service.setting.EnergySettingService;
 import com.energy.audit.service.setting.ProductSettingService;
 import com.energy.audit.service.setting.UnitSettingService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.mockito.ArgumentCaptor;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Unit tests for {@link EnterpriseSettingController}.
@@ -45,7 +49,7 @@ class EnterpriseSettingControllerTest {
                 mock(EnergySettingService.class),
                 mock(ProductSettingService.class),
                 mock(UnitSettingService.class),
-                new ObjectMapper());
+                new ObjectMapper().registerModule(new JavaTimeModule()));
         SecurityUtils.setContext(1L, "enterprise", 3, 42L);
     }
 
@@ -90,17 +94,17 @@ class EnterpriseSettingControllerTest {
         verify(settingService, times(1)).save(setting);
     }
 
-    // ── Draft save endpoint tests (patch/merge semantics) ──
+    // ── Draft save endpoint tests (JSON-patch semantics with Map<String,Object>) ──
 
     @Test
-    void saveDraftAllowsBlankIndustryCodeForNewRecord() {
-        // No existing record → new enterprise, sparse payload is fine
+    void saveDraftNewRecord() {
+        // No existing record → brand new enterprise
         when(settingService.get(42L)).thenReturn(null);
 
-        EntEnterpriseSetting setting = new EntEnterpriseSetting();
-        setting.setFax("qa-codex-test-marker");
+        Map<String, Object> patch = new HashMap<>();
+        patch.put("fax", "qa-codex-test-marker");
 
-        R<Void> response = controller.saveDraft(setting);
+        R<Void> response = controller.saveDraft(patch);
 
         assertThat(response.getCode()).isEqualTo(200);
 
@@ -112,8 +116,8 @@ class EnterpriseSettingControllerTest {
     }
 
     @Test
-    void saveDraftMergesWithExistingRecordPreservingUntouchedFields() {
-        // Existing record with many fields populated
+    void saveDraftSparsePayloadPreservesOmittedFields() {
+        // Existing record with many fields
         EntEnterpriseSetting existing = new EntEnterpriseSetting();
         existing.setId(1L);
         existing.setEnterpriseId(42L);
@@ -124,20 +128,20 @@ class EnterpriseSettingControllerTest {
         existing.setFax("021-12345678");
         when(settingService.get(42L)).thenReturn(existing);
 
-        // Sparse incoming payload: only fax changed
-        EntEnterpriseSetting incoming = new EntEnterpriseSetting();
-        incoming.setFax("qa-codex-20260515-ea-cust-042-marker");
+        // Sparse patch: only fax key is present → omitted keys must survive
+        Map<String, Object> patch = new HashMap<>();
+        patch.put("fax", "qa-codex-20260515-ea-cust-042-marker");
 
-        R<Void> response = controller.saveDraft(incoming);
+        R<Void> response = controller.saveDraft(patch);
 
         assertThat(response.getCode()).isEqualTo(200);
 
         ArgumentCaptor<EntEnterpriseSetting> captor = ArgumentCaptor.forClass(EntEnterpriseSetting.class);
         verify(settingService, times(1)).save(captor.capture());
         EntEnterpriseSetting saved = captor.getValue();
-        // Incoming field is updated
+        // Updated field
         assertThat(saved.getFax()).isEqualTo("qa-codex-20260515-ea-cust-042-marker");
-        // Existing fields are preserved (NOT wiped to null)
+        // Omitted fields preserved
         assertThat(saved.getRegion()).isEqualTo("上海市");
         assertThat(saved.getIndustryCode()).isEqualTo("281");
         assertThat(saved.getIndustryName()).isEqualTo("锅炉及原动设备制造");
@@ -146,7 +150,45 @@ class EnterpriseSettingControllerTest {
     }
 
     @Test
-    void saveDraftMergesFullPayloadCorrectly() {
+    void saveDraftExplicitNullClearsExistingFields() {
+        // Existing record with dates and industry classification
+        EntEnterpriseSetting existing = new EntEnterpriseSetting();
+        existing.setId(1L);
+        existing.setEnterpriseId(42L);
+        existing.setRegisteredDate(java.time.LocalDate.of(2025, 1, 1));
+        existing.setIndustryCode("281");
+        existing.setIndustryName("锅炉及原动设备制造");
+        existing.setIndustryCategory("28");
+        existing.setFax("old-fax");
+        when(settingService.get(42L)).thenReturn(existing);
+
+        // Patch with explicit null → user cleared these fields
+        Map<String, Object> patch = new HashMap<>();
+        patch.put("registeredDate", null);
+        patch.put("industryCode", null);
+        patch.put("industryName", null);
+        patch.put("industryCategory", null);
+        // fax is NOT in the patch → must survive
+
+        R<Void> response = controller.saveDraft(patch);
+
+        assertThat(response.getCode()).isEqualTo(200);
+
+        ArgumentCaptor<EntEnterpriseSetting> captor = ArgumentCaptor.forClass(EntEnterpriseSetting.class);
+        verify(settingService, times(1)).save(captor.capture());
+        EntEnterpriseSetting saved = captor.getValue();
+        // Explicitly cleared → null
+        assertThat(saved.getRegisteredDate()).isNull();
+        assertThat(saved.getIndustryCode()).isNull();
+        assertThat(saved.getIndustryName()).isNull();
+        assertThat(saved.getIndustryCategory()).isNull();
+        // Omitted → preserved
+        assertThat(saved.getFax()).isEqualTo("old-fax");
+        assertThat(saved.getEnterpriseId()).isEqualTo(42L);
+    }
+
+    @Test
+    void saveDraftFullPayloadUpdatesAllSentFields() {
         // Existing record
         EntEnterpriseSetting existing = new EntEnterpriseSetting();
         existing.setId(1L);
@@ -155,14 +197,14 @@ class EnterpriseSettingControllerTest {
         existing.setFax("old-fax");
         when(settingService.get(42L)).thenReturn(existing);
 
-        // Full payload from the frontend (all fields present)
-        EntEnterpriseSetting incoming = new EntEnterpriseSetting();
-        incoming.setRegion("北京市");
-        incoming.setFax("new-fax");
-        incoming.setIndustryCode("282");
-        incoming.setIndustryName("金属加工机械制造");
+        // Full payload from frontend
+        Map<String, Object> patch = new HashMap<>();
+        patch.put("region", "北京市");
+        patch.put("fax", "new-fax");
+        patch.put("industryCode", "282");
+        patch.put("industryName", "金属加工机械制造");
 
-        R<Void> response = controller.saveDraft(incoming);
+        R<Void> response = controller.saveDraft(patch);
 
         assertThat(response.getCode()).isEqualTo(200);
 
