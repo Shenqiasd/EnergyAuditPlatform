@@ -34,7 +34,7 @@ import java.util.Base64;
  *   ID 11: 表7+表8 → Sheet "7.能碳计量器具汇总表" + Sheet "8.能碳计量器具配备率表"
  *   ID 12: 表9逐一输出 → Sheet "9.温室气体排放"
  *   ID 13: 平衡表 → Sheet "10.能源消费平衡综合表"
- *   ID 14: 表16 → Sheet "16.能碳管理改进建议表"
+ *   ID 14: legacy 表6 能源管理制度 anchor, not part of the official 0515 regulated-chart outputs
  *   ID 15: 表11 → Sheet "11.淘汰"
  *   ID 16: 表13 → Sheet "13.企业产品能源成本表" (duplicate of ID 4; currently orphaned in the
  *          template — the batch annotation exists in comments.xml but has no body anchor, so it
@@ -70,7 +70,6 @@ public class TemplateBasedReportBuilder {
         ANNOTATION_SHEET_MAP.put(11, "7.能碳计量器具汇总");    // + 表8 (see ANNOTATION_11_EXTRA_SHEET)
         ANNOTATION_SHEET_MAP.put(12, "9.温室气体排放");
         ANNOTATION_SHEET_MAP.put(13, "10.能源消费平衡综合");
-        ANNOTATION_SHEET_MAP.put(14, "16.能碳管理改进建议");
         ANNOTATION_SHEET_MAP.put(15, "11.淘汰");
         ANNOTATION_SHEET_MAP.put(16, "13.企业产品能源成本表");  // duplicate of ID 4, often orphaned
         ANNOTATION_SHEET_MAP.put(17, "14.节能量计算");
@@ -128,7 +127,7 @@ public class TemplateBasedReportBuilder {
             for (Integer id : commentPositions.keySet()) {
                 if (id == null) continue;
                 if (id == 11) expectedTables += 2;            // annotation 11 inserts two tables
-                else if (id >= 3 && id <= 21 && id != 10) expectedTables += 1;
+                else if (ANNOTATION_SHEET_MAP.containsKey(id)) expectedTables += 1;
             }
             boolean expectImage = commentPositions.containsKey(10) && flowChartImage != null
                     && flowChartImage.length > 0;

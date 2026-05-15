@@ -197,13 +197,13 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
 
     private void persistSavingCalculationDetails(Long submissionId, Long enterpriseId, Integer auditYear,
                                                  Map<String, Object> extractedData, String operator) {
+        businessTablePersister.deleteForReExtraction(
+                SAVING_CALCULATION_DETAIL_TABLE, submissionId, enterpriseId, auditYear, operator);
+
         Object value = extractedData.get(PRODUCT_UNIT_TABLE);
         if (!(value instanceof List<?> sourceRows) || sourceRows.isEmpty()) {
             return;
         }
-
-        businessTablePersister.deleteForReExtraction(
-                SAVING_CALCULATION_DETAIL_TABLE, submissionId, enterpriseId, auditYear, operator);
 
         List<Map<String, Object>> detailRows = new ArrayList<>();
         int productSeq = 1;
