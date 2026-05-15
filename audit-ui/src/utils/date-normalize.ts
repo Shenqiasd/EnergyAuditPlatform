@@ -51,14 +51,14 @@ export function normalizeDateValue(raw: unknown): string | null {
 
   // OADate number (SpreadJS internal) → JS Date
   if (typeof raw === 'number') {
-    // SpreadJS OADate epoch: 1899-12-30
-    const epoch = new Date(1899, 11, 30)
-    const ms = epoch.getTime() + raw * 86400000
+    // SpreadJS OADate epoch: 1899-12-30. Use UTC to avoid historic local
+    // timezone offsets around 1899 shifting the normalized day.
+    const ms = Date.UTC(1899, 11, 30) + raw * 86400000
     const dt = new Date(ms)
     if (!isNaN(dt.getTime())) {
-      const y = dt.getFullYear()
-      const m = String(dt.getMonth() + 1).padStart(2, '0')
-      const d = String(dt.getDate()).padStart(2, '0')
+      const y = dt.getUTCFullYear()
+      const m = String(dt.getUTCMonth() + 1).padStart(2, '0')
+      const d = String(dt.getUTCDate()).padStart(2, '0')
       const result = `${y}-${m}-${d}`
       if (isValidDateString(result)) return result
     }

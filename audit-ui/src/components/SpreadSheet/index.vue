@@ -1369,6 +1369,238 @@ interface DateFieldRegistry {
 }
 let dateFieldRegistry: DateFieldRegistry | null = null
 
+interface DateColumnMapping {
+  col?: number | string
+  field?: string
+  fieldName?: string
+  type?: string
+}
+
+function createDateFieldRegistry(): DateFieldRegistry {
+  return {
+    scalarCells: new Map(),
+    tableColumns: new Map(),
+    tableColumnRanges: new Map(),
+  }
+}
+
+function cloneDateFieldRegistry(source: DateFieldRegistry): DateFieldRegistry {
+  const cloned = createDateFieldRegistry()
+  mergeDateFieldRegistry(cloned, source)
+  return cloned
+}
+
+function hasAnyDateFields(registry: DateFieldRegistry): boolean {
+  for (const cells of registry.scalarCells.values()) {
+    if (cells.size > 0) return true
+  }
+  for (const ranges of registry.tableColumnRanges.values()) {
+    if (ranges.length > 0) return true
+  }
+  return false
+}
+
+function addScalarDateCell(registry: DateFieldRegistry, sheetIndex: number, row: number, col: number) {
+  if (!registry.scalarCells.has(sheetIndex)) {
+    registry.scalarCells.set(sheetIndex, new Set())
+  }
+  registry.scalarCells.get(sheetIndex)!.add(`${row},${col}`)
+}
+
+function addTableDateRange(
+  registry: DateFieldRegistry,
+  sheetIndex: number,
+  col: number,
+  startRow: number,
+  endRow: number,
+) {
+  if (!registry.tableColumns.has(sheetIndex)) {
+    registry.tableColumns.set(sheetIndex, new Set())
+  }
+  registry.tableColumns.get(sheetIndex)!.add(col)
+
+  if (!registry.tableColumnRanges.has(sheetIndex)) {
+    registry.tableColumnRanges.set(sheetIndex, [])
+  }
+  const ranges = registry.tableColumnRanges.get(sheetIndex)!
+  if (!ranges.some(r => r.col === col && r.startRow === startRow && r.endRow === endRow)) {
+    ranges.push({ col, startRow, endRow })
+  }
+}
+
+function mergeDateFieldRegistry(target: DateFieldRegistry, source: DateFieldRegistry) {
+  for (const [sheetIndex, cells] of source.scalarCells) {
+    for (const key of cells) {
+      const [row, col] = key.split(',').map(Number)
+      addScalarDateCell(target, sheetIndex, row, col)
+    }
+  }
+  for (const [sheetIndex, ranges] of source.tableColumnRanges) {
+    for (const range of ranges) {
+      addTableDateRange(target, sheetIndex, range.col, range.startRow, range.endRow)
+    }
+  }
+}
+
+function parseColumnMappingsForDateFields(tag: TplTagMapping): DateColumnMapping[] {
+  if (!tag.columnMappings) return []
+  try {
+    const parsed = JSON.parse(tag.columnMappings) as unknown
+    if (Array.isArray(parsed)) return parsed as DateColumnMapping[]
+    if (parsed && typeof parsed === 'object') {
+      const root = parsed as {
+        commonColumns?: unknown
+        typeColumns?: Record<string, unknown>
+      }
+      const columns: DateColumnMapping[] = []
+      if (Array.isArray(root.commonColumns)) {
+        columns.push(...(root.commonColumns as DateColumnMapping[]))
+      }
+      if (root.typeColumns && typeof root.typeColumns === 'object') {
+        for (const arr of Object.values(root.typeColumns)) {
+          if (Array.isArray(arr)) columns.push(...(arr as DateColumnMapping[]))
+        }
+      }
+      return columns
+    }
+  } catch {
+    // Bad columnMappings should not block template loading.
+  }
+  return []
+}
+
+function isDateColumnMapping(colDef: DateColumnMapping, tag: TplTagMapping): boolean {
+  const fieldName = colDef.field ?? colDef.fieldName
+  if (!fieldName) return false
+  if (NON_DATE_FIELD_NAMES.has(fieldName)) return false
+  return DATE_FIELD_NAMES.has(fieldName) ||
+    colDef.type?.toUpperCase() === 'DATE' ||
+    (tag.dataType?.toUpperCase() === 'DATE' && DATE_FIELD_NAMES.has(fieldName))
+}
+
+function isScalarDateTag(tag: TplTagMapping): boolean {
+  const fieldName = tag.fieldName
+  if (!fieldName) return false
+  if (NON_DATE_FIELD_NAMES.has(fieldName)) return false
+  return DATE_FIELD_NAMES.has(fieldName) || tag.dataType?.toUpperCase() === 'DATE'
+}
+
+function resolveDateColumnIndex(
+  range: { startCol: number },
+  col: number | string | undefined,
+): number | null {
+  if (col == null) return null
+  if (typeof col === 'string' && /^[A-Za-z]+$/.test(col)) {
+    return letterToColIndex(col.toUpperCase())
+  }
+  const relCol = Number(col)
+  if (!Number.isFinite(relCol)) return null
+  return range.startCol + relCol
+}
+
+function resolveTagSheetIndex(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  sheet: import('@/types/spreadjs').GCSpreadSheet,
+  tag: TplTagMapping,
+): number {
+  let sheetIndex = tag.sheetIndex ?? 0
+  for (let si = 0; si < wb.getSheetCount(); si++) {
+    if (wb.getSheet(si) === sheet) {
+      sheetIndex = si
+      break
+    }
+  }
+  return sheetIndex
+}
+
+function buildDateFieldRegistryFromTags(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  tags: TplTagMapping[],
+): DateFieldRegistry {
+  const registry = createDateFieldRegistry()
+
+  for (const tag of tags) {
+    const mt = tag.mappingType ?? 'SCALAR'
+    if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
+    const columns = parseColumnMappingsForDateFields(tag)
+    if (columns.length === 0 || !tag.cellRange) continue
+
+    const range = getDynamicRange(tag)
+    if (!range) continue
+
+    const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
+    if (!sheet) continue
+
+    const sheetIndex = resolveTagSheetIndex(wb, sheet, tag)
+    for (const colDef of columns) {
+      if (!isDateColumnMapping(colDef, tag)) continue
+      const absCol = resolveDateColumnIndex(range, colDef.col)
+      if (absCol == null) continue
+      addTableDateRange(registry, sheetIndex, absCol, range.startRow, range.endRow)
+    }
+  }
+
+  for (const tag of tags) {
+    if ((tag.mappingType ?? 'SCALAR') !== 'SCALAR') continue
+    if (isEnterpriseSettingScalarTag(tag)) continue
+    if (!isScalarDateTag(tag)) continue
+
+    const rangeTarget = resolveSingleCellRange(wb, tag)
+    if (!rangeTarget) continue
+    addScalarDateCell(registry, rangeTarget.sheetIndex, rangeTarget.row, rangeTarget.col)
+  }
+
+  return registry
+}
+
+function isDatePickerStyle(style: import('@/types/spreadjs').GCStyle | null | undefined): boolean {
+  const buttons = style?.cellButtons
+  return Array.isArray(buttons) &&
+    buttons.some(button => button && button.command === 'openDateTimePicker')
+}
+
+function buildDateFieldRegistryFromDatePickerStyles(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+): DateFieldRegistry {
+  const registry = createDateFieldRegistry()
+  const sheetCount = wb.getSheetCount()
+  for (let si = 0; si < sheetCount; si++) {
+    const sheet = wb.getSheet(si)
+    const rowCount = sheet.getRowCount()
+    const colCount = sheet.getColumnCount()
+    for (let row = 0; row < rowCount; row++) {
+      for (let col = 0; col < colCount; col++) {
+        if (isDatePickerStyle(sheet.getStyle(row, col))) {
+          addScalarDateCell(registry, si, row, col)
+        }
+      }
+    }
+  }
+  return registry
+}
+
+function getEffectiveDateFieldRegistry(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+): DateFieldRegistry | null {
+  const effective = dateFieldRegistry
+    ? cloneDateFieldRegistry(dateFieldRegistry)
+    : createDateFieldRegistry()
+
+  if (cachedTags.length > 0) {
+    const rebuiltFromTags = buildDateFieldRegistryFromTags(wb, cachedTags)
+    mergeDateFieldRegistry(effective, rebuiltFromTags)
+    if (hasAnyDateFields(rebuiltFromTags)) {
+      dateFieldRegistry = cloneDateFieldRegistry(rebuiltFromTags)
+    }
+  }
+
+  if (!hasAnyDateFields(effective)) {
+    mergeDateFieldRegistry(effective, buildDateFieldRegistryFromDatePickerStyles(wb))
+  }
+
+  return hasAnyDateFields(effective) ? effective : null
+}
+
 /** Check if a cell is a registered date field */
 function isDateFieldCell(sheetIndex: number, row: number, col: number): boolean {
   if (!dateFieldRegistry) return false
@@ -1415,123 +1647,27 @@ function applyDatePickersAndValidators(
       return
     }
 
-    const registry: DateFieldRegistry = {
-      scalarCells: new Map(),
-      tableColumns: new Map(),
-      tableColumnRanges: new Map(),
-    }
+    const registry = buildDateFieldRegistryFromTags(wb, tags)
 
     wb.suspendPaint()
     try {
-      // ── Process TABLE / EQUIPMENT_BENCHMARK tags ─────────────────────
-      for (const tag of tags) {
-        const mt = tag.mappingType ?? 'SCALAR'
-        if (mt !== 'TABLE' && mt !== 'EQUIPMENT_BENCHMARK') continue
-        if (!tag.columnMappings || !tag.cellRange) continue
-
-        let columns: Array<{ col: number | string; field: string; type?: string }>
-        try {
-          const parsed = JSON.parse(tag.columnMappings)
-          if (Array.isArray(parsed)) {
-            columns = parsed
-          } else {
-            // EQUIPMENT_BENCHMARK format: { commonColumns: [...], typeColumns: {...} }
-            const common = parsed.commonColumns ?? []
-            const typeColArrays = parsed.typeColumns ? Object.values(parsed.typeColumns) : []
-            columns = [...common]
-            for (const arr of typeColArrays) {
-              if (Array.isArray(arr)) columns.push(...(arr as typeof columns))
-            }
-          }
-        } catch { continue }
-
-        const range = getDynamicRange(tag)
-        if (!range) continue
-
-        const sheet = findSheet(wb, tag.sheetName, tag.sheetIndex)
-        if (!sheet) continue
-
-        // Resolve actual sheet index by comparing sheet references
-        let sheetIndex = tag.sheetIndex ?? 0
-        for (let si = 0; si < wb.getSheetCount(); si++) {
-          if (wb.getSheet(si) === sheet) { sheetIndex = si; break }
-        }
-
-        const resolveCol = (col: string | number) => {
-          if (typeof col === 'string' && /^[A-Za-z]+$/.test(col)) {
-            return letterToColIndex(col.toUpperCase())
-          }
-          return range.startCol + Number(col)
-        }
-
-        // Find date columns
-        for (const colDef of columns) {
-          const fieldName = colDef.field
-          if (!fieldName) continue
-          if (NON_DATE_FIELD_NAMES.has(fieldName)) continue
-
-          const isDateField = DATE_FIELD_NAMES.has(fieldName) ||
-            (colDef.type?.toUpperCase() === 'DATE') ||
-            (tag.dataType?.toUpperCase() === 'DATE' && DATE_FIELD_NAMES.has(fieldName))
-
-          if (!isDateField) continue
-
-          const absCol = resolveCol(colDef.col)
-
-          // Track in registry
-          if (!registry.tableColumns.has(sheetIndex)) {
-            registry.tableColumns.set(sheetIndex, new Set())
-          }
-          registry.tableColumns.get(sheetIndex)!.add(absCol)
-
-          if (!registry.tableColumnRanges.has(sheetIndex)) {
-            registry.tableColumnRanges.set(sheetIndex, [])
-          }
-          registry.tableColumnRanges.get(sheetIndex)!.push({
-            col: absCol,
-            startRow: range.startRow,
-            endRow: range.endRow,
-          })
-
-          // Apply date formatter to each cell in the column.
-          // Validation is handled by the CellChanged handler + paste handler.
-          for (let r = range.startRow; r <= range.endRow; r++) {
-            sheet.setStyle(r, absCol, buildDateCellStyle(sheet, r, absCol))
+      // ── Process TABLE / EQUIPMENT_BENCHMARK date ranges ──────────────
+      for (const [sheetIndex, ranges] of registry.tableColumnRanges) {
+        const sheet = wb.getSheet(sheetIndex)
+        for (const range of ranges) {
+          for (let row = range.startRow; row <= range.endRow; row++) {
+            sheet.setStyle(row, range.col, buildDateCellStyle(sheet, row, range.col))
           }
         }
-
-        console.log(
-          `[date-picker] TABLE "${tag.tagName}": processed date columns`,
-        )
       }
 
       // ── Process SCALAR date tags (non-enterprise-setting) ────────────
-      for (const tag of tags) {
-        if ((tag.mappingType ?? 'SCALAR') !== 'SCALAR') continue
-        if (isEnterpriseSettingScalarTag(tag)) continue // B5/D15 read-only
-
-        const fieldName = tag.fieldName
-        if (!fieldName) continue
-        if (NON_DATE_FIELD_NAMES.has(fieldName)) continue
-
-        const isDateField = DATE_FIELD_NAMES.has(fieldName) ||
-          tag.dataType?.toUpperCase() === 'DATE'
-        if (!isDateField) continue
-
-        // Resolve cell position
-        const rangeTarget = resolveSingleCellRange(wb, tag)
-        if (!rangeTarget) continue
-
-        const sheetIndex = rangeTarget.sheetIndex
-        const { row, col } = rangeTarget
-
-        if (!registry.scalarCells.has(sheetIndex)) {
-          registry.scalarCells.set(sheetIndex, new Set())
-        }
-        registry.scalarCells.get(sheetIndex)!.add(`${row},${col}`)
-
+      for (const [sheetIndex, cells] of registry.scalarCells) {
         const sheet = wb.getSheet(sheetIndex)
-        sheet.setStyle(row, col, buildDateCellStyle(sheet, row, col))
+        for (const key of cells) {
+          const [row, col] = key.split(',').map(Number)
+          sheet.setStyle(row, col, buildDateCellStyle(sheet, row, col))
+        }
       }
 
       dateFieldRegistry = registry
@@ -1587,7 +1723,8 @@ function applyDatePickersAndValidators(
  * Invalid date values are cleared to prevent them from reaching the backend.
  */
 function normalizeDateFieldsBeforeSave(wb: import('@/types/spreadjs').GCSpreadWorkbook) {
-  if (!dateFieldRegistry) return
+  const registry = getEffectiveDateFieldRegistry(wb)
+  if (!registry) return
   let normalized = 0
   let cleared = 0
 
@@ -1595,7 +1732,7 @@ function normalizeDateFieldsBeforeSave(wb: import('@/types/spreadjs').GCSpreadWo
   suspendEventSafe(wb)
   try {
     // Scalar date cells
-    for (const [si, cells] of dateFieldRegistry.scalarCells) {
+    for (const [si, cells] of registry.scalarCells) {
       const sheet = wb.getSheet(si)
       for (const key of cells) {
         const [r, c] = key.split(',').map(Number)
@@ -1611,7 +1748,7 @@ function normalizeDateFieldsBeforeSave(wb: import('@/types/spreadjs').GCSpreadWo
       }
     }
     // Table date column ranges
-    for (const [si, ranges] of dateFieldRegistry.tableColumnRanges) {
+    for (const [si, ranges] of registry.tableColumnRanges) {
       const sheet = wb.getSheet(si)
       for (const range of ranges) {
         for (let r = range.startRow; r <= range.endRow; r++) {
