@@ -3,12 +3,16 @@ import { useRoute, useRouter } from 'vue-router'
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { checkPrerequisites } from '@/api/enterpriseSetting'
+import { queryExtractedTable } from '@/api/extracted-data'
+import { appendTableSheet, writeWorkbook, XLSX } from '@/utils/export'
+import { standardChartDefinitions } from './definitions'
 
 const route = useRoute()
 const router = useRouter()
 
 const prerequisitePassed = ref(false)
 const checking = ref(true)
+const exportingAll = ref(false)
 
 async function runPrerequisiteCheck() {
   checking.value = true
@@ -47,26 +51,36 @@ onMounted(() => {
 })
 
 const navItems = [
-  { label: '1. 用能单位基本情况', name: 'StandardBasicInfo' },
-  { label: '2. 上一轮已实施的节能技改项目表', name: 'StandardRetrofitProjects' },
-  { label: '3. 企业概况及主要技术指标一览表', name: 'StandardEnterpriseOverview' },
-  { label: '4. 主要用能设备汇总表', name: 'StandardMajorEquipment' },
-  { label: '5. 能源流程图', name: 'StandardEnergyFlow' },
-  { label: '6. 能源计量器具汇总表', name: 'StandardMeterSummary' },
-  { label: '7. 能源计量器具配备率表', name: 'StandardMeterRate' },
-  { label: '8. 温室气体排放表', name: 'StandardGhgEmission' },
-  { label: '9. 能源消费平衡综合表', name: 'StandardEnergyBalance' },
-  { label: '10. 淘汰产品、设备、装置、工艺和生产能力目录表', name: 'StandardObsoleteEquipment' },
-  { label: '11. 企业产品能源成本表', name: 'StandardProductEnergyCost' },
-  { label: '12. 设备测试报告主要指标汇总表', name: 'StandardTestIndicators' },
-  { label: '13. 节能潜力明细表', name: 'StandardSavingPotential' },
-  { label: '14. 能源管理改进建议表', name: 'StandardMgmtSuggestions' },
-  { label: '15. 节能技术改造建议汇总表', name: 'StandardRetrofitSuggestions' },
-  { label: '16. 节能整改措施表', name: 'StandardRectification' },
-  { label: '17. "十五五"期间节能目标', name: 'StandardFiveYearTarget' },
+  ...standardChartDefinitions.map((item) => ({ label: item.label, name: item.routeName })),
 ]
 
 const currentName = computed(() => route.name as string)
+
+function defaultColumns(rows: Record<string, unknown>[]) {
+  const sample = rows[0] || {}
+  return Object.keys(sample)
+    .filter((key) => !['id', 'submission_id', 'enterprise_id', 'audit_year', 'deleted', 'create_by', 'create_time', 'update_by', 'update_time'].includes(key))
+    .map((key) => ({ prop: key, label: key }))
+}
+
+async function exportAllCharts() {
+  exportingAll.value = true
+  try {
+    const workbook = XLSX.utils.book_new()
+    for (const item of standardChartDefinitions) {
+      if (!item.tableName) {
+        appendTableSheet(workbook, item.exportSheetName, [{ prop: 'note', label: item.exportSheetName }], [])
+        continue
+      }
+      const data = await queryExtractedTable(item.tableName, { pageSize: 100 }).catch(() => ({ rows: [], total: 0 }))
+      const rows = ((data.rows || []) as Record<string, unknown>[]).slice().reverse()
+      appendTableSheet(workbook, item.exportSheetName, item.columns || defaultColumns(rows), rows)
+    }
+    writeWorkbook(workbook, '0515规定图表19表')
+  } finally {
+    exportingAll.value = false
+  }
+}
 </script>
 
 <template>
@@ -75,7 +89,12 @@ const currentName = computed(() => route.name as string)
   </div>
   <div v-else-if="prerequisitePassed" class="standard-layout">
     <aside class="standard-sidebar">
-      <div class="sidebar-title">规定图表</div>
+      <div class="sidebar-title">
+        <span>规定图表</span>
+        <el-button type="primary" size="small" :loading="exportingAll" @click="exportAllCharts">
+          导出19表
+        </el-button>
+      </div>
       <nav class="sidebar-nav">
         <router-link
           v-for="item in navItems"
@@ -117,6 +136,9 @@ const currentName = computed(() => route.name as string)
   color: #303133;
   padding: 16px;
   border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .sidebar-nav {

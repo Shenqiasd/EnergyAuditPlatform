@@ -23,6 +23,25 @@ class SpreadsheetDataExtractorTest {
                     + "{\"col\":7,\"field\":\"calc_description\",\"type\":\"STRING\"},"
                     + "{\"col\":8,\"field\":\"remark\",\"type\":\"STRING\"}]";
 
+    private static final String EQUIPMENT_ENERGY_COLUMNS =
+            "[{\"col\":0,\"field\":\"seq_no\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":1,\"field\":\"device_name\",\"type\":\"STRING\"},"
+                    + "{\"col\":2,\"field\":\"model_spec\",\"type\":\"STRING\"},"
+                    + "{\"col\":3,\"field\":\"nameplate_output\",\"type\":\"STRING\"},"
+                    + "{\"col\":4,\"field\":\"main_energy_name\",\"type\":\"STRING\"},"
+                    + "{\"col\":5,\"field\":\"main_energy_consumption\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":6,\"field\":\"avg_operating_efficiency\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":7,\"field\":\"residual_heat_energy\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":8,\"field\":\"available_residual_heat_energy\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":9,\"field\":\"utilized_residual_heat_energy\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":10,\"field\":\"recovery_utilization_rate\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":11,\"field\":\"statistical_load_rate\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":12,\"field\":\"test_efficiency\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":13,\"field\":\"flue_gas_loss_rate\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":14,\"field\":\"heat_loss_rate\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":15,\"field\":\"other_loss\",\"type\":\"NUMBER\"},"
+                    + "{\"col\":16,\"field\":\"test_date\",\"type\":\"DATE\"}]";
+
     private SpreadsheetDataExtractor extractor;
 
     @BeforeEach
@@ -46,6 +65,23 @@ class SpreadsheetDataExtractorTest {
         // 表16_节能潜力 has header_row=NULL in prod (the template header lives
         // in row 1, not inside the A3:I102 data range), so we leave it null.
         m.setColumnMappings(SAVING_POTENTIAL_COLUMNS);
+        return m;
+    }
+
+    private TplTagMapping equipmentEnergyMapping() {
+        TplTagMapping m = new TplTagMapping();
+        m.setId(2L);
+        m.setTagName("0511_表7_重点设备能耗和效率");
+        m.setFieldName("de_equipment_energy");
+        m.setTargetTable("de_equipment_energy");
+        m.setDataType("STRING");
+        m.setSheetIndex(0);
+        m.setSheetName("7.重点设备能耗和效率");
+        m.setCellRange("A3:Q52");
+        m.setMappingType("TABLE");
+        m.setSourceType("CELL_RANGE");
+        m.setRowKeyColumn(0);
+        m.setColumnMappings(EQUIPMENT_ENERGY_COLUMNS);
         return m;
     }
 
@@ -153,5 +189,31 @@ class SpreadsheetDataExtractorTest {
         assertThat(SpreadsheetDataExtractor.normalizeBlank("  x  ")).isEqualTo("  x  ");
         assertThat(SpreadsheetDataExtractor.normalizeBlank(0L)).isEqualTo(0L);
         assertThat(SpreadsheetDataExtractor.normalizeBlank(0.0)).isEqualTo(0.0);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void extractsEquipmentEnergyAThroughQWithDate() {
+        String json = "{\"sheets\":{\"7.重点设备能耗和效率\":{\"data\":{\"dataTable\":{"
+                + "\"2\":{"
+                + "\"0\":{\"value\":1},\"1\":{\"value\":\"设备A\"},\"2\":{\"value\":\"M1\"},"
+                + "\"3\":{\"value\":\"250kW\"},\"4\":{\"value\":\"电力\"},\"5\":{\"value\":123.45},"
+                + "\"6\":{\"value\":88.8},\"7\":{\"value\":10},\"8\":{\"value\":9},\"9\":{\"value\":8},"
+                + "\"10\":{\"value\":80},\"11\":{\"value\":75},\"12\":{\"value\":91.2},"
+                + "\"13\":{\"value\":1.1},\"14\":{\"value\":2.2},\"15\":{\"value\":3.3},"
+                + "\"16\":{\"value\":\"2026/05/15\"}"
+                + "},"
+                + "\"3\":{\"0\":{\"value\":2},\"1\":{\"value\":\"设备B\"},\"16\":{\"value\":46157}}"
+                + "}}}}}";
+
+        Map<String, Object> out = extractor.extractData(json, List.of(equipmentEnergyMapping()));
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) out.get("de_equipment_energy");
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0)).containsEntry("device_name", "设备A");
+        assertThat(rows.get(0)).containsEntry("main_energy_name", "电力");
+        assertThat(rows.get(0)).containsEntry("test_date", "2026-05-15");
+        assertThat(rows.get(1)).containsEntry("device_name", "设备B");
+        assertThat(rows.get(1)).containsEntry("test_date", "2026-05-15");
     }
 }

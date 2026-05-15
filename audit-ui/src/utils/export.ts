@@ -115,3 +115,24 @@ export function exportTableToExcel(
   XLSX.utils.book_append_sheet(wb, ws, filename.substring(0, 31))
   XLSX.writeFile(wb, `${filename}.xlsx`)
 }
+
+export function appendTableSheet(
+  workbook: XLSX.WorkBook,
+  sheetName: string,
+  columns: ExportColumn[],
+  rows: Record<string, unknown>[],
+) {
+  const { headerRows, leafColumns, merges } = buildHeaderLayout(columns)
+  const dataRows = rows.map((row) => leafColumns.map((c) => row[c.prop] ?? ''))
+  const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...dataRows])
+  if (merges.length > 0) {
+    ws['!merges'] = (ws['!merges'] || []).concat(merges)
+  }
+  XLSX.utils.book_append_sheet(workbook, ws, sheetName.substring(0, 31))
+}
+
+export function writeWorkbook(workbook: XLSX.WorkBook, filename: string) {
+  XLSX.writeFile(workbook, `${filename}.xlsx`)
+}
+
+export { XLSX }

@@ -31,7 +31,7 @@ public class BusinessTablePersister {
             "de_management_policy", "de_saving_potential", "de_management_suggestion",
             "de_tech_reform_suggestion", "de_rectification", "de_report_text",
             "de_equipment_benchmark", "de_equipment_summary", "de_equipment_test",
-            "de_equipment_energy", "de_carbon_peak_info",
+            "de_equipment_energy", "de_saving_calculation_detail", "de_carbon_peak_info",
             "de_energy_ghg_source"
     );
 

@@ -709,10 +709,29 @@ CREATE TABLE `de_equipment_benchmark` (
 DROP TABLE IF EXISTS `de_equipment_energy`;
 CREATE TABLE `de_equipment_energy` (
     `id`               BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `submission_id`    BIGINT        NOT NULL DEFAULT 0      COMMENT '关联提交ID',
     `enterprise_id`    BIGINT        NOT NULL                COMMENT '企业ID -> ent_enterprise.id',
     `audit_year`       INT           NOT NULL                COMMENT '审计年度',
+    `seq_no`           INT           DEFAULT NULL            COMMENT '序号',
     `location`         VARCHAR(256)  DEFAULT NULL            COMMENT '位置',
+    `unit_name`        VARCHAR(128)  DEFAULT NULL            COMMENT '用能单元',
     `device_type`      VARCHAR(128)  DEFAULT NULL            COMMENT '设备类型',
+    `device_name`      VARCHAR(128)  DEFAULT NULL            COMMENT '设备名称',
+    `model_spec`       VARCHAR(128)  DEFAULT NULL            COMMENT '型号规格',
+    `nameplate_output` VARCHAR(128)  DEFAULT NULL            COMMENT '铭牌出力',
+    `main_energy_name` VARCHAR(128)  DEFAULT NULL            COMMENT '主要能源名称',
+    `main_energy_consumption` DECIMAL(18,4) DEFAULT NULL      COMMENT '主要能源消费量',
+    `avg_operating_efficiency` DECIMAL(18,6) DEFAULT NULL     COMMENT '平均运行效率',
+    `residual_heat_energy` DECIMAL(18,4) DEFAULT NULL         COMMENT '余热余能量',
+    `available_residual_heat_energy` DECIMAL(18,4) DEFAULT NULL COMMENT '可回收余热余能量',
+    `utilized_residual_heat_energy` DECIMAL(18,4) DEFAULT NULL COMMENT '已利用余热余能量',
+    `recovery_utilization_rate` DECIMAL(18,6) DEFAULT NULL    COMMENT '回收利用率',
+    `statistical_load_rate` DECIMAL(18,6) DEFAULT NULL        COMMENT '统计负荷率',
+    `test_efficiency` DECIMAL(18,6) DEFAULT NULL              COMMENT '测试效率',
+    `flue_gas_loss_rate` DECIMAL(18,6) DEFAULT NULL           COMMENT '排烟热损失率',
+    `heat_loss_rate`  DECIMAL(18,6) DEFAULT NULL              COMMENT '散热损失率',
+    `other_loss`      DECIMAL(18,6) DEFAULT NULL              COMMENT '其他损失',
+    `test_date`       DATE          DEFAULT NULL              COMMENT '测试日期',
     `indicator_name`   VARCHAR(128)  DEFAULT NULL            COMMENT '指标名称',
     `indicator_value`  DECIMAL(18,6) DEFAULT NULL            COMMENT '指标值',
     `measurement_unit` VARCHAR(32)   DEFAULT NULL            COMMENT '计量单位',
@@ -723,6 +742,7 @@ CREATE TABLE `de_equipment_energy` (
     `update_time`      DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted`          TINYINT       DEFAULT 0               COMMENT '逻辑删除(0未删除 1已删除)',
     PRIMARY KEY (`id`),
+    INDEX `idx_submission` (`submission_id`),
     INDEX `idx_enterprise_year` (`enterprise_id`, `audit_year`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='重点设备能耗和效率';
 
@@ -975,6 +995,29 @@ CREATE TABLE `de_saving_calculation` (
     INDEX `idx_submission` (`submission_id`),
     INDEX `idx_enterprise_year` (`enterprise_id`, `audit_year`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='节能量计算';
+
+DROP TABLE IF EXISTS `de_saving_calculation_detail`;
+CREATE TABLE `de_saving_calculation_detail` (
+    `id`                BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `submission_id`     BIGINT        NOT NULL                COMMENT '关联提交ID',
+    `enterprise_id`     BIGINT        NOT NULL                COMMENT '企业ID -> ent_enterprise.id',
+    `audit_year`        INT           NOT NULL                COMMENT '审计年度',
+    `product_seq`       INT           DEFAULT NULL            COMMENT '产品序号',
+    `row_type`          VARCHAR(32)   DEFAULT NULL            COMMENT 'OUTPUT/UNIT_CONSUMPTION',
+    `row_label`         VARCHAR(256)  DEFAULT NULL            COMMENT '节能量计算行名称',
+    `product_name`      VARCHAR(128)  DEFAULT NULL            COMMENT '产品名称',
+    `measurement_unit`  VARCHAR(64)   DEFAULT NULL            COMMENT '单位',
+    `current_value`     DECIMAL(18,6) DEFAULT NULL            COMMENT '审计期值',
+    `base_value`        DECIMAL(18,6) DEFAULT NULL            COMMENT '基准期值',
+    `create_by`         VARCHAR(64)   DEFAULT NULL            COMMENT '创建人',
+    `create_time`       DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)   DEFAULT NULL            COMMENT '更新人',
+    `update_time`       DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted`           TINYINT       DEFAULT 0               COMMENT '逻辑删除(0未删除 1已删除)',
+    PRIMARY KEY (`id`),
+    INDEX `idx_submission` (`submission_id`),
+    INDEX `idx_enterprise_year` (`enterprise_id`, `audit_year`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='节能量计算产品级明细';
 
 -- ----------------------------
 -- 5.18 温室气体排放 (4.15)
