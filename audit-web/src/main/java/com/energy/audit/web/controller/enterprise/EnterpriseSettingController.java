@@ -73,12 +73,28 @@ public class EnterpriseSettingController {
         return R.ok();
     }
 
-    @Operation(summary = "Draft-save enterprise setting — partial data allowed, no mandatory-field validation")
+    @Operation(summary = "Draft-save enterprise setting — partial/patch semantics, merges with existing record")
     @PutMapping("/draft")
+    @SuppressWarnings("unchecked")
     public R<Void> saveDraft(@RequestBody EntEnterpriseSetting setting) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         setting.setEnterpriseId(enterpriseId);
-        settingService.save(setting);
+
+        // Merge incoming non-null fields onto the existing record so that a
+        // sparse payload (e.g. only {fax}) does not wipe other columns to NULL.
+        EntEnterpriseSetting existing = settingService.get(enterpriseId);
+        EntEnterpriseSetting merged;
+        if (existing != null) {
+            Map<String, Object> base = objectMapper.convertValue(existing, Map.class);
+            Map<String, Object> incoming = objectMapper.convertValue(setting, Map.class);
+            incoming.values().removeIf(v -> v == null);
+            base.putAll(incoming);
+            merged = objectMapper.convertValue(base, EntEnterpriseSetting.class);
+        } else {
+            merged = setting;
+        }
+        merged.setEnterpriseId(enterpriseId);
+        settingService.save(merged);
         return R.ok();
     }
 

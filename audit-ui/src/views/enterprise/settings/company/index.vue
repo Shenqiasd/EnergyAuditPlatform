@@ -219,6 +219,7 @@ onBeforeRouteLeave(async () => {
 function onBeforeUnload(e: BeforeUnloadEvent) {
   if (isDirty()) {
     e.preventDefault()
+    e.returnValue = ''
   }
 }
 
