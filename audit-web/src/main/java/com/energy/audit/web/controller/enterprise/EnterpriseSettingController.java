@@ -59,7 +59,7 @@ public class EnterpriseSettingController {
         return R.ok(settingService.get(enterpriseId));
     }
 
-    @Operation(summary = "Save (upsert) own enterprise setting")
+    @Operation(summary = "Save (upsert) own enterprise setting — strict, requires all mandatory fields")
     @PutMapping
     public R<Void> save(@RequestBody EntEnterpriseSetting setting) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
@@ -70,6 +70,33 @@ public class EnterpriseSettingController {
         }
         setting.setEnterpriseId(enterpriseId);
         settingService.save(setting);
+        return R.ok();
+    }
+
+    @Operation(summary = "Draft-save enterprise setting — JSON-patch semantics: present keys "
+            + "(including explicit null) are applied; omitted keys preserve existing values")
+    @PutMapping("/draft")
+    @SuppressWarnings("unchecked")
+    public R<Void> saveDraft(@RequestBody Map<String, Object> patch) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
+
+        // Start from existing record (or empty map for brand-new enterprises).
+        EntEnterpriseSetting existing = settingService.get(enterpriseId);
+        Map<String, Object> base = existing != null
+                ? objectMapper.convertValue(existing, Map.class)
+                : new HashMap<>();
+
+        // Overlay only keys that are *present* in the incoming JSON.
+        // - present key with value  → user changed the field → write new value
+        // - present key with null   → user explicitly cleared → write null
+        // - omitted key             → not in patch.keySet()  → keep existing
+        for (String key : patch.keySet()) {
+            base.put(key, patch.get(key));
+        }
+
+        EntEnterpriseSetting merged = objectMapper.convertValue(base, EntEnterpriseSetting.class);
+        merged.setEnterpriseId(enterpriseId);
+        settingService.save(merged);
         return R.ok();
     }
 

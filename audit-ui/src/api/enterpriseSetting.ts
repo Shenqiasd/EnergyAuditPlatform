@@ -67,9 +67,25 @@ export function getEnterpriseSetting(): Promise<EnterpriseSetting | null> {
   return request.get('/enterprise/setting')
 }
 
-/** Create or update enterprise setting (upsert) */
+/** Create or update enterprise setting (upsert) — strict, runs full validation */
 export function upsertEnterpriseSetting(data: Partial<EnterpriseSetting>): Promise<void> {
   return request.put('/enterprise/setting', data)
+}
+
+/**
+ * Draft-save enterprise setting — JSON-patch semantics.
+ * Keys present in the payload (including explicit null) are written;
+ * keys absent from the JSON are preserved on the server.
+ *
+ * Converts undefined → null so cleared fields appear in the JSON body
+ * instead of being silently omitted by JSON.stringify.
+ */
+export function draftSaveEnterpriseSetting(data: Partial<EnterpriseSetting>): Promise<void> {
+  const patch: Record<string, unknown> = {}
+  for (const key of Object.keys(data) as (keyof EnterpriseSetting)[]) {
+    patch[key] = data[key] === undefined ? null : data[key]
+  }
+  return request.put('/enterprise/setting/draft', patch)
 }
 
 /** Get enterprise setting as flat field map for SpreadJS pre-fill (bidirectional sync) */

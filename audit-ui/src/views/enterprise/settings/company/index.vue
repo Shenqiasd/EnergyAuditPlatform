@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getEnterpriseSetting, upsertEnterpriseSetting, type EnterpriseSetting } from '@/api/enterpriseSetting'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getEnterpriseSetting, upsertEnterpriseSetting, draftSaveEnterpriseSetting, type EnterpriseSetting } from '@/api/enterpriseSetting'
 import {
   INDUSTRY_CLASSIFICATION,
   buildIndustryLookup,
@@ -23,6 +24,23 @@ const loading = ref(false)
 
 const formRef = ref()
 const form = ref<Partial<EnterpriseSetting>>({})
+
+// ── Dirty tracking ──
+/** Serialised snapshot of the form taken after load / successful save. */
+let baseline = ''
+
+function takeSnapshot(): string {
+  return JSON.stringify(form.value) + '|' + JSON.stringify(industryCascaderValue.value)
+}
+
+function resetBaseline() {
+  baseline = takeSnapshot()
+}
+
+function isDirty(): boolean {
+  if (loading.value) return false
+  return takeSnapshot() !== baseline
+}
 
 // ── Validation rules ──
 const rules = computed(() => ({
@@ -120,11 +138,34 @@ async function loadData() {
       form.value.industryCategory = undefined
     }
   } finally {
+    // Always reset baseline after load — even on error — so the empty/failed
+    // state is not mistaken for unsaved changes (prevents accidental data wipe
+    // if the user triggers draft-save on a failed-load form).
+    resetBaseline()
     loading.value = false
   }
 }
 
-async function handleSave() {
+/** Draft save — no full validation, allows partial data (patch semantics) */
+async function handleDraftSave(): Promise<boolean> {
+  form.value.energyUsageType = normalizeEnergyUsageType(form.value.energyUsageType) ?? undefined
+  saving.value = true
+  try {
+    await draftSaveEnterpriseSetting(form.value)
+    notifyEnterpriseSettingUpdated()
+    resetBaseline()
+    ElMessage.success('草稿已保存')
+    return true
+  } catch {
+    ElMessage.error('草稿保存失败')
+    return false
+  } finally {
+    saving.value = false
+  }
+}
+
+/** Strict save — runs full Element Plus validation before saving */
+async function handleStrictSave() {
   await formRef.value?.validate()
   // Defense in depth: normalize any legacy value still in memory before sending.
   form.value.energyUsageType = normalizeEnergyUsageType(form.value.energyUsageType) ?? undefined
@@ -132,20 +173,74 @@ async function handleSave() {
   try {
     await upsertEnterpriseSetting(form.value)
     notifyEnterpriseSettingUpdated()
+    resetBaseline()
     ElMessage.success('保存成功')
   } finally {
     saving.value = false
   }
 }
 
-onMounted(loadData)
+// ── Leave protection ──
+/**
+ * Shows a 3-choice dialog when the user has unsaved changes.
+ * Returns 'save' | 'discard' | 'cancel'.
+ */
+async function showLeaveDialog(): Promise<'save' | 'discard' | 'cancel'> {
+  try {
+    const action = await ElMessageBox({
+      title: '未保存的更改',
+      message: '当前页面有未保存的修改，是否保存草稿？',
+      distinguishCancelAndClose: true,
+      confirmButtonText: '保存草稿并离开',
+      cancelButtonText: '放弃修改',
+      closeOnClickModal: false,
+      type: 'warning',
+    })
+    // confirmButtonText clicked → action is 'confirm'
+    return action === 'confirm' ? 'save' : 'discard'
+  } catch (action) {
+    // 'cancel' = cancelButtonText clicked, 'close' = X / Escape
+    return action === 'cancel' ? 'discard' : 'cancel'
+  }
+}
+
+onBeforeRouteLeave(async () => {
+  if (!isDirty()) return true
+  const choice = await showLeaveDialog()
+  if (choice === 'cancel') return false
+  if (choice === 'save') {
+    const ok = await handleDraftSave()
+    if (!ok) return false
+  }
+  // 'discard' → allow navigation, form will be re-loaded on next visit
+  return true
+})
+
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (isDirty()) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+onMounted(() => {
+  loadData()
+  window.addEventListener('beforeunload', onBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
+})
 </script>
 
 <template>
   <div class="page-container" v-loading="loading">
     <div class="page-header">
       <span class="title">企业概况</span>
-      <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+      <div class="page-header__actions">
+        <el-button :loading="saving" @click="handleDraftSave">保存草稿</el-button>
+        <el-button type="primary" :loading="saving" @click="handleStrictSave">保存并完成</el-button>
+      </div>
     </div>
 
     <el-form ref="formRef" :model="form" :rules="rules" label-width="180px" class="setting-form">
@@ -363,6 +458,10 @@ onMounted(loadData)
     font-size: 18px;
     font-weight: 600;
     color: #303133;
+  }
+  &__actions {
+    display: flex;
+    gap: 8px;
   }
 }
 .setting-form {
