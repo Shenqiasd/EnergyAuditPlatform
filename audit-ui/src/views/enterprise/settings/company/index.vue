@@ -137,8 +137,11 @@ async function loadData() {
       form.value.industryName = undefined
       form.value.industryCategory = undefined
     }
-    resetBaseline()
   } finally {
+    // Always reset baseline after load — even on error — so the empty/failed
+    // state is not mistaken for unsaved changes (prevents accidental data wipe
+    // if the user triggers draft-save on a failed-load form).
+    resetBaseline()
     loading.value = false
   }
 }
