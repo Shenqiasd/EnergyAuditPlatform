@@ -757,6 +757,7 @@ function readSheet12Products(sheet12: import('@/types/spreadjs').GCSpreadSheet) 
     rows.push({
       indicatorName: indicatorName == null ? null : String(indicatorName),
       denominatorUnit: denominatorUnit == null ? null : String(denominatorUnit),
+      sheet12Row: row + 1,
     })
   }
   return deriveProductsFromSheetRows(rows)
