@@ -21,6 +21,7 @@ import { onEnterpriseSettingUpdated } from '@/utils/enterprise-setting-events'
 import { normalizeDateValue } from '@/utils/date-normalize'
 import {
   deriveProducts,
+  deriveProductsFromSheetRows,
   computeRowDelta,
   generateOps,
   findAnchorRow,
@@ -695,7 +696,8 @@ function applySheet14ProductSplit(
   }
 
   // 3. Derive products capped to Sheet 12 tag range (A5:J20 → max 16 rows)
-  const products = deriveProducts(rawProducts)
+  const productsFromSheet = readSheet12Products(sheet12)
+  const products = productsFromSheet.length > 0 ? productsFromSheet : deriveProducts(rawProducts)
 
   // 4. Calculate and apply row delta (handles both expansion and cleanup)
   const existingProductRows = anchorRow - SHEET14_PRODUCT_AREA_START
@@ -735,6 +737,29 @@ function applySheet14ProductSplit(
     `[sheet14-product-split] generated ${products.length} product(s), ` +
     `${delta.neededRows} rows (was ${existingProductRows})`,
   )
+}
+
+function readSheet12Products(sheet12: import('@/types/spreadjs').GCSpreadSheet) {
+  const rows = []
+  const maxRows = 16
+  const startRow = 4
+  for (let i = 0; i < maxRows; i++) {
+    const row = startRow + i
+    const indicatorName = sheet12.getValue(row, 0)
+    const denominatorUnit = sheet12.getValue(row, 3)
+    const output = sheet12.getValue(row, 6)
+    const unitConsumption = sheet12.getValue(row, 4)
+    const prevOutput = sheet12.getValue(row, 9)
+    const prevUnitConsumption = sheet12.getValue(row, 7)
+    const hasValue = [indicatorName, denominatorUnit, output, unitConsumption, prevOutput, prevUnitConsumption]
+      .some(value => value != null && String(value).trim() !== '')
+    if (!hasValue) continue
+    rows.push({
+      indicatorName: indicatorName == null ? null : String(indicatorName),
+      denominatorUnit: denominatorUnit == null ? null : String(denominatorUnit),
+    })
+  }
+  return deriveProductsFromSheetRows(rows)
 }
 
 /** Column definition type for CONFIG_PREFILL mappings */
@@ -819,6 +844,7 @@ function applyOneConfigPrefill(
     filter?: Record<string, unknown>
     mode?: 'prefill' | 'dropdown_only'
     source?: string
+    preserveExistingRows?: boolean
     columns: ConfigPrefillColDef[]
   }
   try {
@@ -884,10 +910,24 @@ function applyOneConfigPrefill(
     return startCol + Number(colDef.col)
   }
 
+  const preserveExistingRows = config.preserveExistingRows === true
+  const prefillCols = columns.filter(c => c.prefill !== false).map(resolveColIndex)
+  const preservedRows = new Set<number>()
+  if (preserveExistingRows && !isDropdownOnly) {
+    for (let i = 0; i < maxRows; i++) {
+      const hasExisting = prefillCols.some(colIndex => {
+        const value = sheet.getValue(startRow + i, colIndex)
+        return value != null && String(value).trim() !== ''
+      })
+      if (hasExisting) preservedRows.add(i)
+    }
+  }
+
   // Clear old data before writing (skip in dropdown_only mode)
   if (!isDropdownOnly) {
     cpTrace('cp.tag.clear.start', { tag: tagLabel })
     for (let i = 0; i < maxRows; i++) {
+      if (preservedRows.has(i) && i >= records.length) continue
       for (const colDef of columns) {
         if (colDef.prefill === false) continue // don't clear dropdown-only columns
         const colIndex = resolveColIndex(colDef)
@@ -900,7 +940,10 @@ function applyOneConfigPrefill(
   // 7. Determine rows to process
   // In dropdown_only mode, apply dropdowns to ALL rows in the range
   // In prefill mode, only fill rows matching records count
-  const rowsToFill = isDropdownOnly ? maxRows : Math.min(records.length, maxRows)
+  const preservedRowLimit = preservedRows.size ? Math.max(...preservedRows) + 1 : 0
+  const rowsToFill = isDropdownOnly
+    ? maxRows
+    : Math.min(maxRows, Math.max(Math.min(records.length, maxRows), preservedRowLimit))
   if (records.length > maxRows) {
     console.warn(
       `[config-prefill] "${tag.tagName}": ${records.length} records exceed ${maxRows} available rows, truncated`,
@@ -1025,11 +1068,9 @@ function applyOneConfigPrefill(
 
   // 10. Hide empty rows beyond the filled data (skip in dropdown_only mode)
   if (!isDropdownOnly) {
-    for (let i = 0; i < rowsToFill; i++) {
-      sheet.setRowVisible(startRow + i, true)
-    }
-    for (let i = rowsToFill; i < maxRows; i++) {
-      sheet.setRowVisible(startRow + i, false)
+    for (let i = 0; i < maxRows; i++) {
+      const hasGeneratedRecord = i < records.length
+      sheet.setRowVisible(startRow + i, hasGeneratedRecord || preservedRows.has(i))
     }
     // Track this CONFIG_PREFILL area so add-row logic blocks insert/delete here
     const sheetIdx = resolveSheetIndex(wb, tag)

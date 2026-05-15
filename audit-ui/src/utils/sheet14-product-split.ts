@@ -23,6 +23,11 @@ export interface ProductRecord {
   measurementUnit?: string | null
 }
 
+export interface SheetProductRow {
+  indicatorName?: string | null
+  denominatorUnit?: string | null
+}
+
 export interface DerivedProduct {
   name: string
   unit: string
@@ -74,6 +79,33 @@ export function deriveProducts(
       unit: normalizeProductUnit(String(p.measurementUnit ?? '')),
       sheet12Row: SHEET12_PRODUCT_START_ROW + 1 + i, // 1-based for SpreadJS formulas
     }))
+}
+
+export function deriveProductsFromSheetRows(
+  rows: SheetProductRow[],
+  sheet12MaxRows: number = SHEET12_TAG_MAX_ROWS,
+): DerivedProduct[] {
+  return rows.slice(0, sheet12MaxRows)
+    .map((row, i) => {
+      const indicatorName = String(row.indicatorName ?? '').trim()
+      const unit = normalizeProductUnit(String(row.denominatorUnit ?? ''))
+      return {
+        name: resolveProductNameFromIndicator(indicatorName, i + 1),
+        unit,
+        sheet12Row: SHEET12_PRODUCT_START_ROW + 1 + i,
+      }
+    })
+    .filter(p => p.name !== '')
+}
+
+export function resolveProductNameFromIndicator(indicatorName: string, productSeq: number): string {
+  const value = indicatorName.trim()
+  if (!value) return `产品${productSeq}`
+  for (const marker of ['单产', '单位', '综合能耗', '能耗']) {
+    const idx = value.indexOf(marker)
+    if (idx > 0) return value.slice(0, idx).trim()
+  }
+  return value
 }
 
 /**

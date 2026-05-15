@@ -70,3 +70,14 @@ WHERE template_version_id = @ea052_template_version_id
   AND tag_name = '0511_表27_重点设备终端用户'
   AND field_name = 'de_equipment_energy'
   AND deleted = 0;
+
+UPDATE tpl_tag_mapping
+SET column_mappings = JSON_SET(column_mappings, '$.preserveExistingRows', CAST('true' AS JSON)),
+    update_by = 'EA-CUST-052',
+    update_time = NOW()
+WHERE template_version_id = @ea052_template_version_id
+  AND tag_name = '0511_PREFILL_12_PRODUCT'
+  AND mapping_type = 'CONFIG_PREFILL'
+  AND JSON_VALID(column_mappings)
+  AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(column_mappings, '$.preserveExistingRows')), 'false') <> 'true'
+  AND deleted = 0;
