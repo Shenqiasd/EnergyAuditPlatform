@@ -64,6 +64,7 @@ public class ExtractedDataController {
         TABLE_LABELS.put("de_obsolete_equipment",       "淘汰设备");
         TABLE_LABELS.put("de_product_energy_cost",      "产品能源成本");
         TABLE_LABELS.put("de_saving_calculation",       "节能量计算");
+        TABLE_LABELS.put("de_saving_calculation_detail","节能量计算明细");
         TABLE_LABELS.put("de_management_policy",        "管理制度");
         TABLE_LABELS.put("de_saving_potential",         "节能潜力");
         TABLE_LABELS.put("de_management_suggestion",    "管理建议");

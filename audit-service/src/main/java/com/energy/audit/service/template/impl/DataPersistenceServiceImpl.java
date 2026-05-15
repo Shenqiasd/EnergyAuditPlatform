@@ -34,6 +34,8 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
     private static final Logger log = LoggerFactory.getLogger(DataPersistenceServiceImpl.class);
 
     private static final String ENT_ENTERPRISE_SETTING = "ent_enterprise_setting";
+    private static final String PRODUCT_UNIT_TABLE = "de_product_unit_consumption";
+    private static final String SAVING_CALCULATION_DETAIL_TABLE = "de_saving_calculation_detail";
 
     private final DeSubmissionFieldMapper fieldMapper;
     private final DeSubmissionTableMapper tableMapper;
@@ -188,6 +190,109 @@ public class DataPersistenceServiceImpl implements DataPersistenceService {
                 .anyMatch(t -> "de_energy_flow".equalsIgnoreCase(t));
         if (touchedFlow) {
             energyFlowPostProcessor.afterEnergyFlowPersist(submissionId, enterpriseId, auditYear, operator);
+        }
+
+        persistSavingCalculationDetails(submissionId, enterpriseId, auditYear, extractedData, operator);
+    }
+
+    private void persistSavingCalculationDetails(Long submissionId, Long enterpriseId, Integer auditYear,
+                                                 Map<String, Object> extractedData, String operator) {
+        businessTablePersister.deleteForReExtraction(
+                SAVING_CALCULATION_DETAIL_TABLE, submissionId, enterpriseId, auditYear, operator);
+
+        Object value = extractedData.get(PRODUCT_UNIT_TABLE);
+        if (!(value instanceof List<?> sourceRows) || sourceRows.isEmpty()) {
+            return;
+        }
+
+        List<Map<String, Object>> detailRows = new ArrayList<>();
+        int productSeq = 1;
+        for (Object item : sourceRows) {
+            if (!(item instanceof Map<?, ?> sourceRow)) {
+                continue;
+            }
+            Object output = sourceRow.get("output");
+            Object prevOutput = sourceRow.get("prev_output");
+            Object unitConsumption = toTce(sourceRow.get("unit_consumption"));
+            Object prevUnitConsumption = toTce(sourceRow.get("prev_unit_consumption"));
+            if (output == null && prevOutput == null && unitConsumption == null && prevUnitConsumption == null) {
+                continue;
+            }
+
+            String productName = resolveProductName(sourceRow, productSeq);
+            String unit = resolveProductUnit(sourceRow);
+            detailRows.add(detailRow(productSeq, "OUTPUT", productName + "产量（" + unit + "）",
+                    productName, unit, output, prevOutput));
+            detailRows.add(detailRow(productSeq, "UNIT_CONSUMPTION", productName + "单耗（吨标煤/" + unit + "）",
+                    productName, "吨标煤/" + unit, unitConsumption, prevUnitConsumption));
+            productSeq++;
+        }
+
+        if (!detailRows.isEmpty()) {
+            businessTablePersister.persistTableRows(
+                    SAVING_CALCULATION_DETAIL_TABLE, submissionId, enterpriseId, auditYear, detailRows, operator);
+        }
+    }
+
+    private Map<String, Object> detailRow(int productSeq, String rowType, String rowLabel,
+                                          String productName, String unit,
+                                          Object currentValue, Object baseValue) {
+        Map<String, Object> row = new HashMap<>();
+        row.put("product_seq", productSeq);
+        row.put("row_type", rowType);
+        row.put("row_label", rowLabel);
+        row.put("product_name", productName);
+        row.put("measurement_unit", unit);
+        row.put("current_value", currentValue);
+        row.put("base_value", baseValue);
+        return row;
+    }
+
+    private String resolveProductName(Map<?, ?> sourceRow, int productSeq) {
+        Object productName = sourceRow.get("product_name");
+        if (productName != null && !productName.toString().isBlank()) {
+            return productName.toString().trim();
+        }
+        Object indicatorName = sourceRow.get("indicator_name");
+        if (indicatorName != null && !indicatorName.toString().isBlank()) {
+            String value = indicatorName.toString().trim();
+            for (String marker : List.of("单产", "单位", "综合能耗", "能耗")) {
+                int idx = value.indexOf(marker);
+                if (idx > 0) return value.substring(0, idx).trim();
+            }
+            return value;
+        }
+        return "产品" + productSeq;
+    }
+
+    private String resolveProductUnit(Map<?, ?> sourceRow) {
+        Object denominator = sourceRow.get("denominator_unit");
+        if (denominator != null && !denominator.toString().isBlank()) {
+            return denominator.toString().trim();
+        }
+        Object measurementUnit = sourceRow.get("measurement_unit");
+        if (measurementUnit != null && !measurementUnit.toString().isBlank()) {
+            return measurementUnit.toString().trim();
+        }
+        return "单位产品";
+    }
+
+    private Object toTce(Object kgceValue) {
+        BigDecimal value = toBigDecimal(kgceValue);
+        if (value == null) return null;
+        return value.divide(BigDecimal.valueOf(1000));
+    }
+
+    private BigDecimal toBigDecimal(Object value) {
+        if (value == null) return null;
+        if (value instanceof BigDecimal decimal) return decimal;
+        if (value instanceof Number number) return new BigDecimal(number.toString());
+        String text = value.toString().trim();
+        if (text.isEmpty()) return null;
+        try {
+            return new BigDecimal(text);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

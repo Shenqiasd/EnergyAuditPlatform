@@ -19,33 +19,31 @@ import java.util.Base64;
  * Sheet name matching is normalized: comma/fullwidth-dot/quotes/whitespace are treated as
  * equivalent, so "15,温室气体..." in the live SpreadJS template still matches "15.温室气体" here.
  *
- * Annotation mapping (aligned with the current on-line SpreadJS 2026-04 template):
+ * Annotation mapping (aligned with the 0515 regulated-chart numbering):
  *   ID 0: 报告年份 (text replacement)
  *   ID 1: 企业唯一编号 (text replacement)
  *   ID 2: 企业名称 (text replacement)
- *   ID 3: 表1  → Sheet "1.企业概况"
+ *   ID 3: 表1  → Sheet "1.企业基本信息表"
  *   ID 4: 表13 → Sheet "13.企业产品能源成本表"
- *   ID 5: 表15 → Sheet "15.温室气体排放"
+ *   ID 5: 表9  → Sheet "9.温室气体排放"
  *   ID 6: 表12 → Sheet "12.单位产品能耗数据"
- *   ID 7: 表21 → Sheet "21."（“十五五”期间节能目标）
- *   ID 8: 表2  → Sheet "2.主要技术指标"
- *   ID 9: 表7  → Sheet "7.重点用能设备能效对标"  (live template renumbered from 8 → 7)
+ *   ID 7: 表19 → Sheet "19.整改-“十五五”期间节能降碳目标"
+ *   ID 8: 表3  → Sheet "3.企业概况及主要技术指标一览"
+ *   ID 9: 表6  → Sheet "6.重点设备能耗和效率"
  *   ID 10: 能源流向图 → Image insert (AntV X6 screenshot)
- *   ID 11: 表4+表5 → Sheet "4.能源计量器具汇总" + Sheet "5.能源计量器具配备率"
- *   ID 12: 表15逐一输出 → Sheet "15.温室气体排放"
- *   ID 13: 平衡表 → Sheet "11.1"（能源购入、消费、存储）
- *   ID 14: 表6 → Sheet "6.能源管理制度"  (live template renumbered from 7 → 6)
- *   ID 15: 表10 → Sheet "10.淘汰"
+ *   ID 11: 表7+表8 → Sheet "7.能碳计量器具汇总表" + Sheet "8.能碳计量器具配备率表"
+ *   ID 12: 表9逐一输出 → Sheet "9.温室气体排放"
+ *   ID 13: 平衡表 → Sheet "10.能源消费平衡综合表"
+ *   ID 14: legacy 表6 能源管理制度 anchor, not part of the official 0515 regulated-chart outputs
+ *   ID 15: 表11 → Sheet "11.淘汰"
  *   ID 16: 表13 → Sheet "13.企业产品能源成本表" (duplicate of ID 4; currently orphaned in the
  *          template — the batch annotation exists in comments.xml but has no body anchor, so it
  *          is silently skipped here. Document sanitize step in Word + re-upload fixes this.)
  *   ID 17: 表14 → Sheet "14.节能量计算"
- *   ID 18: 表9  → Sheet "9.重点设备测试数据"
- *   ID 19: 表16 → Sheet "16.节能潜力"
- *   ID 20: 表17 → Sheet "17.能源管理改进建议"  (live template renumbered from 18 → 17)
- *   ID 21: 表18 → Sheet "18." (prefix-only anchor; live sheet is "18.节能技术改造建议汇总",
- *          was "19.节能技术改造建议" in the original 0417 template; use the numeric prefix to
- *          survive further topic-name drift)
+ *   ID 18: 表13 → Sheet "13.设备测试报告主要指标汇总表"
+ *   ID 19: 表15 → Sheet "15.节能降碳潜力明细表"
+ *   ID 20: 表16 → Sheet "16.能碳管理改进建议表"
+ *   ID 21: 表17 → Sheet "17.节能降碳技术改造建议汇总表"
  */
 public class TemplateBasedReportBuilder {
 
@@ -61,32 +59,28 @@ public class TemplateBasedReportBuilder {
         // The values below are matched against submission sheet names after normalization
         // (see SpreadJSJsonParser#extractSheetData), so comma/dot/quote/whitespace differences
         // do not matter — only the leading "<number>.<topic>" prefix does.
-        ANNOTATION_SHEET_MAP.put(3, "1.企业概况");
+        ANNOTATION_SHEET_MAP.put(3, "1.企业基本信息表");
         ANNOTATION_SHEET_MAP.put(4, "13.企业产品能源成本表");
-        ANNOTATION_SHEET_MAP.put(5, "15.温室气体排放");
+        ANNOTATION_SHEET_MAP.put(5, "9.温室气体排放");
         ANNOTATION_SHEET_MAP.put(6, "12.单位产品能耗数据");
-        ANNOTATION_SHEET_MAP.put(7, "21.");                   // 十五五期间节能目标
-        ANNOTATION_SHEET_MAP.put(8, "2.主要技术指标");
-        ANNOTATION_SHEET_MAP.put(9, "7.重点用能设备能效对标");  // was 8 in the original 0417 template
+        ANNOTATION_SHEET_MAP.put(7, "19.整改");                // 十五五期间节能降碳目标
+        ANNOTATION_SHEET_MAP.put(8, "3.企业概况及主要技术指标一览");
+        ANNOTATION_SHEET_MAP.put(9, "6.重点设备能耗和效率");
         // ID 10 = energy flow diagram (image)
-        ANNOTATION_SHEET_MAP.put(11, "4.能源计量器具汇总");    // + 表5 (see ANNOTATION_11_EXTRA_SHEET)
-        ANNOTATION_SHEET_MAP.put(12, "15.温室气体排放");
-        ANNOTATION_SHEET_MAP.put(13, "11.1");                   // 能源购入、消费、存储
-        ANNOTATION_SHEET_MAP.put(14, "6.能源管理制度");         // was 7 in the original 0417 template
-        ANNOTATION_SHEET_MAP.put(15, "10.淘汰");
+        ANNOTATION_SHEET_MAP.put(11, "7.能碳计量器具汇总");    // + 表8 (see ANNOTATION_11_EXTRA_SHEET)
+        ANNOTATION_SHEET_MAP.put(12, "9.温室气体排放");
+        ANNOTATION_SHEET_MAP.put(13, "10.能源消费平衡综合");
+        ANNOTATION_SHEET_MAP.put(15, "11.淘汰");
         ANNOTATION_SHEET_MAP.put(16, "13.企业产品能源成本表");  // duplicate of ID 4, often orphaned
         ANNOTATION_SHEET_MAP.put(17, "14.节能量计算");
-        ANNOTATION_SHEET_MAP.put(18, "9.重点设备测试数据");
-        ANNOTATION_SHEET_MAP.put(19, "16.节能潜力");
-        ANNOTATION_SHEET_MAP.put(20, "17.能源管理改进建议");    // was 18 in the original 0417 template
-        // Use numeric prefix "18." instead of descriptive text: the live sheet name is
-        // "18.节能技术改造建议汇总" and a typo-prone descriptive value (e.g. dropping "术" or "造")
-        // would silently stop matching. Same defensive style as IDs 7 and 13 above.
-        ANNOTATION_SHEET_MAP.put(21, "18.");                    // was 19 in the original 0417 template
+        ANNOTATION_SHEET_MAP.put(18, "13.设备测试报告主要指标汇总");
+        ANNOTATION_SHEET_MAP.put(19, "15.节能降碳潜力明细");
+        ANNOTATION_SHEET_MAP.put(20, "16.能碳管理改进建议");
+        ANNOTATION_SHEET_MAP.put(21, "17.节能降碳技术改造建议汇总");
     }
 
     /** Additional sheet for annotation 11 (表4表5 → 2 tables) */
-    private static final String ANNOTATION_11_EXTRA_SHEET = "5.能源计量器具配备率";
+    private static final String ANNOTATION_11_EXTRA_SHEET = "8.能碳计量器具配备率";
 
     /**
      * Build a report by filling a Word template with SpreadJS data.
@@ -133,7 +127,7 @@ public class TemplateBasedReportBuilder {
             for (Integer id : commentPositions.keySet()) {
                 if (id == null) continue;
                 if (id == 11) expectedTables += 2;            // annotation 11 inserts two tables
-                else if (id >= 3 && id <= 21 && id != 10) expectedTables += 1;
+                else if (ANNOTATION_SHEET_MAP.containsKey(id)) expectedTables += 1;
             }
             boolean expectImage = commentPositions.containsKey(10) && flowChartImage != null
                     && flowChartImage.length > 0;
