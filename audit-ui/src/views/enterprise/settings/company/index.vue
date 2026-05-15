@@ -191,6 +191,7 @@ async function showLeaveDialog(): Promise<'save' | 'discard' | 'cancel'> {
       title: '未保存的更改',
       message: '当前页面有未保存的修改，是否保存草稿？',
       distinguishCancelAndClose: true,
+      showCancelButton: true,
       confirmButtonText: '保存草稿并离开',
       cancelButtonText: '放弃修改',
       closeOnClickModal: false,
@@ -204,7 +205,20 @@ async function showLeaveDialog(): Promise<'save' | 'discard' | 'cancel'> {
   }
 }
 
+// ── Leave protection: three layers ──
+// 1. onBeforeRouteLeave  → menu navigation & programmatic router.push
+// 2. popstate sentinel   → browser back (including out-of-SPA)
+// 3. beforeunload        → refresh / close tab
+
+const skipRouteLeaveGuard = ref(false)
+const leavingApproved = ref(false)
+const popstateGuardActive = ref(false)
+
 onBeforeRouteLeave(async () => {
+  if (skipRouteLeaveGuard.value) {
+    skipRouteLeaveGuard.value = false
+    return true
+  }
   if (!isDirty()) return true
   const choice = await showLeaveDialog()
   if (choice === 'cancel') return false
@@ -212,11 +226,39 @@ onBeforeRouteLeave(async () => {
     const ok = await handleDraftSave()
     if (!ok) return false
   }
-  // 'discard' → allow navigation, form will be re-loaded on next visit
+  leavingApproved.value = true
   return true
 })
 
+function pushHistoryGuard() {
+  history.pushState({ companySettingsGuard: true }, '')
+  popstateGuardActive.value = true
+}
+
+async function onPopState() {
+  if (!popstateGuardActive.value) return
+  if (!isDirty()) {
+    popstateGuardActive.value = false
+    history.back()
+    return
+  }
+  // Re-push sentinel so the page stays while the dialog is open
+  pushHistoryGuard()
+  const choice = await showLeaveDialog()
+  if (choice === 'cancel') return
+  if (choice === 'save') {
+    const ok = await handleDraftSave()
+    if (!ok) return
+  }
+  // Approved — go back 2 entries (sentinel + actual previous page)
+  leavingApproved.value = true
+  popstateGuardActive.value = false
+  skipRouteLeaveGuard.value = true
+  history.go(-2)
+}
+
 function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (leavingApproved.value) return
   if (isDirty()) {
     e.preventDefault()
     e.returnValue = ''
@@ -225,11 +267,14 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 
 onMounted(() => {
   loadData()
+  pushHistoryGuard()
   window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('popstate', onPopState)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('popstate', onPopState)
 })
 </script>
 
