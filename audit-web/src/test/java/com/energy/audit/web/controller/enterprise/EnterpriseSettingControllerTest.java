@@ -85,6 +85,54 @@ class EnterpriseSettingControllerTest {
         verify(settingService, times(1)).save(setting);
     }
 
+    // ── Draft save endpoint tests ──
+
+    @Test
+    void saveDraftAllowsBlankIndustryCode() {
+        EntEnterpriseSetting setting = new EntEnterpriseSetting();
+        setting.setIndustryCode(null);
+        setting.setIndustryName(null);
+
+        R<Void> response = controller.saveDraft(setting);
+
+        assertThat(response.getCode()).isEqualTo(200);
+        assertThat(setting.getEnterpriseId()).isEqualTo(42L);
+        verify(settingService, times(1)).save(setting);
+    }
+
+    @Test
+    void saveDraftAllowsPartialData() {
+        EntEnterpriseSetting setting = new EntEnterpriseSetting();
+        setting.setFax("qa-codex-test-marker");
+
+        R<Void> response = controller.saveDraft(setting);
+
+        assertThat(response.getCode()).isEqualTo(200);
+        assertThat(setting.getEnterpriseId()).isEqualTo(42L);
+        verify(settingService, times(1)).save(setting);
+    }
+
+    @Test
+    void saveDraftStampsEnterpriseId() {
+        EntEnterpriseSetting setting = baseSetting();
+
+        controller.saveDraft(setting);
+
+        assertThat(setting.getEnterpriseId()).isEqualTo(42L);
+    }
+
+    @Test
+    void strictSaveStillRejectsBlankIndustryAfterDraftEndpointExists() {
+        EntEnterpriseSetting setting = new EntEnterpriseSetting();
+        setting.setFax("some-value");
+
+        assertThatThrownBy(() -> controller.save(setting))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("行业分类不能为空");
+
+        verify(settingService, never()).save(setting);
+    }
+
     private static EntEnterpriseSetting baseSetting() {
         EntEnterpriseSetting setting = new EntEnterpriseSetting();
         setting.setIndustryCode("C281");

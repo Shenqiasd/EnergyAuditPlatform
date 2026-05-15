@@ -59,7 +59,7 @@ public class EnterpriseSettingController {
         return R.ok(settingService.get(enterpriseId));
     }
 
-    @Operation(summary = "Save (upsert) own enterprise setting")
+    @Operation(summary = "Save (upsert) own enterprise setting — strict, requires all mandatory fields")
     @PutMapping
     public R<Void> save(@RequestBody EntEnterpriseSetting setting) {
         Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
@@ -68,6 +68,15 @@ public class EnterpriseSettingController {
         if (isBlank(setting.getIndustryCode()) || isBlank(setting.getIndustryName())) {
             throw new BusinessException(400, "行业分类不能为空");
         }
+        setting.setEnterpriseId(enterpriseId);
+        settingService.save(setting);
+        return R.ok();
+    }
+
+    @Operation(summary = "Draft-save enterprise setting — partial data allowed, no mandatory-field validation")
+    @PutMapping("/draft")
+    public R<Void> saveDraft(@RequestBody EntEnterpriseSetting setting) {
+        Long enterpriseId = SecurityUtils.getRequiredCurrentEnterpriseId();
         setting.setEnterpriseId(enterpriseId);
         settingService.save(setting);
         return R.ok();

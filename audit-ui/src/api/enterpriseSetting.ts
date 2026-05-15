@@ -67,9 +67,14 @@ export function getEnterpriseSetting(): Promise<EnterpriseSetting | null> {
   return request.get('/enterprise/setting')
 }
 
-/** Create or update enterprise setting (upsert) */
+/** Create or update enterprise setting (upsert) — strict, runs full validation */
 export function upsertEnterpriseSetting(data: Partial<EnterpriseSetting>): Promise<void> {
   return request.put('/enterprise/setting', data)
+}
+
+/** Draft-save enterprise setting — partial data allowed, no mandatory-field validation */
+export function draftSaveEnterpriseSetting(data: Partial<EnterpriseSetting>): Promise<void> {
+  return request.put('/enterprise/setting/draft', data)
 }
 
 /** Get enterprise setting as flat field map for SpreadJS pre-fill (bidirectional sync) */
