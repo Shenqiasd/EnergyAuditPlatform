@@ -12,6 +12,9 @@ LIMIT 1;
 
 SET @ea052_template_version_id = COALESCE(@ea052_template_version_id, 43);
 
+CALL ensure_column('de_equipment_energy', 'seq_no', 'INT NULL COMMENT ''序号'' AFTER audit_year');
+CALL ensure_column('de_equipment_energy', 'device_name', 'VARCHAR(128) NULL COMMENT ''设备名称'' AFTER device_type');
+CALL ensure_column('de_equipment_energy', 'model_spec', 'VARCHAR(128) NULL COMMENT ''型号规格'' AFTER device_name');
 CALL ensure_column('de_equipment_energy', 'nameplate_output', 'VARCHAR(128) NULL COMMENT ''铭牌出力'' AFTER model_spec');
 CALL ensure_column('de_equipment_energy', 'main_energy_name', 'VARCHAR(128) NULL COMMENT ''主要能源名称'' AFTER nameplate_output');
 CALL ensure_column('de_equipment_energy', 'main_energy_consumption', 'DECIMAL(18,4) NULL COMMENT ''主要能源消费量'' AFTER main_energy_name');
