@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getEnergyFlowConfig,
@@ -935,7 +935,7 @@ function formatNum(n: number | null | undefined): string {
           </div>
           <div class="prop-row">
             <label>颜色</label>
-            <el-color-picker :model-value="selectedNode.color || '#666'" size="small" @update:model-value="v => updateNodeProp('color', v)" />
+            <el-color-picker :model-value="selectedNode.color || '#666'" size="small" @update:model-value="(v: string | null) => updateNodeProp('color', v)" />
           </div>
           <div class="prop-row">
             <label>宽度</label>
@@ -960,7 +960,7 @@ function formatNum(n: number | null | undefined): string {
           </div>
           <div class="prop-row">
             <label>颜色</label>
-            <el-color-picker :model-value="selectedEdge.color || '#666'" size="small" @update:model-value="v => updateEdgeProp('color', v)" />
+            <el-color-picker :model-value="selectedEdge.color || '#666'" size="small" @update:model-value="(v: string | null) => updateEdgeProp('color', v)" />
           </div>
           <div class="prop-row">
             <label>线宽</label>
