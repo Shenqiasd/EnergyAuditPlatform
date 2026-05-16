@@ -54,9 +54,6 @@ const showRecordDialog = ref(false)
 const creatingEdge = ref(false)
 const edgeSourceNodeId = ref<string | null>(null)
 
-// Final-effect preview toggle
-const showFinalPreview = ref(false)
-
 // Mode B pending edge (source/target node IDs waiting for dialog confirm)
 const pendingEdgeSrcNodeId = ref<string | null>(null)
 const pendingEdgeTgtNodeId = ref<string | null>(null)
