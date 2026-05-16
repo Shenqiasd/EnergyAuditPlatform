@@ -416,6 +416,43 @@ function buildEdgeLabel(r: FlowRecord): string {
 }
 
 // ============================================================
+// Find matching canvas node for a record's source/target
+// ============================================================
+function findNodeForRecordSource(r: FlowRecord): FlowNodeConfig | undefined {
+  if (r.sourceType === 'unit' && r.sourceRefId) {
+    return nodes.value.find(n => n.refType === 'unit' && n.refId === r.sourceRefId)
+  }
+  if (r.sourceType === 'external_energy') {
+    if (r.itemType === 'energy' && r.itemId) {
+      const match = nodes.value.find(n => n.nodeType === 'energy_input' && n.refId === r.itemId)
+      if (match) return match
+    }
+    return nodes.value.find(n => n.nodeType === 'energy_input')
+  }
+  if (r.sourceType === 'system' && r.sourceUnit) {
+    return nodes.value.find(n => n.label === r.sourceUnit)
+  }
+  return undefined
+}
+
+function findNodeForRecordTarget(r: FlowRecord): FlowNodeConfig | undefined {
+  if (r.targetType === 'unit' && r.targetRefId) {
+    return nodes.value.find(n => n.refType === 'unit' && n.refId === r.targetRefId)
+  }
+  if (r.targetType === 'product_output') {
+    if (r.itemType === 'product' && r.itemId) {
+      const match = nodes.value.find(n => n.nodeType === 'product_output' && n.refId === r.itemId)
+      if (match) return match
+    }
+    return nodes.value.find(n => n.nodeType === 'product_output')
+  }
+  if (r.targetType === 'production_system' && r.targetUnit) {
+    return nodes.value.find(n => n.label === r.targetUnit)
+  }
+  return undefined
+}
+
+// ============================================================
 // Node interactions
 // ============================================================
 function handleNodeMouseDown(nodeId: string, event: MouseEvent) {
@@ -597,7 +634,7 @@ async function saveRecord() {
     flowRecords.value.push(r)
   }
 
-  // Sync all bound edges with updated record data
+  // Sync all bound edges with updated record data (including source/target node rebinding)
   if (r._clientKey) {
     for (const e of edges.value) {
       if (e._flowRecordClientKey === r._clientKey) {
@@ -607,6 +644,12 @@ async function saveRecord() {
         e.physicalQuantity = r.physicalQuantity
         e.calculatedValue = r.calculatedValue
         e.labelText = buildEdgeLabel(r)
+        // Rebind source node when record source changes
+        const newSrcNode = findNodeForRecordSource(r)
+        if (newSrcNode) e.sourceNodeId = newSrcNode.nodeId
+        // Rebind target node when record target changes
+        const newTgtNode = findNodeForRecordTarget(r)
+        if (newTgtNode) e.targetNodeId = newTgtNode.nodeId
       }
     }
   }
@@ -829,6 +872,10 @@ function edgeLabelPos(edge: FlowEdgeConfig): { x: number; y: number } {
 // ============================================================
 function computeLocalExportErrors(): string[] {
   const errors: string[] = []
+  // Merge backend export errors (legacy 待确认, enterprise fields, etc.)
+  if (validation.value.exportErrors && validation.value.exportErrors.length > 0) {
+    errors.push(...validation.value.exportErrors)
+  }
   if (!validation.value.enterpriseComplete) {
     errors.push('企业信息不完整（请先完善企业概况页面）')
   }
@@ -838,14 +885,20 @@ function computeLocalExportErrors(): string[] {
   for (const r of flowRecords.value) {
     if (r.itemType === 'energy' && r.itemId) {
       const energy = energies.value.find(e => e.id === r.itemId)
-      if (energy && energy.equivalentValue == null) {
+      if (!energy) {
+        errors.push(`填报记录的能源品种(itemId=${r.itemId})在本企业中不存在或已删除（待确认）`)
+      } else if (energy.equivalentValue == null) {
         errors.push(`能源 [${energy.name}] 缺少折标系数`)
       }
     } else if (r.itemType === 'product' && r.itemId) {
       const product = products.value.find(p => p.id === r.itemId)
-      if (product && product.unitPrice == null) {
+      if (!product) {
+        errors.push(`填报记录的产品(itemId=${r.itemId})在本企业中不存在或已删除（待确认）`)
+      } else if (product.unitPrice == null) {
         errors.push(`产品 [${product.name}] 缺少单价`)
       }
+    } else if (!r.itemType && r.energyProduct) {
+      errors.push(`填报记录 [${r.energyProduct}] 为旧数据（待确认），请编辑确认品目类型和品目`)
     }
   }
   return [...new Set(errors)]

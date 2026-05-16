@@ -215,14 +215,22 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         for (DeEnergyFlow f : flows) {
             if ("energy".equals(f.getItemType()) && f.getItemId() != null) {
                 BsEnergy energy = energyMapper.selectByIdAndEnterprise(f.getItemId(), enterpriseId);
-                if (energy != null && energy.getEquivalentValue() == null) {
+                if (energy == null) {
+                    String msg = "填报记录的能源品种(itemId=" + f.getItemId() + ")在本企业中不存在或已删除（待确认）";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
+                } else if (energy.getEquivalentValue() == null) {
                     String msg = "能源 [" + energy.getName() + "] 缺少折标系数";
                     warnings.add(msg);
                     exportErrors.add(msg);
                 }
             } else if ("product".equals(f.getItemType()) && f.getItemId() != null) {
                 BsProduct product = productMapper.selectByIdAndEnterprise(f.getItemId(), enterpriseId);
-                if (product != null && product.getUnitPrice() == null) {
+                if (product == null) {
+                    String msg = "填报记录的产品(itemId=" + f.getItemId() + ")在本企业中不存在或已删除（待确认）";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
+                } else if (product.getUnitPrice() == null) {
                     String msg = "产品 [" + product.getName() + "] 缺少单价";
                     warnings.add(msg);
                     exportErrors.add(msg);
@@ -252,7 +260,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
             // Server-side validation for each flow record
             for (int i = 0; i < dto.getFlowRecords().size(); i++) {
                 DeEnergyFlow flow = dto.getFlowRecords().get(i);
-                validateFlowRecord(flow, i);
+                validateFlowRecord(flow, i, enterpriseId);
             }
 
             List<DeEnergyFlow> existing = flowMapper.selectByEnterpriseAndYear(enterpriseId, auditYear);
@@ -348,42 +356,47 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
 
-            // Replace edges (resolve flowRecordId from flowRecordIndex if needed)
-            edgeMapper.deleteByDiagramId(diagramId, operator);
+            // Pre-validate edges: resolve flowRecordId and reject invalid visible edges BEFORE deleting
+            List<Long> resolvedEdgeRecordIds = new ArrayList<>();
             if (dc.getEdges() != null) {
                 for (DiagramConfigDTO.FlowEdgeDTO ed : dc.getEdges()) {
-                    DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
-                    edge.setDiagramId(diagramId);
-                    edge.setEdgeId(ed.getEdgeId());
-                    edge.setSourceNodeId(ed.getSourceNodeId());
-                    edge.setTargetNodeId(ed.getTargetNodeId());
-
-                    // Resolve flowRecordId: prefer flowRecordIndex → saved record ID
                     Long resolvedRecordId = ed.getFlowRecordId();
                     if (ed.getFlowRecordIndex() != null
                             && ed.getFlowRecordIndex() >= 0
                             && ed.getFlowRecordIndex() < savedRecords.size()) {
                         resolvedRecordId = savedRecords.get(ed.getFlowRecordIndex()).getId();
                     }
-                    // Validate: resolved flowRecordId must point to an active saved record
                     if (resolvedRecordId != null) {
                         final Long checkId = resolvedRecordId;
                         boolean valid = savedRecords.stream()
                                 .anyMatch(r -> r.getId().equals(checkId));
                         if (!valid) {
-                            log.warn("Edge {} has flowRecordId={} not in active records, skipping",
+                            log.warn("Edge {} has flowRecordId={} not in active records",
                                     ed.getEdgeId(), resolvedRecordId);
                             resolvedRecordId = null;
                         }
                     }
-                    // Skip visible edges that have no valid flowRecordId binding
                     Integer edgeVisible = ed.getVisible() != null ? ed.getVisible() : 1;
                     if (resolvedRecordId == null && edgeVisible == 1) {
-                        log.warn("Skipping visible edge {} — no valid flowRecordId", ed.getEdgeId());
-                        continue;
+                        throw new IllegalArgumentException(
+                                String.format("连线 [%s] 没有绑定到有效的填报记录，无法保存。请先删除该连线或重新绑定填报记录。",
+                                        ed.getEdgeId()));
                     }
-                    edge.setFlowRecordId(resolvedRecordId);
+                    resolvedEdgeRecordIds.add(resolvedRecordId);
+                }
+            }
 
+            // Now safe to replace edges (all validated)
+            edgeMapper.deleteByDiagramId(diagramId, operator);
+            if (dc.getEdges() != null) {
+                for (int i = 0; i < dc.getEdges().size(); i++) {
+                    DiagramConfigDTO.FlowEdgeDTO ed = dc.getEdges().get(i);
+                    DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
+                    edge.setDiagramId(diagramId);
+                    edge.setEdgeId(ed.getEdgeId());
+                    edge.setSourceNodeId(ed.getSourceNodeId());
+                    edge.setTargetNodeId(ed.getTargetNodeId());
+                    edge.setFlowRecordId(resolvedEdgeRecordIds.get(i));
                     edge.setItemType(ed.getItemType());
                     edge.setItemId(ed.getItemId());
                     edge.setPhysicalQuantity(ed.getPhysicalQuantity());
@@ -392,7 +405,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     edge.setColor(ed.getColor());
                     edge.setLineWidth(ed.getLineWidth());
                     edge.setRoutePoints(ed.getRoutePoints());
-                    edge.setVisible(edgeVisible);
+                    edge.setVisible(ed.getVisible() != null ? ed.getVisible() : 1);
                     edge.setCreateBy(operator);
                     edge.setUpdateBy(operator);
                     edgeMapper.insert(edge);
@@ -503,7 +516,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
      * Server-side validation for fill records.
      * Legacy rows without itemType/itemId are allowed but flagged.
      */
-    private void validateFlowRecord(DeEnergyFlow flow, int index) {
+    private void validateFlowRecord(DeEnergyFlow flow, int index, Long enterpriseId) {
         // Legacy rows: if no sourceType and has energyProduct, treat as legacy — allow but flag
         if (isBlank(flow.getSourceType()) && !isBlank(flow.getEnergyProduct())) {
             return; // legacy row, skip strict validation
@@ -511,15 +524,23 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         List<String> errors = new ArrayList<>();
         if (isBlank(flow.getSourceType())) {
             errors.add("来源类型(sourceType)不能为空");
-        } else if ("unit".equals(flow.getSourceType()) && flow.getSourceRefId() == null) {
-            if (isBlank(flow.getSourceUnit())) errors.add("来源单元未指定");
+        } else if ("unit".equals(flow.getSourceType())) {
+            if (flow.getSourceRefId() == null) {
+                if (isBlank(flow.getSourceUnit())) errors.add("来源单元未指定");
+            } else if (unitMapper.selectByIdAndEnterprise(flow.getSourceRefId(), enterpriseId) == null) {
+                errors.add("来源单元(sourceRefId=" + flow.getSourceRefId() + ")在本企业中不存在");
+            }
         } else if ("system".equals(flow.getSourceType()) && isBlank(flow.getSourceUnit())) {
             errors.add("来源系统名称不能为空");
         }
         if (isBlank(flow.getTargetType())) {
             errors.add("目的类型(targetType)不能为空");
-        } else if ("unit".equals(flow.getTargetType()) && flow.getTargetRefId() == null) {
-            if (isBlank(flow.getTargetUnit())) errors.add("目的单元未指定");
+        } else if ("unit".equals(flow.getTargetType())) {
+            if (flow.getTargetRefId() == null) {
+                if (isBlank(flow.getTargetUnit())) errors.add("目的单元未指定");
+            } else if (unitMapper.selectByIdAndEnterprise(flow.getTargetRefId(), enterpriseId) == null) {
+                errors.add("目的单元(targetRefId=" + flow.getTargetRefId() + ")在本企业中不存在");
+            }
         } else if ("production_system".equals(flow.getTargetType()) && isBlank(flow.getTargetUnit())) {
             errors.add("目的生产系统名称不能为空");
         }
@@ -528,6 +549,14 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         }
         if (flow.getItemId() == null && !isBlank(flow.getItemType())) {
             errors.add("品目(itemId)不能为空");
+        } else if (flow.getItemId() != null && !isBlank(flow.getItemType())) {
+            if ("energy".equals(flow.getItemType())
+                    && energyMapper.selectByIdAndEnterprise(flow.getItemId(), enterpriseId) == null) {
+                errors.add("能源品种(itemId=" + flow.getItemId() + ")在本企业中不存在");
+            } else if ("product".equals(flow.getItemType())
+                    && productMapper.selectByIdAndEnterprise(flow.getItemId(), enterpriseId) == null) {
+                errors.add("产品(itemId=" + flow.getItemId() + ")在本企业中不存在");
+            }
         }
         if (flow.getPhysicalQuantity() == null) {
             errors.add("实物量(physicalQuantity)不能为空");

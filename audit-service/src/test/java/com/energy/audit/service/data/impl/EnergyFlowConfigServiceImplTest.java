@@ -254,6 +254,7 @@ class EnergyFlowConfigServiceImplTest {
                 try {
                     BsEnergy elec = energy(1L, "电力", new BigDecimal("0.1229"));
                     when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(elec);
+                    when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
 
                     DeEnergyFlow flow = new DeEnergyFlow();
                     flow.setSourceType("external_energy");
@@ -282,6 +283,7 @@ class EnergyFlowConfigServiceImplTest {
         try {
             BsProduct prod = product(1L, "产品A", new BigDecimal("5.5"));
             when(productMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(prod);
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
 
             DeEnergyFlow flow = new DeEnergyFlow();
             flow.setSourceType("unit");
@@ -361,6 +363,8 @@ class EnergyFlowConfigServiceImplTest {
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
 
             // Create a record so the edge can bind to it
             DeEnergyFlow rec = new DeEnergyFlow();
@@ -445,6 +449,8 @@ class EnergyFlowConfigServiceImplTest {
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(energyMapper.selectByIdAndEnterprise(5L, ENT_ID)).thenReturn(energy(5L, "天然气", new BigDecimal("1.33")));
 
             // Create a record so the edge can bind to it
             DeEnergyFlow rec = new DeEnergyFlow();
@@ -514,6 +520,10 @@ class EnergyFlowConfigServiceImplTest {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR))
                     .thenReturn(List.of(existing1, existing2));
 
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+            when(productMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(product(2L, "产品B", new BigDecimal("500")));
+
             // Incoming: keep record 10, drop record 20, add new record
             DeEnergyFlow keep = new DeEnergyFlow();
             keep.setId(10L);
@@ -563,6 +573,8 @@ class EnergyFlowConfigServiceImplTest {
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
 
             // One new record, insert simulates auto-increment ID = 42
             DeEnergyFlow rec = new DeEnergyFlow();
@@ -778,15 +790,17 @@ class EnergyFlowConfigServiceImplTest {
     }
 
     // ============================================================
-    // Fix #1 (v3): visible edges without valid flowRecordId are NOT persisted
+    // Fix #4 (v4): backend REJECTS invalid visible edges (throws, does not silently drop)
     // ============================================================
 
     @Test
-    void saveConfigSkipsVisibleEdgeWithInvalidFlowRecordId() {
+    void saveConfigRejectsVisibleEdgeWithInvalidFlowRecordId() {
         com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
 
             DeEnergyFlow rec = new DeEnergyFlow();
             rec.setSourceType("external_energy");
@@ -802,12 +816,11 @@ class EnergyFlowConfigServiceImplTest {
             }).when(flowMapper).insert(any(DeEnergyFlow.class));
 
             DiagramConfigDTO dc = new DiagramConfigDTO();
-            dc.setName("skip unbound test");
+            dc.setName("reject unbound test");
             dc.setCanvasWidth(1200);
             dc.setCanvasHeight(800);
             dc.setNodes(Collections.emptyList());
 
-            // Visible edge with invalid flowRecordId (999 not in saved records)
             DiagramConfigDTO.FlowEdgeDTO badEdge = new DiagramConfigDTO.FlowEdgeDTO();
             badEdge.setEdgeId("edge-bad");
             badEdge.setSourceNodeId("n1");
@@ -821,17 +834,19 @@ class EnergyFlowConfigServiceImplTest {
             dto.setFlowRecords(List.of(rec));
             dto.setDiagram(dc);
 
-            service.saveConfig(ENT_ID, YEAR, dto);
-
-            // Visible edge with no valid binding must NOT be inserted
-            verify(edgeMapper, never()).insert(any(DeEnergyFlowEdge.class));
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("连线")
+                    .hasMessageContaining("edge-bad");
+            // Existing edges must NOT be deleted when validation fails (pre-validation)
+            verify(edgeMapper, never()).deleteByDiagramId(anyLong(), anyString());
         } finally {
             com.energy.audit.common.util.SecurityUtils.clear();
         }
     }
 
     @Test
-    void saveConfigSkipsVisibleEdgeWithNullFlowRecordId() {
+    void saveConfigRejectsVisibleEdgeWithNullFlowRecordId() {
         com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
@@ -855,20 +870,23 @@ class EnergyFlowConfigServiceImplTest {
             SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
             dto.setDiagram(dc);
 
-            service.saveConfig(ENT_ID, YEAR, dto);
-
-            verify(edgeMapper, never()).insert(any(DeEnergyFlowEdge.class));
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("连线");
+            verify(edgeMapper, never()).deleteByDiagramId(anyLong(), anyString());
         } finally {
             com.energy.audit.common.util.SecurityUtils.clear();
         }
     }
 
     @Test
-    void saveConfigSkipsVisibleEdgeWithOutOfRangeFlowRecordIndex() {
+    void saveConfigRejectsVisibleEdgeWithOutOfRangeFlowRecordIndex() {
         com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
 
             DeEnergyFlow rec = new DeEnergyFlow();
             rec.setSourceType("external_energy");
@@ -902,9 +920,10 @@ class EnergyFlowConfigServiceImplTest {
             dto.setFlowRecords(List.of(rec));
             dto.setDiagram(dc);
 
-            service.saveConfig(ENT_ID, YEAR, dto);
-
-            verify(edgeMapper, never()).insert(any(DeEnergyFlowEdge.class));
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("连线");
+            verify(edgeMapper, never()).deleteByDiagramId(anyLong(), anyString());
         } finally {
             com.energy.audit.common.util.SecurityUtils.clear();
         }
@@ -1130,5 +1149,167 @@ class EnergyFlowConfigServiceImplTest {
 
         assertThat(result.getValidation().isEnterpriseComplete()).isTrue();
         assertThat(result.getValidation().isExportReady()).isTrue();
+    }
+
+    // ============================================================
+    // Fix #2 (v4): backend validation verifies master data references exist
+    // ============================================================
+
+    @Test
+    void saveConfigRejectsInvalidSourceRefId() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(unitMapper.selectByIdAndEnterprise(999L, ENT_ID)).thenReturn(null);
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setSourceType("unit");
+            flow.setSourceRefId(999L);
+            flow.setTargetType("product_output");
+            flow.setItemType("product");
+            flow.setItemId(1L);
+            flow.setPhysicalQuantity(new BigDecimal("100"));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sourceRefId=999")
+                    .hasMessageContaining("不存在");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigRejectsInvalidTargetRefId() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(unitMapper.selectByIdAndEnterprise(999L, ENT_ID)).thenReturn(null);
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setSourceType("external_energy");
+            flow.setTargetType("unit");
+            flow.setTargetRefId(999L);
+            flow.setItemType("energy");
+            flow.setItemId(1L);
+            flow.setPhysicalQuantity(new BigDecimal("100"));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("targetRefId=999")
+                    .hasMessageContaining("不存在");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigRejectsInvalidEnergyItemId() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(energyMapper.selectByIdAndEnterprise(999L, ENT_ID)).thenReturn(null);
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setSourceType("external_energy");
+            flow.setTargetType("unit");
+            flow.setTargetRefId(1L);
+            flow.setItemType("energy");
+            flow.setItemId(999L);
+            flow.setPhysicalQuantity(new BigDecimal("100"));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("itemId=999")
+                    .hasMessageContaining("不存在");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigRejectsInvalidProductItemId() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(productMapper.selectByIdAndEnterprise(999L, ENT_ID)).thenReturn(null);
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setSourceType("unit");
+            flow.setSourceRefId(1L);
+            flow.setTargetType("product_output");
+            flow.setItemType("product");
+            flow.setItemId(999L);
+            flow.setPhysicalQuantity(new BigDecimal("100"));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("itemId=999")
+                    .hasMessageContaining("不存在");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void getConfigExportBlockedWhenEnergyItemIdDeleted() {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("external_energy");
+        flow.setTargetType("unit");
+        flow.setTargetRefId(1L);
+        flow.setItemType("energy");
+        flow.setItemId(999L); // non-existent energy
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(energyMapper.selectByIdAndEnterprise(999L, ENT_ID)).thenReturn(null);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("待确认") && e.contains("itemId=999"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenProductItemIdDeleted() {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("unit");
+        flow.setSourceRefId(1L);
+        flow.setTargetType("product_output");
+        flow.setItemType("product");
+        flow.setItemId(888L); // non-existent product
+        flow.setPhysicalQuantity(new BigDecimal("200"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(productMapper.selectByIdAndEnterprise(888L, ENT_ID)).thenReturn(null);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("待确认") && e.contains("itemId=888"));
     }
 }
