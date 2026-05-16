@@ -30,6 +30,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -388,6 +391,9 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                         }
                     }
                 }
+                // Validate routePoints (malformed JSON, non-orthogonal, out-of-canvas, node crossing)
+                List<String> rpErrs = validateEdgeRoutePoints(ed, getNodeMap);
+                exportErrors.addAll(rpErrs);
             }
         }
         validation.setWarnings(warnings);
@@ -967,6 +973,115 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
             throw new IllegalArgumentException(
                     String.format("填报记录[%d]校验失败: %s", index + 1, String.join("; ", errors)));
         }
+    }
+
+    /**
+     * Validate route points on an edge: malformed JSON, typed-invalid, non-orthogonal,
+     * out-of-canvas, node crossing. Returns list of export errors (empty if valid or absent).
+     */
+    private List<String> validateEdgeRoutePoints(DiagramConfigDTO.FlowEdgeDTO ed,
+                                                  Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap) {
+        List<String> errors = new ArrayList<>();
+        String rp = ed.getRoutePoints();
+        if (rp == null || rp.isBlank()) return errors;
+
+        // Parse JSON
+        List<Map<String, Object>> points;
+        try {
+            ObjectMapper om = new ObjectMapper();
+            points = om.readValue(rp, new TypeReference<>() {});
+        } catch (Exception ex) {
+            errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints为无效JSON: " + ex.getMessage());
+            return errors;
+        }
+        if (points == null || points.isEmpty()) return errors;
+
+        // Validate each point has numeric x, y
+        List<double[]> coords = new ArrayList<>();
+        for (int i = 0; i < points.size(); i++) {
+            Map<String, Object> pt = points.get(i);
+            if (pt == null || !pt.containsKey("x") || !pt.containsKey("y")) {
+                errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i + "]缺少x或y字段");
+                return errors;
+            }
+            double x, y;
+            try {
+                x = ((Number) pt.get("x")).doubleValue();
+                y = ((Number) pt.get("y")).doubleValue();
+            } catch (Exception ex) {
+                errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i + "]的x或y不是有效数值");
+                return errors;
+            }
+            if (Double.isNaN(x) || Double.isInfinite(x) || Double.isNaN(y) || Double.isInfinite(y)) {
+                errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i + "]包含NaN或Infinity");
+                return errors;
+            }
+            // Out of canvas
+            if (x < 0 || y < 0 || x > 5000 || y > 5000) {
+                errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i + "]超出画布范围(" + x + "," + y + ")");
+            }
+            coords.add(new double[]{x, y});
+        }
+
+        // Check orthogonality: build full path with approximate source/target endpoints
+        DiagramConfigDTO.FlowNodeDTO srcNode = nodeMap.get(ed.getSourceNodeId());
+        DiagramConfigDTO.FlowNodeDTO tgtNode = nodeMap.get(ed.getTargetNodeId());
+        if (srcNode != null && tgtNode != null) {
+            double sx = (srcNode.getPositionX() != null ? srcNode.getPositionX() : 0)
+                    + (srcNode.getWidth() != null ? srcNode.getWidth() : 100);
+            double sy = (srcNode.getPositionY() != null ? srcNode.getPositionY() : 0)
+                    + (srcNode.getHeight() != null ? srcNode.getHeight() : 50) / 2.0;
+            double tx = tgtNode.getPositionX() != null ? tgtNode.getPositionX() : 0;
+            double ty = (tgtNode.getPositionY() != null ? tgtNode.getPositionY() : 0)
+                    + (tgtNode.getHeight() != null ? tgtNode.getHeight() : 50) / 2.0;
+
+            // Build full path: [source, ...routePoints, target]
+            List<double[]> full = new ArrayList<>();
+            full.add(new double[]{sx, sy});
+            full.addAll(coords);
+            full.add(new double[]{tx, ty});
+            for (int i = 0; i < full.size() - 1; i++) {
+                double[] a = full.get(i);
+                double[] b = full.get(i + 1);
+                if (Math.abs(a[0] - b[0]) > 1 && Math.abs(a[1] - b[1]) > 1) {
+                    errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints第" + (i + 1)
+                            + "段不符合90°正交规则");
+                    break;
+                }
+            }
+
+            // Check node crossing: route points inside other nodes
+            for (DiagramConfigDTO.FlowNodeDTO nd : nodeMap.values()) {
+                if (nd.getNodeId() == null) continue;
+                if (nd.getNodeId().equals(ed.getSourceNodeId()) || nd.getNodeId().equals(ed.getTargetNodeId())) continue;
+                double nx = nd.getPositionX() != null ? nd.getPositionX() : 0;
+                double ny = nd.getPositionY() != null ? nd.getPositionY() : 0;
+                double nw = nd.getWidth() != null ? nd.getWidth() : 100;
+                double nh = nd.getHeight() != null ? nd.getHeight() : 50;
+                for (int i = 0; i < coords.size(); i++) {
+                    double[] c = coords.get(i);
+                    if (c[0] > nx && c[0] < nx + nw && c[1] > ny && c[1] < ny + nh) {
+                        errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints["
+                                + i + "]穿过节点[" + nd.getNodeId() + "]");
+                        break;
+                    }
+                }
+            }
+
+            // Check backflow top-channel bypass: if source is right of target, points must go above both
+            if (sx > tx) {
+                double minNodeY = Math.min(sy, ty);
+                boolean hasTopPoint = false;
+                for (double[] c : coords) {
+                    if (c[1] < minNodeY) { hasTopPoint = true; break; }
+                }
+                if (!hasTopPoint) {
+                    errors.add("回流连线 [" + ed.getEdgeId() + "] 的routePoints未经过顶部回流通道");
+                }
+            }
+        }
+
+        return errors;
     }
 
     private void calculateFlowValue(DeEnergyFlow flow, Long enterpriseId) {

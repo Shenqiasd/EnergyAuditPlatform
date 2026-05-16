@@ -1152,7 +1152,9 @@ function computeLocalExportErrors(): string[] {
               }
             }
           }
-        } catch { /* invalid JSON ignored — not a blocking error here */ }
+        } catch {
+              errors.push(`连线 [${e.edgeId}] 的routePoints为无效JSON格式，请重新编辑路由点`)
+            }
       }
     }
   }

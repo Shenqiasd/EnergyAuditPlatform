@@ -2745,4 +2745,253 @@ class EnergyFlowConfigServiceImplTest {
             com.energy.audit.common.util.SecurityUtils.clear();
         }
     }
+
+    // ============================================================
+    // Fix (v18): route point validation in getConfig export
+    // ============================================================
+
+    private EnergyFlowConfigDTO getConfigWithEdgeRoutePoints(String routePoints) {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setId(100L);
+        flow.setSourceType("external_energy");
+        flow.setTargetType("unit");
+        flow.setTargetRefId(1L);
+        flow.setItemType("energy");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+
+        // Build diagram with two nodes and an edge with route points
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("test");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        DeEnergyFlowNode srcNode = new DeEnergyFlowNode();
+        srcNode.setNodeId("node-src");
+        srcNode.setNodeType("energy_input");
+        srcNode.setRefType("energy");
+        srcNode.setRefId(1L);
+        srcNode.setPositionX(100.0);
+        srcNode.setPositionY(200.0);
+        srcNode.setWidth(100.0);
+        srcNode.setHeight(50.0);
+        srcNode.setVisible(1);
+        DeEnergyFlowNode tgtNode = new DeEnergyFlowNode();
+        tgtNode.setNodeId("node-tgt");
+        tgtNode.setNodeType("unit");
+        tgtNode.setRefType("unit");
+        tgtNode.setRefId(1L);
+        tgtNode.setPositionX(400.0);
+        tgtNode.setPositionY(200.0);
+        tgtNode.setWidth(100.0);
+        tgtNode.setHeight(50.0);
+        tgtNode.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgtNode));
+
+        DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
+        edge.setEdgeId("edge-rp");
+        edge.setSourceNodeId("node-src");
+        edge.setTargetNodeId("node-tgt");
+        edge.setFlowRecordId(100L);
+        edge.setVisible(1);
+        edge.setRoutePoints(routePoints);
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
+
+        return service.getConfig(ENT_ID, YEAR);
+    }
+
+    @Test
+    void getConfigExportBlockedWhenRoutePointsMalformedJson() {
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("{not valid json}");
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("routePoints") && e.contains("无效JSON"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenRoutePointsMissingXY() {
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"a\":1}]");
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("routePoints") && e.contains("缺少x或y"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenRoutePointsOutOfCanvas() {
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":6000,\"y\":200}]");
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("routePoints") && e.contains("超出画布"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenRoutePointsNonOrthogonal() {
+        // Diagonal segment from source exit (200,225) to (350,300) to target entry (400,225)
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":350,\"y\":300}]");
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("routePoints") && e.contains("正交"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenRoutePointsCrossNode() {
+        // Route point inside the target node area (400-500, 200-250)
+        // but we need a third node that the point crosses through
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3), unit(2L, "中间节点", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setId(100L);
+        flow.setSourceType("external_energy");
+        flow.setTargetType("unit");
+        flow.setTargetRefId(1L);
+        flow.setItemType("energy");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("test");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        DeEnergyFlowNode srcNode = new DeEnergyFlowNode();
+        srcNode.setNodeId("node-src");
+        srcNode.setNodeType("energy_input");
+        srcNode.setRefType("energy");
+        srcNode.setRefId(1L);
+        srcNode.setPositionX(100.0);
+        srcNode.setPositionY(200.0);
+        srcNode.setWidth(100.0);
+        srcNode.setHeight(50.0);
+        srcNode.setVisible(1);
+        DeEnergyFlowNode midNode = new DeEnergyFlowNode();
+        midNode.setNodeId("node-mid");
+        midNode.setNodeType("unit");
+        midNode.setRefType("unit");
+        midNode.setRefId(2L);
+        midNode.setPositionX(250.0);
+        midNode.setPositionY(200.0);
+        midNode.setWidth(100.0);
+        midNode.setHeight(50.0);
+        midNode.setVisible(1);
+        DeEnergyFlowNode tgtNode = new DeEnergyFlowNode();
+        tgtNode.setNodeId("node-tgt");
+        tgtNode.setNodeType("unit");
+        tgtNode.setRefType("unit");
+        tgtNode.setRefId(1L);
+        tgtNode.setPositionX(500.0);
+        tgtNode.setPositionY(200.0);
+        tgtNode.setWidth(100.0);
+        tgtNode.setHeight(50.0);
+        tgtNode.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, midNode, tgtNode));
+
+        DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
+        edge.setEdgeId("edge-crossing");
+        edge.setSourceNodeId("node-src");
+        edge.setTargetNodeId("node-tgt");
+        edge.setFlowRecordId(100L);
+        edge.setVisible(1);
+        // Route point at (300, 225) is inside midNode (250-350, 200-250)
+        edge.setRoutePoints("[{\"x\":200,\"y\":225},{\"x\":300,\"y\":225}]");
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("routePoints") && e.contains("穿过节点"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenBackflowRoutePointsBypassTopChannel() {
+        // Backflow: source node is to the right of target; route points don't go above nodes
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setId(100L);
+        flow.setSourceType("unit");
+        flow.setSourceRefId(1L);
+        flow.setTargetType("external_energy");
+        flow.setItemType("energy");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("test");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        // Source node is at x=500 (right), target node at x=100 (left) → backflow
+        DeEnergyFlowNode srcNode = new DeEnergyFlowNode();
+        srcNode.setNodeId("node-right");
+        srcNode.setNodeType("unit");
+        srcNode.setRefType("unit");
+        srcNode.setRefId(1L);
+        srcNode.setPositionX(500.0);
+        srcNode.setPositionY(200.0);
+        srcNode.setWidth(100.0);
+        srcNode.setHeight(50.0);
+        srcNode.setVisible(1);
+        DeEnergyFlowNode tgtNode = new DeEnergyFlowNode();
+        tgtNode.setNodeId("node-left");
+        tgtNode.setNodeType("energy_input");
+        tgtNode.setRefType("energy");
+        tgtNode.setRefId(1L);
+        tgtNode.setPositionX(100.0);
+        tgtNode.setPositionY(200.0);
+        tgtNode.setWidth(100.0);
+        tgtNode.setHeight(50.0);
+        tgtNode.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgtNode));
+
+        DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
+        edge.setEdgeId("edge-backflow");
+        edge.setSourceNodeId("node-right");
+        edge.setTargetNodeId("node-left");
+        edge.setFlowRecordId(100L);
+        edge.setVisible(1);
+        // Route points stay at Y=300 (below both nodes at Y=200-250) — doesn't go through top channel
+        edge.setRoutePoints("[{\"x\":600,\"y\":300},{\"x\":100,\"y\":300}]");
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("回流") && e.contains("routePoints") && e.contains("顶部"));
+    }
+
+    @Test
+    void getConfigExportPassesWhenRoutePointsValidOrthogonal() {
+        // Valid orthogonal route points should not block export
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":200,\"y\":225},{\"x\":300,\"y\":225}]");
+        // Should not have route-point-specific errors (may have other export issues)
+        assertThat(result.getValidation().getExportErrors())
+                .noneMatch(e -> e.contains("routePoints"));
+    }
 }
