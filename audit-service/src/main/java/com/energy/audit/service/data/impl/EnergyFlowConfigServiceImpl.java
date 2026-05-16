@@ -151,6 +151,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
             cdto.setMeasurementUnit(c.getMeasurementUnit());
             cdto.setOpeningStock(c.getOpeningStock());
             cdto.setPurchaseTotal(c.getPurchaseTotal());
+            cdto.setPurchaseAmount(c.getPurchaseAmount());
             cdto.setClosingStock(c.getClosingStock());
             cdto.setExternalSupply(c.getExternalSupply());
             cdto.setEquivFactor(c.getEquivFactor());
@@ -878,6 +879,15 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         }
         if (flow.getPhysicalQuantity() == null) {
             errors.add("实物量(physicalQuantity)不能为空");
+        }
+        // Terminal-use semantics: product output must originate from terminal-use unit (unitType=3)
+        if ("product_output".equals(flow.getTargetType()) && "unit".equals(flow.getSourceType())
+                && flow.getSourceRefId() != null) {
+            BsUnit srcUnit = unitMapper.selectByIdAndEnterprise(flow.getSourceRefId(), enterpriseId);
+            if (srcUnit != null && srcUnit.getUnitType() != null && srcUnit.getUnitType() != 3) {
+                errors.add("产品输出记录的来源单元必须是终端使用环节(unitType=3)，当前来源单元类型为"
+                        + srcUnit.getUnitType());
+            }
         }
         if (!errors.isEmpty()) {
             throw new IllegalArgumentException(

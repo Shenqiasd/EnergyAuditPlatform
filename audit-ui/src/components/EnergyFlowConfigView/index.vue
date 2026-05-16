@@ -76,6 +76,11 @@ const recordById = computed(() => {
   props.flowRecords?.forEach(r => { if (r.id) m.set(r.id, r) })
   return m
 })
+const recordByClientKey = computed(() => {
+  const m = new Map<string, FlowRecord>()
+  props.flowRecords?.forEach(r => { if (r._clientKey) m.set(r._clientKey, r) })
+  return m
+})
 
 // ── Stage layout constants ────────────────────────────────
 const STAGE_LABELS = ['购入贮存环节', '加工转换环节', '输送分配环节', '终端使用环节']
@@ -147,6 +152,10 @@ const shapeNodes = computed(() => layoutNodes.value)
 const visibleEdges = computed(() => props.edges.filter(e => (e.visible ?? 1) !== 0))
 
 function resolveRecord(e: FlowEdgeConfig): FlowRecord | undefined {
+  if (e._flowRecordClientKey) {
+    const byKey = recordByClientKey.value.get(e._flowRecordClientKey)
+    if (byKey) return byKey
+  }
   if (e.flowRecordId) return recordById.value.get(e.flowRecordId)
   return undefined
 }
@@ -163,7 +172,7 @@ function energyNodeTotalLine(n: FlowNodeConfig): string {
   const cons = consumptionByEnergyId.value.get(n.refId)
   const en = energyMap.value.get(n.refId)
   if (!cons) return ''
-  const usage = (cons.purchaseTotal ?? 0) + (cons.openingStock ?? 0)
+  const usage = (cons.purchaseAmount ?? 0) + (cons.openingStock ?? 0)
     - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
   const unit = en?.measurementUnit ?? cons.measurementUnit ?? ''
   const v = fmtNum(usage)
@@ -191,7 +200,7 @@ function inventoryLines(n: FlowNodeConfig): InventorySlot[] {
   const cs = fmt(cons?.closingStock)
   const es = fmt(cons?.externalSupply)
   const os = fmt(cons?.openingStock)
-  const pt = fmt(cons?.purchaseTotal)
+  const pt = fmt(cons?.purchaseAmount)
   return [
     { label: '期末库存', value: cs, arrow: cs ? '←' : '' },
     { label: '外供', value: es, arrow: es ? '←' : '' },
@@ -231,12 +240,12 @@ const equivLines = computed<EquivLine[]>(() => {
     const cons = consumptionByEnergyId.value.get(ln.node.refId!)
     const en = energyMap.value.get(ln.node.refId!)
     // Distinguish absent data from real zero: require at least one non-null consumption field
-    if (!cons || (cons.purchaseTotal == null && cons.openingStock == null
+    if (!cons || (cons.purchaseAmount == null && cons.openingStock == null
         && cons.closingStock == null && cons.externalSupply == null)) {
       items.push({ cy: ln.cy, equiv: null, equal: null })
       continue
     }
-    const usage = (cons.purchaseTotal ?? 0) + (cons.openingStock ?? 0)
+    const usage = (cons.purchaseAmount ?? 0) + (cons.openingStock ?? 0)
       - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
     const equivF = en?.equivalentValue ?? cons?.equivFactor ?? 0
     const equalF = en?.equalValue ?? cons?.equalFactor ?? 0
@@ -306,7 +315,7 @@ const backflowLaneMap = computed(() => {
   for (const e of backflowEdges) {
     const rec = resolveRecord(e)
     const iId = rec?.itemId ?? e.itemId
-    const key = iId ? `bf-energy-${iId}` : `bf-${e.edgeId}`
+    const key = iId ? `bf-${iId}-${e.sourceNodeId}-${e.targetNodeId}` : `bf-${e.edgeId}`
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(e)
   }
@@ -493,6 +502,8 @@ const productLines = computed<ProductLine[]>(() => {
     if (!isProductEdge(e)) continue
     const sln = layoutNodeMap.value.get(e.sourceNodeId)
     if (!sln) continue
+    // Enforce terminal-use semantics: product output must originate from stage 3 nodes
+    if (sln.stage !== 3) continue
     const rec = resolveRecord(e)
     const itemId = rec?.itemId ?? e.itemId
     const pr = itemId ? productMap.value.get(itemId) : undefined

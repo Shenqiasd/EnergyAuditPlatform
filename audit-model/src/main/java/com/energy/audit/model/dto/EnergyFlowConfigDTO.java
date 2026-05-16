@@ -64,6 +64,7 @@ public class EnergyFlowConfigDTO implements Serializable {
         private String measurementUnit;
         private java.math.BigDecimal openingStock;
         private java.math.BigDecimal purchaseTotal;
+        private java.math.BigDecimal purchaseAmount;
         private java.math.BigDecimal closingStock;
         private java.math.BigDecimal externalSupply;
         private java.math.BigDecimal equivFactor;

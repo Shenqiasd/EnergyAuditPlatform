@@ -993,6 +993,15 @@ function computeLocalExportErrors(): string[] {
       errors.push(`填报记录 [${r.energyProduct}] 为旧数据（待确认），请编辑确认品目类型和品目`)
     }
   }
+  // Terminal-use semantics: product-output records must originate from terminal-use source units
+  for (const r of flowRecords.value) {
+    if (r.targetType === 'product_output' && r.sourceType === 'unit' && r.sourceRefId) {
+      const srcUnit = units.value.find(u => u.id === r.sourceRefId)
+      if (srcUnit && srcUnit.unitType !== 3) {
+        errors.push(`产品输出记录的来源单元 [${srcUnit.name}] 不是终端使用环节(unitType=${srcUnit.unitType})，产品输出必须从终端使用环节产出`)
+      }
+    }
+  }
   // Check visible edges for valid record bindings, endpoint nodes, and endpoint semantics
   const nodeIdSet = new Set(nodes.value.map(n => n.nodeId))
   const nodeByIdMap = new Map(nodes.value.map(n => [n.nodeId, n]))

@@ -35,6 +35,7 @@ export interface EnergyConsumptionInfo {
   measurementUnit?: string
   openingStock?: number
   purchaseTotal?: number
+  purchaseAmount?: number
   closingStock?: number
   externalSupply?: number
   equivFactor?: number
