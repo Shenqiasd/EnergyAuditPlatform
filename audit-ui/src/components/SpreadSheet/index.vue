@@ -62,6 +62,7 @@ let currentSubmission: TplSubmission | null = null
 let disposed = false
 let loadSeq = 0
 let stopEnterpriseSettingUpdatedListener: (() => void) | null = null
+let configPrefillData: ConfigPrefillData | null = null
 
 /**
  * ownsLock is initialised from props.hasLock at mount time (before any async work),
@@ -270,7 +271,7 @@ async function initWorkbook() {
           const versionId = publishedVersion.id
           cpTrace('phase2.fetch.start')
           console.time('[perf] phase2-fetch')
-          const [tags, prefillData, configPrefillData] = await Promise.all([
+          const [tags, prefillData, fetchedConfigPrefillData] = await Promise.all([
             listTags(versionId).catch(e => {
               console.warn('[phase2] listTags failed:', e)
               return [] as TplTagMapping[]
@@ -283,6 +284,7 @@ async function initWorkbook() {
           if (isLoadStale(loadId, wb)) return
           cpTrace('phase2.fetch.done', { tagCount: tags.length })
           cachedTags = tags
+          configPrefillData = fetchedConfigPrefillData
 
           // Master suspend envelope for all Phase 2 mutations — prevents the
           // ~1000 setValue/setStyle/setDataValidator calls below from each
@@ -316,25 +318,25 @@ async function initWorkbook() {
             }
 
             // Config-driven prefill: always write values + dropdowns + hide empty rows
-            if (configPrefillData) {
+            if (fetchedConfigPrefillData) {
               cpTrace('applyConfigPrefill.start')
               console.time('[perf] applyConfigPrefill')
               if (isLoadStale(loadId, wb)) return
-              applyConfigPrefill(wb, tags, configPrefillData)
+              applyConfigPrefill(wb, tags, fetchedConfigPrefillData)
               console.timeEnd('[perf] applyConfigPrefill')
               cpTrace('applyConfigPrefill.done')
             }
 
             // EA-CUST-053: split Sheet 14 product rows from Sheet 12 products
             cpTrace('applySheet14ProductSplit.start')
-            applySheet14ProductSplit(wb, configPrefillData)
+            applySheet14ProductSplit(wb, fetchedConfigPrefillData)
             cpTrace('applySheet14ProductSplit.done')
 
             // EA-CUST-039: hide heat / electricity rows in Sheet 15 based on
             // active energy configuration (runs even when configPrefillData is
             // null — the function handles that gracefully).
             cpTrace('applyGhgRowVisibility.start')
-            applyGhgRowVisibility(wb, configPrefillData)
+            applyGhgRowVisibility(wb, fetchedConfigPrefillData)
             cpTrace('applyGhgRowVisibility.done')
 
             // Inject dictionary-based dropdown validators (uses pre-fetched tags)
@@ -440,6 +442,9 @@ async function initWorkbook() {
     cpTrace('postcalc.bindSheetNavEvents.start')
     bindSheetNavEvents(wb)
     cpTrace('postcalc.bindSheetNavEvents.done')
+    cpTrace('postcalc.bindSheet14ProductSplitRefresh.start')
+    bindSheet14ProductSplitRefresh(wb, configPrefillData)
+    cpTrace('postcalc.bindSheet14ProductSplitRefresh.done')
     activeSheetIndex.value = wb.getActiveSheetIndex()
     cpTrace('postcalc.computeAllSheetStatuses.start')
     computeAllSheetStatuses()
@@ -739,18 +744,87 @@ function applySheet14ProductSplit(
   )
 }
 
-function readSheet12Products(sheet12: import('@/types/spreadjs').GCSpreadSheet) {
+function bindSheet14ProductSplitRefresh(
+  wb: import('@/types/spreadjs').GCSpreadWorkbook,
+  configData: ConfigPrefillData | null,
+) {
+  const Events = window.GC?.Spread?.Sheets?.Events
+  if (!Events?.CellChanged || !configData) return
+
+  const sheetCount = wb.getSheetCount()
+  let sheet12: import('@/types/spreadjs').GCSpreadSheet | null = null
+  for (let i = 0; i < sheetCount; i++) {
+    const sheet = wb.getSheet(i)
+    const name = sheet.name() ?? ''
+    if (name.includes('12') && name.includes('单位产品能耗')) {
+      sheet12 = sheet
+      break
+    }
+  }
+  if (!sheet12) return
+
+  sheet12.bind(Events.CellChanged, (_sender: unknown, args: { row: number; col: number; propertyName?: string }) => {
+    if (args.propertyName && args.propertyName !== 'value') return
+    if (args.row < 4 || args.row >= 20) return
+    if (![0, 3, 4, 6, 7, 9].includes(args.col)) return
+    applySheet14ProductSplit(wb, configData)
+  })
+}
+
+function applySheet14ProductSplitToJson(jsonObj: Record<string, unknown>) {
+  const sheetsObj = jsonObj.sheets
+  if (!isRecord(sheetsObj)) return
+
+  let sheet12: Record<string, unknown> | null = null
+  let sheet14: Record<string, unknown> | null = null
+  let sheet12Name = ''
+  for (const [name, sheet] of Object.entries(sheetsObj)) {
+    if (!isRecord(sheet)) continue
+    const actualName = String(sheet.name ?? name)
+    if (!sheet12 && actualName.includes('12') && actualName.includes('单位产品能耗')) {
+      sheet12 = sheet
+      sheet12Name = actualName
+    }
+    if (!sheet14 && actualName.includes('14') && actualName.includes('节能量')) {
+      sheet14 = sheet
+    }
+  }
+  if (!sheet12 || !sheet14 || !sheet12Name) return
+
+  const products = readSheet12ProductsFromJson(sheet12)
+  const anchorRow = findAnchorRow(
+    (row, col) => readJsonCellValue(sheet14, row, col),
+    Number(sheet14.rowCount ?? 0) || 200,
+  )
+  if (anchorRow < 0) return
+
+  const existingProductRows = anchorRow - SHEET14_PRODUCT_AREA_START
+  const delta = computeRowDelta(existingProductRows, products.length)
+  if (delta.diff !== 0) return
+
+  for (const op of generateOps(products, sheet12Name)) {
+    const cell = ensureJsonCell(sheet14, op.row, op.col)
+    if (op.type === 'setValue') {
+      cell.value = op.value
+      delete cell.formula
+    } else {
+      cell.formula = op.value
+    }
+  }
+}
+
+function readSheet12ProductsFromJson(sheet12: Record<string, unknown>) {
   const rows = []
   const maxRows = 16
   const startRow = 4
   for (let i = 0; i < maxRows; i++) {
     const row = startRow + i
-    const indicatorName = sheet12.getValue(row, 0)
-    const denominatorUnit = sheet12.getValue(row, 3)
-    const output = sheet12.getValue(row, 6)
-    const unitConsumption = sheet12.getValue(row, 4)
-    const prevOutput = sheet12.getValue(row, 9)
-    const prevUnitConsumption = sheet12.getValue(row, 7)
+    const indicatorName = readJsonCellValue(sheet12, row, 0)
+    const denominatorUnit = readJsonCellValue(sheet12, row, 3)
+    const output = readJsonCellValue(sheet12, row, 6)
+    const unitConsumption = readJsonCellValue(sheet12, row, 4)
+    const prevOutput = readJsonCellValue(sheet12, row, 9)
+    const prevUnitConsumption = readJsonCellValue(sheet12, row, 7)
     const hasValue = [indicatorName, denominatorUnit, output, unitConsumption, prevOutput, prevUnitConsumption]
       .some(value => value != null && String(value).trim() !== '')
     if (!hasValue) continue
@@ -761,6 +835,72 @@ function readSheet12Products(sheet12: import('@/types/spreadjs').GCSpreadSheet) 
     })
   }
   return deriveProductsFromSheetRows(rows)
+}
+
+function readJsonCellValue(sheet: Record<string, unknown>, row: number, col: number): unknown {
+  const cell = getJsonCell(sheet, row, col)
+  if (!cell) return null
+  const value = cell.value
+  return isCalcErrorValue(value) ? null : value ?? null
+}
+
+function getJsonCell(sheet: Record<string, unknown>, row: number, col: number): Record<string, unknown> | null {
+  const data = isRecord(sheet.data) ? sheet.data : null
+  const dataTable = data && isRecord(data.dataTable) ? data.dataTable : null
+  if (!dataTable) return null
+  const rawRowData = dataTable[String(row)]
+  if (!isRecord(rawRowData)) return null
+  const rawCell = rawRowData[String(col)]
+  const cell = isRecord(rawCell) ? rawCell : null
+  return cell
+}
+
+function ensureJsonCell(sheet: Record<string, unknown>, row: number, col: number): Record<string, unknown> {
+  const data = ensureRecordProp(sheet, 'data')
+  const dataTable = ensureRecordProp(data, 'dataTable')
+  const rowData = ensureRecordProp(dataTable, String(row))
+  return ensureRecordProp(rowData, String(col))
+}
+
+function ensureRecordProp(target: Record<string, unknown>, key: string): Record<string, unknown> {
+  if (!isRecord(target[key])) target[key] = {}
+  return target[key] as Record<string, unknown>
+}
+
+function readSheet12Products(sheet12: import('@/types/spreadjs').GCSpreadSheet) {
+  const rows = []
+  const maxRows = 16
+  const startRow = 4
+  for (let i = 0; i < maxRows; i++) {
+    const row = startRow + i
+    const indicatorName = normalizeSheet12CellValue(sheet12.getValue(row, 0))
+    const denominatorUnit = normalizeSheet12CellValue(sheet12.getValue(row, 3))
+    const output = normalizeSheet12CellValue(sheet12.getValue(row, 6))
+    const unitConsumption = normalizeSheet12CellValue(sheet12.getValue(row, 4))
+    const prevOutput = normalizeSheet12CellValue(sheet12.getValue(row, 9))
+    const prevUnitConsumption = normalizeSheet12CellValue(sheet12.getValue(row, 7))
+    const hasValue = [indicatorName, denominatorUnit, output, unitConsumption, prevOutput, prevUnitConsumption]
+      .some(value => value != null && String(value).trim() !== '')
+    if (!hasValue) continue
+    rows.push({
+      indicatorName: indicatorName == null ? null : String(indicatorName),
+      denominatorUnit: denominatorUnit == null ? null : String(denominatorUnit),
+      sheet12Row: row + 1,
+    })
+  }
+  return deriveProductsFromSheetRows(rows)
+}
+
+function normalizeSheet12CellValue(value: unknown): unknown {
+  return isCalcErrorValue(value) ? null : value
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isCalcErrorValue(value: unknown): boolean {
+  return isRecord(value) && typeof value._calcError === 'string'
 }
 
 /** Column definition type for CONFIG_PREFILL mappings */
@@ -3022,9 +3162,11 @@ async function save(options?: { skipExtraction?: boolean }): Promise<void> {
   }
   saving.value = true
   try {
+    applySheet14ProductSplit(workbook, configPrefillData)
     // EA-CUST-041: normalize all date fields before serialization
     normalizeDateFieldsBeforeSave(workbook)
     const jsonObj = workbook.toJSON() as Record<string, unknown>
+    applySheet14ProductSplitToJson(jsonObj)
     // Embed add-row dynamic ranges into the JSON for backend extraction
     if (dynamicRanges.size > 0) {
       const drObj: Record<string, unknown> = {}
