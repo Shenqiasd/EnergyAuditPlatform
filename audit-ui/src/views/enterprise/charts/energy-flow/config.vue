@@ -993,19 +993,21 @@ function computeLocalExportErrors(): string[] {
       errors.push(`填报记录 [${r.energyProduct}] 为旧数据（待确认），请编辑确认品目类型和品目`)
     }
   }
-  // Terminal-use semantics: product-output records must originate from terminal-use sources
-  // Validates ALL source types (unit, system, custom), not just unit
+  // Terminal-use semantics: product-output records must originate from proven terminal-use sources.
+  // Only unit sources with unitType=3 qualify. System/custom are rejected outright.
   for (const r of flowRecords.value) {
     if (r.targetType !== 'product_output') continue
     if (r.sourceType === 'unit' && r.sourceRefId) {
       const srcUnit = units.value.find(u => u.id === r.sourceRefId)
-      if (srcUnit && srcUnit.unitType !== 3) {
+      if (srcUnit && srcUnit.unitType == null) {
+        errors.push(`产品输出记录的来源单元 [${srcUnit.name}] 缺少unitType，无法确认为终端使用环节`)
+      } else if (srcUnit && srcUnit.unitType !== 3) {
         errors.push(`产品输出记录的来源单元 [${srcUnit.name}] 不是终端使用环节(unitType=${srcUnit.unitType})，产品输出必须从终端使用环节产出`)
       }
-    } else if (r.sourceType === 'system' && !r.sourceUnit) {
-      errors.push('产品输出记录的来源系统名称不能为空')
-    } else if (r.sourceType === 'custom' && !r.sourceUnit) {
-      errors.push('产品输出记录的自定义来源名称不能为空')
+    } else if (r.sourceType === 'system') {
+      errors.push('产品输出记录不允许来源类型为system，必须绑定终端使用环节的用能单元(sourceType=unit, unitType=3)')
+    } else if (r.sourceType === 'custom') {
+      errors.push('产品输出记录不允许来源类型为custom，必须绑定终端使用环节的用能单元(sourceType=unit, unitType=3)')
     }
   }
   // Check visible edges for valid record bindings, endpoint nodes, and endpoint semantics

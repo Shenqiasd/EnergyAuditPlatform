@@ -202,17 +202,17 @@ const NODE_COLORS: Record<string, string> = {
 function nodeColor(n: FlowNodeConfig): string { return n.color || NODE_COLORS[n.nodeType] || '#666' }
 
 // ── Energy node: name + total quantity/unit (two lines in circle) ─
-// Blank when ALL source fields are absent (not partial zero)
+// Blank when ANY required inventory term is missing (not partial-zero coercion)
 function energyNodeTotalLine(n: FlowNodeConfig): string {
   if (n.nodeType !== 'energy_input' || !n.refId) return ''
   const cons = consumptionByEnergyId.value.get(n.refId)
   const en = energyMap.value.get(n.refId)
   if (!cons) return ''
-  // Require at least one non-null field to compute a total
-  if (cons.purchaseAmount == null && cons.openingStock == null
-      && cons.closingStock == null && cons.externalSupply == null) return ''
-  const usage = (cons.purchaseAmount ?? 0) + (cons.openingStock ?? 0)
-    - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
+  // ALL four inventory terms must be present to compute a total
+  if (cons.purchaseAmount == null || cons.openingStock == null
+      || cons.closingStock == null || cons.externalSupply == null) return ''
+  const usage = cons.purchaseAmount + cons.openingStock
+    - cons.closingStock - cons.externalSupply
   const unit = en?.measurementUnit ?? cons.measurementUnit ?? ''
   const v = fmtNum(usage)
   return v ? v + ' ' + unit : ''
@@ -269,36 +269,43 @@ function unitEfficiency(n: FlowNodeConfig): string {
 // ── Equivalence / equivalent double lines (stage 0→1) ─────
 // Always-present double solid line region (mandatory layout element)
 // Spec: equiv = consumeAmount × equivalentCoefficient, equal = consumeAmount × calorificCoefficient
-// Percentages: 消费值 ÷ 能源总量 (consumeAmount / totalConsumeAmount)
+// Percentages: 消费值 ÷ 能源总量, where 能源总量 = openingStock + purchaseAmount - externalSupply - closingStock (per-node)
+// Blank when consumeAmount is null, coefficient is null, or any energyTotal term is missing
 interface EquivLine { y: number; equivVal: string; equalVal: string; equivPct: string; equalPct: string }
 const equivLines = computed<EquivLine[]>(() => {
   const energyNodes = layoutNodes.value.filter(ln => ln.node.nodeType === 'energy_input' && ln.node.refId)
   if (!energyNodes.length) return []
-  let totalConsume = 0
-  const items: { cy: number; equiv: number | null; equal: number | null; consume: number | null }[] = []
+  const items: { cy: number; equiv: number | null; equal: number | null; pct: number | null }[] = []
   for (const ln of energyNodes) {
     const cons = consumptionByEnergyId.value.get(ln.node.refId!)
     const en = energyMap.value.get(ln.node.refId!)
-    // Use canonical consumeAmount (aggregate of industrial+material+transport)
+    // consumeAmount must be present
     if (!cons || cons.consumeAmount == null) {
-      items.push({ cy: ln.cy, equiv: null, equal: null, consume: null })
+      items.push({ cy: ln.cy, equiv: null, equal: null, pct: null })
       continue
     }
     const ca = cons.consumeAmount
-    const equivF = en?.equivalentValue ?? cons?.equivFactor ?? 0
-    const equalF = en?.equalValue ?? cons?.equalFactor ?? 0
-    const equiv = ca * equivF
-    const equal = ca * equalF
-    totalConsume += ca
-    items.push({ cy: ln.cy, equiv, equal, consume: ca })
+    // Coefficients must be present (not coerced from null to 0)
+    const equivF = en?.equivalentValue ?? cons?.equivFactor
+    const equalF = en?.equalValue ?? cons?.equalFactor
+    const equiv = equivF != null ? ca * equivF : null
+    const equal = equalF != null ? ca * equalF : null
+    // Percentage: consumeAmount / energyTotal where energyTotal = openingStock + purchaseAmount - externalSupply - closingStock
+    // All four energyTotal terms must be present; otherwise blank
+    let pct: number | null = null
+    if (cons.openingStock != null && cons.purchaseAmount != null
+        && cons.externalSupply != null && cons.closingStock != null) {
+      const energyTotal = cons.openingStock + cons.purchaseAmount - cons.externalSupply - cons.closingStock
+      pct = energyTotal > 0 ? ca / energyTotal : null
+    }
+    items.push({ cy: ln.cy, equiv, equal, pct })
   }
   return items.map(it => ({
     y: it.cy,
     equivVal: it.equiv != null ? fmtNum(it.equiv) : '',
     equalVal: it.equal != null ? fmtNum(it.equal) : '',
-    // Percentages: 消费值 ÷ 能源总量 (consumeAmount ratio)
-    equivPct: it.consume != null && totalConsume > 0 ? fmtPct(it.consume / totalConsume) : '',
-    equalPct: it.consume != null && totalConsume > 0 ? fmtPct(it.consume / totalConsume) : '',
+    equivPct: it.pct != null ? fmtPct(it.pct) : '',
+    equalPct: it.pct != null ? fmtPct(it.pct) : '',
   }))
 })
 const equivLineX = computed(() => stageDividers.value[0] ?? stageX.value[1] ?? cw.value * 0.3)
@@ -368,41 +375,60 @@ const backflowLaneMap = computed(() => {
   return m
 })
 
-// Build trunk X map: group edges by compatible route segment (source+target path)
-// Same-energy flows with different source/target paths get separate trunks
-const trunkXMap = computed(() => {
-  const m = new Map<string, number>()
-  const edgesByTrunk = new Map<string, FlowEdgeConfig[]>()
+// Build trunk X map: compatible-route-segment logic
+// Same-energy flows from same source share a trunk; different sources get separate trunks.
+// Each edge gets a trunk key for its shared segment (source node + itemId)
+// and a branch slot key for its individual target.
+interface TrunkInfo { trunkX: number; branchX: number }
+const trunkInfoMap = computed(() => {
+  const m = new Map<string, TrunkInfo>()
+  // Group forward edges by source node + itemId (shared trunk segment)
+  const trunkGroups = new Map<string, FlowEdgeConfig[]>()
   for (const e of visibleEdges.value) {
     if (isProductEdge(e) || isBackflow(e)) continue
     const sln = layoutNodeMap.value.get(e.sourceNodeId)
-    const tln = layoutNodeMap.value.get(e.targetNodeId)
-    if (!sln || !tln) continue
+    if (!sln) continue
     const rec = resolveRecord(e)
     const iId = rec?.itemId ?? e.itemId
-    // Key by source stage + target stage + itemId + source node + target node
-    const key = `${sln.stage}-${tln.stage}-${iId ?? ''}-${e.sourceNodeId}-${e.targetNodeId}`
-    if (!edgesByTrunk.has(key)) edgesByTrunk.set(key, [])
-    edgesByTrunk.get(key)!.push(e)
+    const tk = `${e.sourceNodeId}-${iId ?? ''}`
+    if (!trunkGroups.has(tk)) trunkGroups.set(tk, [])
+    trunkGroups.get(tk)!.push(e)
   }
   let slotIdx = 0
-  for (const [key, edges] of edgesByTrunk) {
+  for (const [, edges] of trunkGroups) {
     const sln = layoutNodeMap.value.get(edges[0].sourceNodeId)
     if (!sln) continue
-    const baseX = sln.cx + sln.w / 2 + 20 + slotIdx * 16
-    m.set(key, baseX)
+    const trunkX = sln.cx + sln.w / 2 + 20 + slotIdx * 16
+    // Collect distinct targets to assign branch slots
+    const targetSet = new Set(edges.map(e => e.targetNodeId))
+    const targets = Array.from(targetSet)
+    for (const e of edges) {
+      if (targets.length <= 1) {
+        // Single target: trunk and branch are same X
+        m.set(e.edgeId, { trunkX, branchX: trunkX })
+      } else {
+        // Multi-target: branch slot offset from trunk
+        const tIdx = targets.indexOf(e.targetNodeId)
+        const branchX = trunkX + (tIdx + 1) * 8
+        m.set(e.edgeId, { trunkX, branchX })
+      }
+    }
     slotIdx++
   }
   return m
 })
 
+// Legacy trunkXMap for backward compatibility with buildOrthoPath
+const trunkXMap = computed(() => {
+  const m = new Map<string, number>()
+  for (const [edgeId, info] of trunkInfoMap.value) {
+    m.set(edgeId, info.trunkX)
+  }
+  return m
+})
+
 function trunkKey(e: FlowEdgeConfig): string {
-  const sln = layoutNodeMap.value.get(e.sourceNodeId)
-  const tln = layoutNodeMap.value.get(e.targetNodeId)
-  if (!sln || !tln) return e.edgeId
-  const rec = resolveRecord(e)
-  const iId = rec?.itemId ?? e.itemId
-  return `${sln.stage}-${tln.stage}-${iId ?? ''}-${e.sourceNodeId}-${e.targetNodeId}`
+  return e.edgeId
 }
 
 // Collect all horizontal segment Y positions for crossing detection
@@ -425,12 +451,18 @@ function buildOrthoPath(edge: FlowEdgeConfig): { x: number; y: number }[] {
     return [s, { x: s.x, y: topY }, { x: t.x, y: topY }, t]
   }
 
-  // Forward edge: use trunk X for same-energy grouping
-  const tk = trunkKey(edge)
-  const trunkX = trunkXMap.value.get(tk)
-  if (trunkX && Math.abs(trunkX - s.x) > 5) {
-    // Route: exit right → go to trunk X → vertical to target Y → enter target
-    return [s, { x: trunkX, y: s.y }, { x: trunkX, y: t.y }, t]
+  // Forward edge: use compatible-route-segment trunk/branch routing
+  const info = trunkInfoMap.value.get(edge.edgeId)
+  if (info && Math.abs(info.trunkX - s.x) > 5) {
+    if (info.trunkX === info.branchX) {
+      // Single-target or same branch: straight trunk route
+      return [s, { x: info.trunkX, y: s.y }, { x: info.trunkX, y: t.y }, t]
+    }
+    // Multi-target: shared trunk segment then branch to individual target
+    // Route: source → trunkX at source Y → trunkX at midY → branchX at midY → branchX at target Y → target
+    const midY = (s.y + t.y) / 2
+    return [s, { x: info.trunkX, y: s.y }, { x: info.trunkX, y: midY },
+            { x: info.branchX, y: midY }, { x: info.branchX, y: t.y }, t]
   }
 
   // Default orthogonal: midpoint routing
@@ -538,19 +570,14 @@ function edgePath(edge: FlowEdgeConfig): string {
 }
 
 // ── Product output lines: horizontal to right boundary ──────
-interface ProductLine { y: number; x1: number; topText: string; bottomText: string }
+// Renderer must NOT silently drop invalid product lines — show them with error indicator
+interface ProductLine { y: number; x1: number; topText: string; bottomText: string; invalid?: boolean }
 const productLines = computed<ProductLine[]>(() => {
   const results: ProductLine[] = []
   for (const e of visibleEdges.value) {
     if (!isProductEdge(e)) continue
     const sln = layoutNodeMap.value.get(e.sourceNodeId)
     if (!sln) continue
-    // Enforce terminal-use semantics: product output must originate from stage 3 nodes
-    // Non-terminal sources produce validation errors, not silent drops
-    if (sln.stage !== 3) {
-      // Add to invalidProductLines for error display
-      continue
-    }
     const rec = resolveRecord(e)
     const itemId = rec?.itemId ?? e.itemId
     const pr = itemId ? productMap.value.get(itemId) : undefined
@@ -558,7 +585,9 @@ const productLines = computed<ProductLine[]>(() => {
     const pq = rec?.physicalQuantity ?? e.physicalQuantity
     const unit = pr?.measurementUnit ?? ''
     const bottomText = fmtNum(pq) ? fmtNum(pq) + ' ' + unit : ''
-    results.push({ y: sln.cy, x1: sln.cx + sln.w / 2, topText, bottomText })
+    // Non-stage-3 sources are invalid but still rendered (with error styling)
+    const invalid = sln.stage !== 3
+    results.push({ y: sln.cy, x1: sln.cx + sln.w / 2, topText, bottomText, invalid })
   }
   return results
 })
@@ -741,18 +770,20 @@ function fitView() { svgRef.value?.scrollIntoView({ behavior: 'smooth', block: '
       <!-- Product output lines: black horizontal to right boundary with arrow -->
       <g class="product-lines-layer">
         <template v-for="(pl, pi) in productLines" :key="'pl'+pi">
-          <line :x1="pl.x1" :y1="pl.y" :x2="cw - 30" :y2="pl.y" stroke="#000" stroke-width="2"
-            :marker-end="`url(#${markerId('#000')})`" />
+          <line :x1="pl.x1" :y1="pl.y" :x2="cw - 30" :y2="pl.y"
+            :stroke="pl.invalid ? '#E74C3C' : '#000'" stroke-width="2"
+            :stroke-dasharray="pl.invalid ? '6,3' : undefined"
+            :marker-end="`url(#${markerId(pl.invalid ? '#E74C3C' : '#000')})`" />
           <text
-            v-if="pl.topText"
+            v-if="pl.topText || pl.invalid"
             :x="(pl.x1 + cw - 30) / 2" :y="pl.y - 8"
-            text-anchor="middle" font-size="10" fill="#333"
+            text-anchor="middle" font-size="10" :fill="pl.invalid ? '#E74C3C' : '#333'"
             stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"
-          >{{ pl.topText }}</text>
+          >{{ pl.invalid ? '⚠ ' + (pl.topText || '非终端使用来源') : pl.topText }}</text>
           <text
             v-if="pl.bottomText"
             :x="(pl.x1 + cw - 30) / 2" :y="pl.y + 14"
-            text-anchor="middle" font-size="9" fill="#666"
+            text-anchor="middle" font-size="9" :fill="pl.invalid ? '#E74C3C' : '#666'"
             stroke="#fff" stroke-width="2" stroke-linejoin="round" paint-order="stroke"
           >{{ pl.bottomText }}</text>
         </template>

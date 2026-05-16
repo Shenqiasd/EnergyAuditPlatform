@@ -891,28 +891,26 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         if (flow.getPhysicalQuantity() == null) {
             errors.add("实物量(physicalQuantity)不能为空");
         }
-        // Terminal-use semantics: product output must originate from terminal-use sources
-        // For unit sources: validate unitType=3
-        // For system/custom sources: they are inherently non-unit and cannot guarantee terminal-use stage
+        // Terminal-use semantics: product output must originate from a proven terminal-use source.
+        // Only unit sources with unitType=3 qualify. System/custom sources cannot be proven terminal-use.
         if ("product_output".equals(flow.getTargetType())) {
             if ("unit".equals(flow.getSourceType())) {
                 if (flow.getSourceRefId() != null) {
                     BsUnit srcUnit = unitMapper.selectByIdAndEnterprise(flow.getSourceRefId(), enterpriseId);
-                    if (srcUnit != null && srcUnit.getUnitType() != null && srcUnit.getUnitType() != 3) {
+                    if (srcUnit == null) {
+                        errors.add("产品输出记录的来源单元(sourceRefId=" + flow.getSourceRefId() + ")不存在");
+                    } else if (srcUnit.getUnitType() == null) {
+                        errors.add("产品输出记录的来源单元 [" + srcUnit.getName()
+                                + "] 缺少unitType，无法确认为终端使用环节");
+                    } else if (srcUnit.getUnitType() != 3) {
                         errors.add("产品输出记录的来源单元必须是终端使用环节(unitType=3)，当前来源单元类型为"
                                 + srcUnit.getUnitType());
                     }
                 }
             } else if ("system".equals(flow.getSourceType())) {
-                // System sources for product output: allowed but flagged if no sourceUnit
-                if (isBlank(flow.getSourceUnit())) {
-                    errors.add("产品输出记录的来源系统名称不能为空");
-                }
+                errors.add("产品输出记录不允许来源类型为system，必须绑定终端使用环节的用能单元(sourceType=unit, unitType=3)");
             } else if ("custom".equals(flow.getSourceType())) {
-                // Custom sources for product output: allowed but flagged if no sourceUnit
-                if (isBlank(flow.getSourceUnit())) {
-                    errors.add("产品输出记录的自定义来源名称不能为空");
-                }
+                errors.add("产品输出记录不允许来源类型为custom，必须绑定终端使用环节的用能单元(sourceType=unit, unitType=3)");
             }
         }
         if (!errors.isEmpty()) {
