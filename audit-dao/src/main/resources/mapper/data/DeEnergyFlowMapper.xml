@@ -83,4 +83,29 @@
           AND deleted = 0
     </update>
 
+    <update id="updateById">
+        UPDATE de_energy_flow
+        SET submission_id = #{submissionId},
+            flow_stage = #{flowStage},
+            seq_no = #{seqNo},
+            source_unit = #{sourceUnit},
+            source_unit_id = #{sourceUnitId},
+            target_unit = #{targetUnit},
+            target_unit_id = #{targetUnitId},
+            energy_product = #{energyProduct},
+            physical_quantity = #{physicalQuantity},
+            standard_quantity = #{standardQuantity},
+            remark = #{remark},
+            source_type = #{sourceType},
+            source_ref_id = #{sourceRefId},
+            target_type = #{targetType},
+            target_ref_id = #{targetRefId},
+            item_type = #{itemType},
+            item_id = #{itemId},
+            calculated_value = #{calculatedValue},
+            update_by = #{updateBy},
+            update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
 </mapper>

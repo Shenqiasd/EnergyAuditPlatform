@@ -56,10 +56,13 @@ public class EnergyFlowConfigDTO implements Serializable {
     @Data
     public static class ValidationResultDTO implements Serializable {
         private boolean valid;
+        private boolean exportReady;
         private boolean enterpriseComplete;
         private boolean hasUnits;
         private boolean hasEnergies;
         private boolean hasProducts;
         private List<String> warnings;
+        /** Blocking errors that prevent PNG export */
+        private List<String> exportErrors;
     }
 }

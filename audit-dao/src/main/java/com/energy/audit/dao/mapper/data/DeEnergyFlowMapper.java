@@ -21,4 +21,6 @@ public interface DeEnergyFlowMapper {
     int softDeleteByIdAndEnterprise(@Param("id") Long id,
                                     @Param("enterpriseId") Long enterpriseId,
                                     @Param("updateBy") String updateBy);
+
+    int updateById(DeEnergyFlow record);
 }

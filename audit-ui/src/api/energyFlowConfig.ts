@@ -78,6 +78,7 @@ export interface FlowEdgeConfig {
   sourceNodeId: string
   targetNodeId: string
   flowRecordId?: number | null
+  flowRecordIndex?: number | null
   itemType?: string
   itemId?: number | null
   physicalQuantity?: number | null
@@ -102,11 +103,13 @@ export interface DiagramConfig {
 
 export interface ValidationResult {
   valid: boolean
+  exportReady: boolean
   enterpriseComplete: boolean
   hasUnits: boolean
   hasEnergies: boolean
   hasProducts: boolean
   warnings: string[]
+  exportErrors: string[]
 }
 
 export interface EnergyFlowConfig {

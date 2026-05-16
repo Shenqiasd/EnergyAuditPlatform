@@ -28,7 +28,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
@@ -187,7 +190,10 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
 
         // Validation
         EnergyFlowConfigDTO.ValidationResultDTO validation = new EnergyFlowConfigDTO.ValidationResultDTO();
-        boolean entComplete = ent != null && ent.getEnterpriseName() != null && !ent.getEnterpriseName().isBlank();
+        boolean entComplete = ent != null
+                && ent.getEnterpriseName() != null && !ent.getEnterpriseName().isBlank()
+                && ent.getCreditCode() != null && !ent.getCreditCode().isBlank()
+                && ent.getContactPerson() != null && !ent.getContactPerson().isBlank();
         validation.setEnterpriseComplete(entComplete);
         validation.setHasUnits(!unitList.isEmpty());
         validation.setHasEnergies(!energyList.isEmpty());
@@ -195,26 +201,34 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         validation.setValid(entComplete && !unitList.isEmpty() && !energyList.isEmpty() && !productList.isEmpty());
 
         List<String> warnings = new ArrayList<>();
-        if (!entComplete) warnings.add("企业信息不完整");
-        if (unitList.isEmpty()) warnings.add("至少需要一个用能单元");
-        if (energyList.isEmpty()) warnings.add("至少需要一个能源品种");
-        if (productList.isEmpty()) warnings.add("至少需要一个产品");
+        List<String> exportErrors = new ArrayList<>();
+        if (!entComplete) {
+            exportErrors.add("企业信息不完整（需填写企业名称、统一社会信用代码、联系人）");
+        }
+        if (unitList.isEmpty()) exportErrors.add("至少需要一个用能单元");
+        if (energyList.isEmpty()) exportErrors.add("至少需要一个能源品种");
+        if (productList.isEmpty()) exportErrors.add("至少需要一个产品");
 
-        // Check for missing coefficients
         for (DeEnergyFlow f : flows) {
             if ("energy".equals(f.getItemType()) && f.getItemId() != null) {
                 BsEnergy energy = energyMapper.selectByIdAndEnterprise(f.getItemId(), enterpriseId);
                 if (energy != null && energy.getEquivalentValue() == null) {
-                    warnings.add("能源 [" + energy.getName() + "] 缺少折标系数");
+                    String msg = "能源 [" + energy.getName() + "] 缺少折标系数";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
                 }
             } else if ("product".equals(f.getItemType()) && f.getItemId() != null) {
                 BsProduct product = productMapper.selectByIdAndEnterprise(f.getItemId(), enterpriseId);
                 if (product != null && product.getUnitPrice() == null) {
-                    warnings.add("产品 [" + product.getName() + "] 缺少单价");
+                    String msg = "产品 [" + product.getName() + "] 缺少单价";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
                 }
             }
         }
         validation.setWarnings(warnings);
+        validation.setExportErrors(exportErrors);
+        validation.setExportReady(exportErrors.isEmpty());
         result.setValidation(validation);
 
         return result;
@@ -225,21 +239,43 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
     public void saveConfig(Long enterpriseId, Integer auditYear, SaveEnergyFlowConfigDTO dto) {
         String operator = SecurityUtils.getCurrentUsername();
 
-        // 1. Save flow records (replace-all strategy, same as existing saveBatch)
+        // 1. Upsert flow records (preserve IDs so edges keep stable flowRecordId)
+        List<DeEnergyFlow> savedRecords = new ArrayList<>();
         if (dto.getFlowRecords() != null) {
-            flowMapper.deleteByEnterpriseAndYear(enterpriseId, auditYear, operator);
+            List<DeEnergyFlow> existing = flowMapper.selectByEnterpriseAndYear(enterpriseId, auditYear);
+            Set<Long> existingIds = existing.stream()
+                    .map(DeEnergyFlow::getId)
+                    .collect(Collectors.toSet());
+            Set<Long> incomingIds = new HashSet<>();
+
             for (int i = 0; i < dto.getFlowRecords().size(); i++) {
                 DeEnergyFlow flow = dto.getFlowRecords().get(i);
                 flow.setEnterpriseId(enterpriseId);
                 flow.setAuditYear(auditYear);
                 flow.setSeqNo(i + 1);
-                flow.setCreateBy(operator);
-                flow.setUpdateBy(operator);
                 if (flow.getSubmissionId() == null) {
                     flow.setSubmissionId(0L);
                 }
                 calculateFlowValue(flow, enterpriseId);
-                flowMapper.insert(flow);
+
+                if (flow.getId() != null && existingIds.contains(flow.getId())) {
+                    flow.setUpdateBy(operator);
+                    flowMapper.updateById(flow);
+                    incomingIds.add(flow.getId());
+                } else {
+                    flow.setId(null);
+                    flow.setCreateBy(operator);
+                    flow.setUpdateBy(operator);
+                    flowMapper.insert(flow);
+                }
+                savedRecords.add(flow);
+            }
+
+            // Soft-delete records no longer in the incoming list
+            for (Long eid : existingIds) {
+                if (!incomingIds.contains(eid)) {
+                    flowMapper.softDeleteByIdAndEnterprise(eid, enterpriseId, operator);
+                }
             }
         }
 
@@ -299,7 +335,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
 
-            // Replace edges
+            // Replace edges (resolve flowRecordId from flowRecordIndex if needed)
             edgeMapper.deleteByDiagramId(diagramId, operator);
             if (dc.getEdges() != null) {
                 for (DiagramConfigDTO.FlowEdgeDTO ed : dc.getEdges()) {
@@ -308,7 +344,16 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     edge.setEdgeId(ed.getEdgeId());
                     edge.setSourceNodeId(ed.getSourceNodeId());
                     edge.setTargetNodeId(ed.getTargetNodeId());
-                    edge.setFlowRecordId(ed.getFlowRecordId());
+
+                    // Resolve flowRecordId: prefer flowRecordIndex → saved record ID
+                    Long resolvedRecordId = ed.getFlowRecordId();
+                    if (ed.getFlowRecordIndex() != null
+                            && ed.getFlowRecordIndex() >= 0
+                            && ed.getFlowRecordIndex() < savedRecords.size()) {
+                        resolvedRecordId = savedRecords.get(ed.getFlowRecordIndex()).getId();
+                    }
+                    edge.setFlowRecordId(resolvedRecordId);
+
                     edge.setItemType(ed.getItemType());
                     edge.setItemId(ed.getItemId());
                     edge.setPhysicalQuantity(ed.getPhysicalQuantity());

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
   getEnergyFlowConfig,
   saveEnergyFlowConfig,
@@ -52,6 +52,20 @@ const showRecordDialog = ref(false)
 const creatingEdge = ref(false)
 const edgeSourceNodeId = ref<string | null>(null)
 
+// Mode B pending edge (source/target node IDs waiting for dialog confirm)
+const pendingEdgeSrcNodeId = ref<string | null>(null)
+const pendingEdgeTgtNodeId = ref<string | null>(null)
+
+// Record form ref and validation rules
+const recordFormRef = ref<FormInstance | null>(null)
+const recordFormRules: FormRules = {
+  sourceType: [{ required: true, message: '请选择来源类型', trigger: 'change' }],
+  targetType: [{ required: true, message: '请选择目的类型', trigger: 'change' }],
+  itemType: [{ required: true, message: '请选择品目类型', trigger: 'change' }],
+  itemId: [{ required: true, message: '请选择品目', trigger: 'change' }],
+  physicalQuantity: [{ required: true, message: '请输入实物量', trigger: 'blur' }],
+}
+
 // SVG ref for PNG export
 const svgRef = ref<SVGSVGElement | null>(null)
 
@@ -64,11 +78,13 @@ const energies = computed(() => config.value?.energies ?? [])
 const products = computed(() => config.value?.products ?? [])
 const validation = computed(() => config.value?.validation ?? {
   valid: false,
+  exportReady: false,
   enterpriseComplete: false,
   hasUnits: false,
   hasEnergies: false,
   hasProducts: false,
   warnings: [],
+  exportErrors: [],
 })
 
 const selectedNode = computed(() =>
@@ -132,6 +148,14 @@ async function loadData() {
 async function handleSave() {
   saving.value = true
   try {
+    // Set flowRecordIndex on each edge so backend can resolve flowRecordId after upsert
+    const edgesWithIndex = edges.value.map(e => {
+      const idx = flowRecords.value.findIndex(r =>
+        (r.id != null && r.id === e.flowRecordId) ||
+        (r.id == null && r.sourceUnit === findNodeLabel(e.sourceNodeId) && r.targetUnit === findNodeLabel(e.targetNodeId))
+      )
+      return { ...e, flowRecordIndex: idx >= 0 ? idx : null }
+    })
     const diagram: DiagramConfig = {
       name: `${enterpriseName.value} ${auditYear.value}年能流图`,
       diagramType: 3,
@@ -139,7 +163,7 @@ async function handleSave() {
       canvasHeight: canvasHeight.value,
       backgroundColor: '#ffffff',
       nodes: nodes.value,
-      edges: edges.value,
+      edges: edgesWithIndex,
     }
     const body: SaveEnergyFlowConfig = {
       flowRecords: flowRecords.value,
@@ -153,6 +177,11 @@ async function handleSave() {
   } finally {
     saving.value = false
   }
+}
+
+function findNodeLabel(nodeId: string): string {
+  const node = nodes.value.find(n => n.nodeId === nodeId)
+  return node?.label ?? ''
 }
 
 // ============================================================
@@ -327,6 +356,7 @@ function autoLayout() {
       sourceNodeId: srcNodeId,
       targetNodeId: tgtNodeId,
       flowRecordId: r.id,
+      flowRecordIndex: i,
       itemType: r.itemType,
       itemId: r.itemId,
       physicalQuantity: r.physicalQuantity,
@@ -433,7 +463,10 @@ function showCreateEdgeDialog(srcNodeId: string, tgtNodeId: string) {
   const tgtNode = nodes.value.find(n => n.nodeId === tgtNodeId)
   if (!srcNode || !tgtNode) return
 
-  // Create a new record from edge creation (Mode B)
+  // Store pending edge info for Mode B (will create edge on dialog confirm)
+  pendingEdgeSrcNodeId.value = srcNodeId
+  pendingEdgeTgtNodeId.value = tgtNodeId
+
   const record: FlowRecord = {
     sourceUnit: srcNode.label,
     targetUnit: tgtNode.label,
@@ -449,7 +482,22 @@ function showCreateEdgeDialog(srcNodeId: string, tgtNodeId: string) {
 // ============================================================
 // Record CRUD
 // ============================================================
+function handleRecordDialogCancel() {
+  showRecordDialog.value = false
+  pendingEdgeSrcNodeId.value = null
+  pendingEdgeTgtNodeId.value = null
+  editingRecord.value = null
+}
+
+function handleRecordDialogClose() {
+  pendingEdgeSrcNodeId.value = null
+  pendingEdgeTgtNodeId.value = null
+  editingRecord.value = null
+}
+
 function addRecord() {
+  pendingEdgeSrcNodeId.value = null
+  pendingEdgeTgtNodeId.value = null
   editingRecord.value = {
     sourceType: 'external_energy',
     targetType: 'unit',
@@ -463,8 +511,18 @@ function editRecord(record: FlowRecord) {
   showRecordDialog.value = true
 }
 
-function saveRecord() {
+async function saveRecord() {
   if (!editingRecord.value) return
+
+  // Fix #5: validate form before saving
+  if (recordFormRef.value) {
+    try {
+      await recordFormRef.value.validate()
+    } catch {
+      return
+    }
+  }
+
   pushUndo()
 
   const r = editingRecord.value
@@ -505,6 +563,29 @@ function saveRecord() {
   } else {
     flowRecords.value.push(r)
   }
+
+  // Fix #2: Mode B — also create the visual edge when dialog was opened from edge creation
+  if (pendingEdgeSrcNodeId.value && pendingEdgeTgtNodeId.value) {
+    const edgeId = `edge-${Date.now()}`
+    const newEdge: FlowEdgeConfig = {
+      edgeId,
+      sourceNodeId: pendingEdgeSrcNodeId.value,
+      targetNodeId: pendingEdgeTgtNodeId.value,
+      flowRecordId: r.id,
+      itemType: r.itemType,
+      itemId: r.itemId,
+      physicalQuantity: r.physicalQuantity,
+      calculatedValue: r.calculatedValue,
+      labelText: buildEdgeLabel(r),
+      color: EDGE_COLORS[edges.value.length % EDGE_COLORS.length],
+      lineWidth: 2,
+      visible: 1,
+    }
+    edges.value.push(newEdge)
+    pendingEdgeSrcNodeId.value = null
+    pendingEdgeTgtNodeId.value = null
+  }
+
   showRecordDialog.value = false
   editingRecord.value = null
   pushUndo()
@@ -601,6 +682,46 @@ function deleteSelectedEdge() {
 }
 
 // ============================================================
+// Fix #4: Route point editing helpers
+// ============================================================
+const parsedRoutePoints = computed(() => {
+  if (!selectedEdge.value?.routePoints) return []
+  try {
+    return JSON.parse(selectedEdge.value.routePoints) as { x: number; y: number }[]
+  } catch {
+    return []
+  }
+})
+
+function setRoutePointsJson(pts: { x: number; y: number }[]) {
+  if (!selectedEdge.value) return
+  pushUndo()
+  selectedEdge.value.routePoints = pts.length > 0 ? JSON.stringify(pts) : undefined
+  pushUndo()
+}
+
+function addRoutePoint() {
+  if (!selectedEdge.value) return
+  const src = nodes.value.find(n => n.nodeId === selectedEdge.value!.sourceNodeId)
+  const dst = nodes.value.find(n => n.nodeId === selectedEdge.value!.targetNodeId)
+  const mx = ((src?.positionX ?? 0) + (dst?.positionX ?? 400)) / 2
+  const my = ((src?.positionY ?? 0) + (dst?.positionY ?? 200)) / 2
+  const pts = [...parsedRoutePoints.value, { x: Math.round(mx), y: Math.round(my) }]
+  setRoutePointsJson(pts)
+}
+
+function updateRoutePoint(index: number, x: number, y: number) {
+  const pts = [...parsedRoutePoints.value]
+  pts[index] = { x, y }
+  setRoutePointsJson(pts)
+}
+
+function removeRoutePoint(index: number) {
+  const pts = parsedRoutePoints.value.filter((_: { x: number; y: number }, i: number) => i !== index)
+  setRoutePointsJson(pts)
+}
+
+// ============================================================
 // SVG edge path generation
 // ============================================================
 function edgePath(edge: FlowEdgeConfig): string {
@@ -652,7 +773,17 @@ function edgeLabelPos(edge: FlowEdgeConfig): { x: number; y: number } {
 // PNG Export
 // ============================================================
 async function handleExportPng() {
-  if (!validation.value.valid) {
+  // Fix #3: check exportReady (blocking errors) instead of just valid
+  const v = validation.value
+  if (!v.exportReady && v.exportErrors && v.exportErrors.length > 0) {
+    ElMessageBox.alert(
+      v.exportErrors.join('\n'),
+      '无法导出 PNG — 以下问题必须解决',
+      { type: 'error' }
+    )
+    return
+  }
+  if (!v.valid) {
     ElMessage.warning('前置资料不完整，无法导出')
     return
   }
@@ -975,6 +1106,18 @@ function formatNum(n: number | null | undefined): string {
           <div class="prop-row">
             <el-checkbox :model-value="(selectedEdge.visible ?? 1) === 1" @update:model-value="v => updateEdgeProp('visible', v ? 1 : 0)">可见</el-checkbox>
           </div>
+          <!-- Fix #4: Route point editing UI -->
+          <div class="prop-row" style="margin-top: 8px">
+            <label>折点 (Route Points)</label>
+            <div v-for="(pt, pi) in parsedRoutePoints" :key="pi" class="route-point-row">
+              <span class="route-point-idx">{{ pi + 1 }}.</span>
+              <el-input-number :model-value="pt.x" size="small" :controls="false" style="width: 70px" @update:model-value="v => updateRoutePoint(pi, v ?? 0, pt.y)" />
+              <span>,</span>
+              <el-input-number :model-value="pt.y" size="small" :controls="false" style="width: 70px" @update:model-value="v => updateRoutePoint(pi, pt.x, v ?? 0)" />
+              <el-button link type="danger" size="small" @click="removeRoutePoint(pi)">×</el-button>
+            </div>
+            <el-button size="small" @click="addRoutePoint" style="margin-top: 4px">+ 添加折点</el-button>
+          </div>
           <el-button type="danger" size="small" @click="deleteSelectedEdge" style="margin-top: 8px">删除连线</el-button>
         </template>
 
@@ -1026,9 +1169,9 @@ function formatNum(n: number | null | undefined): string {
     </div>
 
     <!-- Record Edit Dialog -->
-    <el-dialog v-model="showRecordDialog" title="编辑填报记录" width="600px" :close-on-click-modal="false">
-      <el-form v-if="editingRecord" label-width="100px" size="small">
-        <el-form-item label="来源类型">
+    <el-dialog v-model="showRecordDialog" title="编辑填报记录" width="600px" :close-on-click-modal="false" @close="handleRecordDialogClose">
+      <el-form v-if="editingRecord" ref="recordFormRef" :model="editingRecord" :rules="recordFormRules" label-width="100px" size="small">
+        <el-form-item label="来源类型" prop="sourceType">
           <el-select v-model="editingRecord.sourceType" style="width: 100%">
             <el-option label="外购能源" value="external_energy" />
             <el-option label="用能单元" value="unit" />
@@ -1040,7 +1183,7 @@ function formatNum(n: number | null | undefined): string {
             <el-option v-for="u in units" :key="u.id" :label="u.name" :value="u.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="目的类型">
+        <el-form-item label="目的类型" prop="targetType">
           <el-select v-model="editingRecord.targetType" style="width: 100%">
             <el-option label="用能单元" value="unit" />
             <el-option label="生产系统" value="production_system" />
@@ -1052,13 +1195,13 @@ function formatNum(n: number | null | undefined): string {
             <el-option v-for="u in units" :key="u.id" :label="u.name" :value="u.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="品目类型">
+        <el-form-item label="品目类型" prop="itemType">
           <el-select v-model="editingRecord.itemType" style="width: 100%">
             <el-option label="能源" value="energy" />
             <el-option label="产品" value="product" />
           </el-select>
         </el-form-item>
-        <el-form-item label="品目">
+        <el-form-item label="品目" prop="itemId">
           <el-select v-model="editingRecord.itemId" style="width: 100%" filterable>
             <template v-if="editingRecord.itemType === 'energy'">
               <el-option v-for="e in energies" :key="e.id" :label="e.name" :value="e.id" />
@@ -1068,7 +1211,7 @@ function formatNum(n: number | null | undefined): string {
             </template>
           </el-select>
         </el-form-item>
-        <el-form-item label="实物量">
+        <el-form-item label="实物量" prop="physicalQuantity">
           <el-input-number v-model="editingRecord.physicalQuantity" style="width: 100%" :precision="4" />
         </el-form-item>
         <el-form-item label="备注">
@@ -1076,7 +1219,7 @@ function formatNum(n: number | null | undefined): string {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showRecordDialog = false">取消</el-button>
+        <el-button @click="handleRecordDialogCancel">取消</el-button>
         <el-button type="primary" @click="saveRecord">确定</el-button>
       </template>
     </el-dialog>
@@ -1229,5 +1372,19 @@ function formatNum(n: number | null | undefined): string {
 .edge-selected {
   stroke-dasharray: 6 3;
   stroke-width: 3 !important;
+}
+
+.route-point-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: 12px;
+
+  .route-point-idx {
+    color: #909399;
+    width: 16px;
+    flex-shrink: 0;
+  }
 }
 </style>

@@ -28,13 +28,16 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -90,7 +93,7 @@ class EnergyFlowConfigServiceImplTest {
 
     @Test
     void getConfigValidationFailsWhenNoUnits() {
-        stubEnterprise("测试企业");
+        stubEnterpriseComplete();
         when(unitMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
         when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
@@ -100,12 +103,12 @@ class EnergyFlowConfigServiceImplTest {
 
         assertThat(result.getValidation().isValid()).isFalse();
         assertThat(result.getValidation().isHasUnits()).isFalse();
-        assertThat(result.getValidation().getWarnings()).contains("至少需要一个用能单元");
+        assertThat(result.getValidation().getExportErrors()).anyMatch(e -> e.contains("用能单元"));
     }
 
     @Test
     void getConfigValidationPassesWhenAllPrerequisitesMet() {
-        stubEnterprise("测试企业");
+        stubEnterpriseComplete();
         when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
         when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
         when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
@@ -114,11 +117,13 @@ class EnergyFlowConfigServiceImplTest {
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
 
         assertThat(result.getValidation().isValid()).isTrue();
+        assertThat(result.getValidation().isExportReady()).isTrue();
+        assertThat(result.getValidation().getExportErrors()).isEmpty();
     }
 
     @Test
     void getConfigWarnsMissingEquivalentValue() {
-        stubEnterprise("测试企业");
+        stubEnterpriseComplete();
         when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
         when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "天然气", null)));
         when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
@@ -135,11 +140,14 @@ class EnergyFlowConfigServiceImplTest {
 
         assertThat(result.getValidation().getWarnings())
                 .anyMatch(w -> w.contains("天然气") && w.contains("折标系数"));
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(w -> w.contains("天然气") && w.contains("折标系数"));
+        assertThat(result.getValidation().isExportReady()).isFalse();
     }
 
     @Test
     void getConfigWarnsMissingProductUnitPrice() {
-        stubEnterprise("测试企业");
+        stubEnterpriseComplete();
         when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "车间", 3)));
         when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
         when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品B", null)));
@@ -156,11 +164,14 @@ class EnergyFlowConfigServiceImplTest {
 
         assertThat(result.getValidation().getWarnings())
                 .anyMatch(w -> w.contains("产品B") && w.contains("单价"));
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(w -> w.contains("产品B") && w.contains("单价"));
+        assertThat(result.getValidation().isExportReady()).isFalse();
     }
 
     @Test
     void getConfigReturnsDiagramNodesEdges() {
-        stubEnterprise("测试企业");
+        stubEnterpriseComplete();
         when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
         when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
         when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
@@ -205,7 +216,7 @@ class EnergyFlowConfigServiceImplTest {
 
     @Test
     void getConfigHandlesOldRecordsWithoutV2Fields() {
-        stubEnterprise("测试企业");
+        stubEnterpriseComplete();
         when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
         when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
         when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
@@ -432,6 +443,137 @@ class EnergyFlowConfigServiceImplTest {
     }
 
     // ============================================================
+    // Fix #1 regression: upsert preserves IDs, flowRecordIndex resolves
+    // ============================================================
+
+    @Test
+    void saveConfigUpsertsExistingRecordsAndDeletesRemoved() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            // Simulate two existing records in DB
+            DeEnergyFlow existing1 = new DeEnergyFlow();
+            existing1.setId(10L);
+            existing1.setEnterpriseId(ENT_ID);
+            existing1.setAuditYear(YEAR);
+            DeEnergyFlow existing2 = new DeEnergyFlow();
+            existing2.setId(20L);
+            existing2.setEnterpriseId(ENT_ID);
+            existing2.setAuditYear(YEAR);
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR))
+                    .thenReturn(List.of(existing1, existing2));
+
+            // Incoming: keep record 10, drop record 20, add new record
+            DeEnergyFlow keep = new DeEnergyFlow();
+            keep.setId(10L);
+            keep.setItemType("energy");
+            keep.setItemId(1L);
+            keep.setPhysicalQuantity(new BigDecimal("100"));
+
+            DeEnergyFlow newRec = new DeEnergyFlow();
+            newRec.setItemType("product");
+            newRec.setItemId(2L);
+            newRec.setPhysicalQuantity(new BigDecimal("200"));
+
+            // Make insert set an ID to simulate auto-increment
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0);
+                f.setId(30L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(keep, newRec));
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            // Existing record 10 → updateById, not insert
+            verify(flowMapper).updateById(keep);
+            // New record → insert
+            verify(flowMapper).insert(newRec);
+            // Record 20 removed → soft-delete
+            verify(flowMapper).softDeleteByIdAndEnterprise(20L, ENT_ID, "test");
+            // The old deleteByEnterpriseAndYear should NOT be called
+            verify(flowMapper, never()).deleteByEnterpriseAndYear(anyLong(), anyInt(), anyString());
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigResolvesFlowRecordIdFromIndex() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+            // One new record, insert simulates auto-increment ID = 42
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setItemType("energy");
+            rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("500"));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0);
+                f.setId(42L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+
+            // Edge references record by flowRecordIndex=0 (no flowRecordId yet)
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("idx resolve test");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+            dc.setNodes(Collections.emptyList());
+
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-idx");
+            edge.setSourceNodeId("n1");
+            edge.setTargetNodeId("n2");
+            edge.setFlowRecordId(null);
+            edge.setFlowRecordIndex(0);
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec));
+            dto.setDiagram(dc);
+
+            // Capture the edge that gets inserted
+            List<DeEnergyFlowEdge> capturedEdges = new ArrayList<>();
+            doAnswer(inv -> {
+                capturedEdges.add(inv.getArgument(0));
+                return 1;
+            }).when(edgeMapper).insert(any(DeEnergyFlowEdge.class));
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            // Edge's flowRecordId should be resolved to 42 (the newly inserted record's ID)
+            assertThat(capturedEdges).hasSize(1);
+            assertThat(capturedEdges.get(0).getFlowRecordId()).isEqualTo(42L);
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    // ============================================================
+    // Fix #3 regression: export validation blocks on missing coefficients
+    // ============================================================
+
+    @Test
+    void getConfigExportBlockedWhenEnterpriseIncomplete() {
+        // Enterprise with name only (missing creditCode, contactPerson)
+        stubEnterprise("测试企业");
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("企业信息不完整"));
+    }
+
+    // ============================================================
     // Helpers
     // ============================================================
 
@@ -439,6 +581,15 @@ class EnergyFlowConfigServiceImplTest {
         EntEnterprise ent = new EntEnterprise();
         ent.setId(ENT_ID);
         ent.setEnterpriseName(name);
+        when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+    }
+
+    private void stubEnterpriseComplete() {
+        EntEnterprise ent = new EntEnterprise();
+        ent.setId(ENT_ID);
+        ent.setEnterpriseName("测试企业");
+        ent.setCreditCode("91000000MA0XXXXX");
+        ent.setContactPerson("张三");
         when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
     }
 

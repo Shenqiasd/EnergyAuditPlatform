@@ -46,6 +46,8 @@ public class DiagramConfigDTO implements Serializable {
         private String sourceNodeId;
         private String targetNodeId;
         private Long flowRecordId;
+        /** Index into the flowRecords array — used to resolve flowRecordId after upsert */
+        private Integer flowRecordIndex;
         private String itemType;
         private Long itemId;
         private BigDecimal physicalQuantity;
