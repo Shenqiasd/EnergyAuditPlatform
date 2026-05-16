@@ -1,0 +1,1227 @@
+<script setup lang="ts">
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  getEnergyFlowConfig,
+  saveEnergyFlowConfig,
+  type EnergyFlowConfig,
+  type FlowRecord,
+  type FlowNodeConfig,
+  type FlowEdgeConfig,
+  type DiagramConfig,
+  type UnitInfo,
+  type EnergyInfo,
+  type ProductInfo,
+  type SaveEnergyFlowConfig,
+} from '@/api/energyFlowConfig'
+
+// ============================================================
+// State
+// ============================================================
+const currentYear = new Date().getFullYear()
+const auditYear = ref(currentYear)
+const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i)
+const loading = ref(false)
+const saving = ref(false)
+
+const config = ref<EnergyFlowConfig | null>(null)
+const flowRecords = ref<FlowRecord[]>([])
+const nodes = ref<FlowNodeConfig[]>([])
+const edges = ref<FlowEdgeConfig[]>([])
+const canvasWidth = ref(1200)
+const canvasHeight = ref(800)
+
+// Undo/redo
+const undoStack = ref<string[]>([])
+const redoStack = ref<string[]>([])
+
+// Selection
+const selectedNodeId = ref<string | null>(null)
+const selectedEdgeId = ref<string | null>(null)
+
+// Drag state
+const dragging = ref(false)
+const dragNodeId = ref<string | null>(null)
+const dragOffset = reactive({ x: 0, y: 0 })
+
+// Record editing
+const editingRecord = ref<FlowRecord | null>(null)
+const showRecordDialog = ref(false)
+
+// Edge creation mode
+const creatingEdge = ref(false)
+const edgeSourceNodeId = ref<string | null>(null)
+
+// SVG ref for PNG export
+const svgRef = ref<SVGSVGElement | null>(null)
+
+// ============================================================
+// Computed
+// ============================================================
+const enterpriseName = computed(() => config.value?.enterpriseInfo?.name ?? '未知企业')
+const units = computed(() => config.value?.units ?? [])
+const energies = computed(() => config.value?.energies ?? [])
+const products = computed(() => config.value?.products ?? [])
+const validation = computed(() => config.value?.validation ?? {
+  valid: false,
+  enterpriseComplete: false,
+  hasUnits: false,
+  hasEnergies: false,
+  hasProducts: false,
+  warnings: [],
+})
+
+const selectedNode = computed(() =>
+  selectedNodeId.value ? nodes.value.find(n => n.nodeId === selectedNodeId.value) ?? null : null
+)
+const selectedEdge = computed(() =>
+  selectedEdgeId.value ? edges.value.find(e => e.edgeId === selectedEdgeId.value) ?? null : null
+)
+
+// ============================================================
+// Colors
+// ============================================================
+const NODE_COLORS: Record<string, string> = {
+  energy_input: '#E74C3C',
+  unit: '#3498DB',
+  product_output: '#27AE60',
+  custom: '#95A5A6',
+}
+const EDGE_COLORS = ['#E74C3C', '#3498DB', '#27AE60', '#F39C12', '#9B59B6', '#1ABC9C', '#E67E22']
+
+function nodeColor(n: FlowNodeConfig): string {
+  return n.color || NODE_COLORS[n.nodeType] || '#666'
+}
+
+function edgeColor(e: FlowEdgeConfig, idx: number): string {
+  return e.color || EDGE_COLORS[idx % EDGE_COLORS.length]
+}
+
+// ============================================================
+// Data Loading
+// ============================================================
+async function loadData() {
+  loading.value = true
+  try {
+    const res = await getEnergyFlowConfig(auditYear.value)
+    config.value = res
+    flowRecords.value = res.flowRecords ?? []
+
+    if (res.diagram) {
+      nodes.value = res.diagram.nodes ?? []
+      edges.value = res.diagram.edges ?? []
+      canvasWidth.value = res.diagram.canvasWidth || 1200
+      canvasHeight.value = res.diagram.canvasHeight || 800
+    } else {
+      nodes.value = []
+      edges.value = []
+    }
+    undoStack.value = []
+    redoStack.value = []
+    pushUndo()
+  } catch {
+    ElMessage.error('加载能流图配置失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+// ============================================================
+// Save
+// ============================================================
+async function handleSave() {
+  saving.value = true
+  try {
+    const diagram: DiagramConfig = {
+      name: `${enterpriseName.value} ${auditYear.value}年能流图`,
+      diagramType: 3,
+      canvasWidth: canvasWidth.value,
+      canvasHeight: canvasHeight.value,
+      backgroundColor: '#ffffff',
+      nodes: nodes.value,
+      edges: edges.value,
+    }
+    const body: SaveEnergyFlowConfig = {
+      flowRecords: flowRecords.value,
+      diagram,
+    }
+    await saveEnergyFlowConfig(auditYear.value, body)
+    ElMessage.success('保存成功')
+    await loadData()
+  } catch {
+    ElMessage.error('保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+// ============================================================
+// Undo / Redo
+// ============================================================
+function stateSnapshot(): string {
+  return JSON.stringify({ nodes: nodes.value, edges: edges.value, records: flowRecords.value })
+}
+
+function pushUndo() {
+  undoStack.value.push(stateSnapshot())
+  if (undoStack.value.length > 50) undoStack.value.shift()
+  redoStack.value = []
+}
+
+function applySnapshot(snap: string) {
+  const s = JSON.parse(snap)
+  nodes.value = s.nodes
+  edges.value = s.edges
+  flowRecords.value = s.records
+}
+
+function undo() {
+  if (undoStack.value.length <= 1) return
+  redoStack.value.push(undoStack.value.pop()!)
+  applySnapshot(undoStack.value[undoStack.value.length - 1])
+}
+
+function redo() {
+  if (redoStack.value.length === 0) return
+  const snap = redoStack.value.pop()!
+  undoStack.value.push(snap)
+  applySnapshot(snap)
+}
+
+// ============================================================
+// Validation
+// ============================================================
+function handleValidate() {
+  if (!config.value) return
+  const v = validation.value
+  if (v.valid && v.warnings.length === 0) {
+    ElMessage.success('校验通过，所有前置资料完整')
+  } else {
+    const msgs = v.warnings.join('\n')
+    ElMessageBox.alert(msgs || '前置资料不完整', '校验结果', { type: 'warning' })
+  }
+}
+
+// ============================================================
+// Auto Layout (Mode A: records -> nodes/edges)
+// ============================================================
+function autoLayout() {
+  pushUndo()
+  const newNodes: FlowNodeConfig[] = []
+  const newEdges: FlowEdgeConfig[] = []
+  const nodeSet = new Set<string>()
+
+  const PAD_X = 60
+  const PAD_Y = 80
+  const COL_W = 250
+  const ROW_H = 80
+  const layerNodes: Map<string, { nodeType: string; refType: string; refId?: number | null; layer: number }> = new Map()
+
+  for (const r of flowRecords.value) {
+    // Source node
+    const srcName = r.sourceUnit || '外购'
+    if (!layerNodes.has(srcName)) {
+      let nodeType = 'custom'
+      let refType = 'custom'
+      let refId: number | null = null
+      if (r.sourceType === 'external_energy') {
+        nodeType = 'energy_input'
+        refType = 'energy'
+        refId = r.itemId ?? null
+      } else if (r.sourceType === 'unit' || r.sourceUnitId) {
+        nodeType = 'unit'
+        refType = 'unit'
+        refId = r.sourceRefId ?? r.sourceUnitId ?? null
+      } else if (srcName === '外购') {
+        nodeType = 'energy_input'
+        refType = 'energy'
+      }
+      const unit = units.value.find(u => u.name === srcName)
+      const layer = srcName === '外购' || nodeType === 'energy_input' ? 0 : unit ? unit.unitType : 1
+      layerNodes.set(srcName, { nodeType, refType, refId, layer })
+    }
+
+    // Target node
+    const tgtName = r.targetUnit || '产出'
+    if (!layerNodes.has(tgtName)) {
+      let nodeType = 'custom'
+      let refType = 'custom'
+      let refId: number | null = null
+      if (r.targetType === 'product_output' || tgtName === '产出') {
+        nodeType = 'product_output'
+        refType = 'product'
+      } else if (r.targetType === 'unit' || r.targetUnitId) {
+        nodeType = 'unit'
+        refType = 'unit'
+        refId = r.targetRefId ?? r.targetUnitId ?? null
+      }
+      const unit = units.value.find(u => u.name === tgtName)
+      const layer = tgtName === '产出' || nodeType === 'product_output' ? 4 : unit ? unit.unitType : 2
+      layerNodes.set(tgtName, { nodeType, refType, refId, layer })
+    }
+  }
+
+  // Also add energy input nodes for each energy that appears in purchase flows
+  for (const r of flowRecords.value) {
+    if ((r.sourceUnit === '外购' || r.sourceType === 'external_energy') && r.energyProduct) {
+      if (!layerNodes.has(r.energyProduct)) {
+        layerNodes.set(r.energyProduct, {
+          nodeType: 'energy_input',
+          refType: 'energy',
+          refId: r.itemId ?? null,
+          layer: 0,
+        })
+      }
+    }
+  }
+
+  // Layout by layer
+  const layerBuckets: Map<number, string[]> = new Map()
+  for (const [name, info] of layerNodes) {
+    const arr = layerBuckets.get(info.layer) ?? []
+    arr.push(name)
+    layerBuckets.set(info.layer, arr)
+  }
+
+  const sortedLayers = Array.from(layerBuckets.keys()).sort((a, b) => a - b)
+  let colIdx = 0
+  for (const layer of sortedLayers) {
+    const names = layerBuckets.get(layer)!
+    names.forEach((name, rowIdx) => {
+      const info = layerNodes.get(name)!
+      const node: FlowNodeConfig = {
+        nodeId: `node-${name}`,
+        nodeType: info.nodeType,
+        refType: info.refType,
+        refId: info.refId,
+        label: name,
+        positionX: PAD_X + colIdx * COL_W,
+        positionY: PAD_Y + rowIdx * ROW_H,
+        width: info.nodeType === 'energy_input' ? 60 : 100,
+        height: info.nodeType === 'energy_input' ? 60 : 50,
+        color: NODE_COLORS[info.nodeType] || '#666',
+        visible: 1,
+        locked: 0,
+      }
+      newNodes.push(node)
+      nodeSet.add(name)
+    })
+    colIdx++
+  }
+
+  // Create edges from records
+  for (let i = 0; i < flowRecords.value.length; i++) {
+    const r = flowRecords.value[i]
+    let srcNodeId: string
+    let tgtNodeId: string
+
+    if (r.sourceUnit === '外购' && r.energyProduct && nodeSet.has(r.energyProduct)) {
+      srcNodeId = `node-${r.energyProduct}`
+    } else {
+      srcNodeId = `node-${r.sourceUnit || '外购'}`
+    }
+    tgtNodeId = `node-${r.targetUnit || '产出'}`
+
+    const edge: FlowEdgeConfig = {
+      edgeId: `edge-${i}`,
+      sourceNodeId: srcNodeId,
+      targetNodeId: tgtNodeId,
+      flowRecordId: r.id,
+      itemType: r.itemType,
+      itemId: r.itemId,
+      physicalQuantity: r.physicalQuantity,
+      calculatedValue: r.calculatedValue,
+      labelText: buildEdgeLabel(r),
+      color: EDGE_COLORS[i % EDGE_COLORS.length],
+      lineWidth: 2,
+      visible: 1,
+    }
+    newEdges.push(edge)
+  }
+
+  nodes.value = newNodes
+  edges.value = newEdges
+  canvasWidth.value = Math.max(1200, (colIdx + 1) * COL_W + PAD_X * 2)
+  canvasHeight.value = Math.max(800, Math.max(...Array.from(layerBuckets.values()).map(v => v.length)) * ROW_H + PAD_Y * 2)
+  pushUndo()
+  ElMessage.success('自动布局完成')
+}
+
+function buildEdgeLabel(r: FlowRecord): string {
+  const parts: string[] = []
+  if (r.energyProduct) parts.push(r.energyProduct)
+  if (r.physicalQuantity != null) parts.push(String(r.physicalQuantity))
+  if (r.calculatedValue != null) parts.push(`(${r.calculatedValue})`)
+  return parts.join(' ')
+}
+
+// ============================================================
+// Node interactions
+// ============================================================
+function handleNodeMouseDown(nodeId: string, event: MouseEvent) {
+  event.preventDefault()
+  event.stopPropagation()
+  selectedNodeId.value = nodeId
+  selectedEdgeId.value = null
+
+  if (creatingEdge.value && edgeSourceNodeId.value) {
+    // Complete edge creation
+    const srcId = edgeSourceNodeId.value
+    creatingEdge.value = false
+    edgeSourceNodeId.value = null
+    if (srcId !== nodeId) {
+      showCreateEdgeDialog(srcId, nodeId)
+    }
+    return
+  }
+
+  const node = nodes.value.find(n => n.nodeId === nodeId)
+  if (!node || node.locked) return
+
+  dragging.value = true
+  dragNodeId.value = nodeId
+  dragOffset.x = event.clientX - node.positionX
+  dragOffset.y = event.clientY - node.positionY
+}
+
+function handleCanvasMouseMove(event: MouseEvent) {
+  if (!dragging.value || !dragNodeId.value) return
+  const node = nodes.value.find(n => n.nodeId === dragNodeId.value)
+  if (!node) return
+  node.positionX = Math.max(0, event.clientX - dragOffset.x)
+  node.positionY = Math.max(0, event.clientY - dragOffset.y)
+}
+
+function handleCanvasMouseUp() {
+  if (dragging.value) {
+    dragging.value = false
+    dragNodeId.value = null
+    pushUndo()
+  }
+}
+
+function handleCanvasClick() {
+  if (!dragging.value) {
+    selectedNodeId.value = null
+    selectedEdgeId.value = null
+  }
+}
+
+// ============================================================
+// Edge interactions
+// ============================================================
+function handleEdgeClick(edgeId: string, event: MouseEvent) {
+  event.stopPropagation()
+  selectedEdgeId.value = edgeId
+  selectedNodeId.value = null
+}
+
+function startEdgeCreation() {
+  creatingEdge.value = true
+  edgeSourceNodeId.value = null
+  ElMessage.info('点击源节点开始连线')
+}
+
+function showCreateEdgeDialog(srcNodeId: string, tgtNodeId: string) {
+  const srcNode = nodes.value.find(n => n.nodeId === srcNodeId)
+  const tgtNode = nodes.value.find(n => n.nodeId === tgtNodeId)
+  if (!srcNode || !tgtNode) return
+
+  // Create a new record from edge creation (Mode B)
+  const record: FlowRecord = {
+    sourceUnit: srcNode.label,
+    targetUnit: tgtNode.label,
+    sourceType: srcNode.nodeType === 'energy_input' ? 'external_energy' : 'unit',
+    targetType: tgtNode.nodeType === 'product_output' ? 'product_output' : 'unit',
+    sourceRefId: srcNode.refId,
+    targetRefId: tgtNode.refId,
+  }
+  editingRecord.value = record
+  showRecordDialog.value = true
+}
+
+// ============================================================
+// Record CRUD
+// ============================================================
+function addRecord() {
+  editingRecord.value = {
+    sourceType: 'external_energy',
+    targetType: 'unit',
+    itemType: 'energy',
+  }
+  showRecordDialog.value = true
+}
+
+function editRecord(record: FlowRecord) {
+  editingRecord.value = { ...record }
+  showRecordDialog.value = true
+}
+
+function saveRecord() {
+  if (!editingRecord.value) return
+  pushUndo()
+
+  const r = editingRecord.value
+  // Sync display fields from typed fields
+  if (r.sourceType === 'external_energy') {
+    r.sourceUnit = '外购'
+  } else if (r.sourceRefId) {
+    const unit = units.value.find(u => u.id === r.sourceRefId)
+    if (unit) r.sourceUnit = unit.name
+  }
+  if (r.targetType === 'product_output') {
+    r.targetUnit = '产出'
+  } else if (r.targetRefId) {
+    const unit = units.value.find(u => u.id === r.targetRefId)
+    if (unit) r.targetUnit = unit.name
+  }
+  if (r.itemType === 'energy' && r.itemId) {
+    const energy = energies.value.find(e => e.id === r.itemId)
+    if (energy) {
+      r.energyProduct = energy.name
+      if (r.physicalQuantity != null && energy.equivalentValue != null) {
+        r.calculatedValue = r.physicalQuantity * energy.equivalentValue
+      }
+    }
+  } else if (r.itemType === 'product' && r.itemId) {
+    const product = products.value.find(p => p.id === r.itemId)
+    if (product) {
+      r.energyProduct = product.name
+      if (r.physicalQuantity != null && product.unitPrice != null) {
+        r.calculatedValue = r.physicalQuantity * product.unitPrice
+      }
+    }
+  }
+
+  const idx = flowRecords.value.findIndex(f => f.id === r.id && r.id)
+  if (idx >= 0) {
+    flowRecords.value[idx] = r
+  } else {
+    flowRecords.value.push(r)
+  }
+  showRecordDialog.value = false
+  editingRecord.value = null
+  pushUndo()
+}
+
+function deleteRecord(index: number) {
+  pushUndo()
+  flowRecords.value.splice(index, 1)
+  pushUndo()
+}
+
+// ============================================================
+// Drag from sidebar
+// ============================================================
+function handleSidebarDragStart(event: DragEvent, type: string, item: UnitInfo | EnergyInfo | ProductInfo) {
+  event.dataTransfer?.setData('application/json', JSON.stringify({ type, item }))
+}
+
+function handleCanvasDrop(event: DragEvent) {
+  event.preventDefault()
+  const data = event.dataTransfer?.getData('application/json')
+  if (!data) return
+
+  const { type, item } = JSON.parse(data)
+  const rect = (event.target as Element)?.closest('svg')?.getBoundingClientRect()
+  if (!rect) return
+
+  const x = event.clientX - rect.left
+  const y = event.clientY - rect.top
+
+  pushUndo()
+
+  let nodeType = 'custom'
+  let refType = type
+  if (type === 'energy') nodeType = 'energy_input'
+  else if (type === 'unit') nodeType = 'unit'
+  else if (type === 'product') nodeType = 'product_output'
+
+  const nodeId = `node-${type}-${item.id}-${Date.now()}`
+  const node: FlowNodeConfig = {
+    nodeId,
+    nodeType,
+    refType,
+    refId: item.id,
+    label: item.name,
+    positionX: x,
+    positionY: y,
+    width: nodeType === 'energy_input' ? 60 : 100,
+    height: nodeType === 'energy_input' ? 60 : 50,
+    color: NODE_COLORS[nodeType] || '#666',
+    visible: 1,
+    locked: 0,
+  }
+  nodes.value.push(node)
+  pushUndo()
+}
+
+function handleCanvasDragOver(event: DragEvent) {
+  event.preventDefault()
+}
+
+// ============================================================
+// Properties panel updates
+// ============================================================
+function updateNodeProp(prop: string, value: unknown) {
+  if (!selectedNode.value) return
+  pushUndo();
+  (selectedNode.value as Record<string, unknown>)[prop] = value
+  pushUndo()
+}
+
+function updateEdgeProp(prop: string, value: unknown) {
+  if (!selectedEdge.value) return
+  pushUndo();
+  (selectedEdge.value as Record<string, unknown>)[prop] = value
+  pushUndo()
+}
+
+function deleteSelectedNode() {
+  if (!selectedNodeId.value) return
+  pushUndo()
+  nodes.value = nodes.value.filter(n => n.nodeId !== selectedNodeId.value)
+  edges.value = edges.value.filter(e => e.sourceNodeId !== selectedNodeId.value && e.targetNodeId !== selectedNodeId.value)
+  selectedNodeId.value = null
+  pushUndo()
+}
+
+function deleteSelectedEdge() {
+  if (!selectedEdgeId.value) return
+  pushUndo()
+  edges.value = edges.value.filter(e => e.edgeId !== selectedEdgeId.value)
+  selectedEdgeId.value = null
+  pushUndo()
+}
+
+// ============================================================
+// SVG edge path generation
+// ============================================================
+function edgePath(edge: FlowEdgeConfig): string {
+  const src = nodes.value.find(n => n.nodeId === edge.sourceNodeId)
+  const dst = nodes.value.find(n => n.nodeId === edge.targetNodeId)
+  if (!src || !dst) return ''
+
+  const srcW = src.width || 100
+  const srcH = src.height || 50
+  const dstH = dst.height || 50
+
+  const sx = src.positionX + srcW
+  const sy = src.positionY + srcH / 2
+  const tx = dst.positionX
+  const ty = dst.positionY + dstH / 2
+
+  if (edge.routePoints) {
+    try {
+      const pts = JSON.parse(edge.routePoints) as { x: number; y: number }[]
+      if (pts.length > 0) {
+        let d = `M ${sx} ${sy}`
+        for (const p of pts) d += ` L ${p.x} ${p.y}`
+        d += ` L ${tx} ${ty}`
+        return d
+      }
+    } catch { /* fall through */ }
+  }
+
+  const midX = (sx + tx) / 2
+  return `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`
+}
+
+function edgeLabelPos(edge: FlowEdgeConfig): { x: number; y: number } {
+  const src = nodes.value.find(n => n.nodeId === edge.sourceNodeId)
+  const dst = nodes.value.find(n => n.nodeId === edge.targetNodeId)
+  if (!src || !dst) return { x: 0, y: 0 }
+
+  const srcW = src.width || 100
+  const srcH = src.height || 50
+  const dstH = dst.height || 50
+
+  return {
+    x: (src.positionX + srcW + dst.positionX) / 2,
+    y: (src.positionY + srcH / 2 + dst.positionY + dstH / 2) / 2 - 8,
+  }
+}
+
+// ============================================================
+// PNG Export
+// ============================================================
+async function handleExportPng() {
+  if (!validation.value.valid) {
+    ElMessage.warning('前置资料不完整，无法导出')
+    return
+  }
+  if (nodes.value.length === 0) {
+    ElMessage.warning('图表为空，无法导出')
+    return
+  }
+  if (!svgRef.value) return
+
+  try {
+    const svg = svgRef.value
+    const serializer = new XMLSerializer()
+    const svgStr = serializer.serializeToString(svg)
+    const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image()
+        i.onload = () => resolve(i)
+        i.onerror = () => reject(new Error('svg load failed'))
+        i.src = url
+      })
+      const scale = 2
+      const canvas = document.createElement('canvas')
+      canvas.width = canvasWidth.value * scale
+      canvas.height = canvasHeight.value * scale
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.scale(scale, scale)
+      ctx.drawImage(img, 0, 0)
+      const dataUri = canvas.toDataURL('image/png')
+      const link = document.createElement('a')
+      link.download = `energy-flow-${enterpriseName.value}-${auditYear.value}.png`
+      link.href = dataUri
+      link.click()
+      ElMessage.success('已导出 PNG')
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  } catch {
+    ElMessage.error('导出失败')
+  }
+}
+
+// ============================================================
+// Lifecycle
+// ============================================================
+onMounted(() => {
+  loadData()
+})
+
+function formatNum(n: number | null | undefined): string {
+  if (n == null) return '-'
+  return Number(n).toFixed(2)
+}
+</script>
+
+<template>
+  <div class="energy-flow-config-page">
+    <!-- Top Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <h3>能源流程图配置</h3>
+        <el-select v-model="auditYear" style="width: 110px; margin-left: 12px" @change="loadData">
+          <el-option v-for="y in yearOptions" :key="y" :label="y + '年'" :value="y" />
+        </el-select>
+      </div>
+      <div class="toolbar-actions">
+        <el-button @click="undo" :disabled="undoStack.length <= 1" size="small">撤销</el-button>
+        <el-button @click="redo" :disabled="redoStack.length === 0" size="small">重做</el-button>
+        <el-button @click="autoLayout" size="small" type="info">自动布局</el-button>
+        <el-button @click="startEdgeCreation" size="small">连线</el-button>
+        <el-button @click="handleValidate" size="small">校验</el-button>
+        <el-button @click="handleExportPng" size="small" type="success">导出 PNG</el-button>
+        <el-button @click="handleSave" :loading="saving" type="primary" size="small">保存</el-button>
+      </div>
+    </div>
+
+    <div class="main-layout">
+      <!-- Left Sidebar -->
+      <div class="sidebar-left">
+        <div class="sidebar-section">
+          <h4>{{ enterpriseName }}</h4>
+          <div class="validation-badges">
+            <el-tag :type="validation.enterpriseComplete ? 'success' : 'danger'" size="small">企业信息</el-tag>
+            <el-tag :type="validation.hasUnits ? 'success' : 'danger'" size="small">用能单元</el-tag>
+            <el-tag :type="validation.hasEnergies ? 'success' : 'danger'" size="small">能源品种</el-tag>
+            <el-tag :type="validation.hasProducts ? 'success' : 'danger'" size="small">产品</el-tag>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <h4>用能单元</h4>
+          <div
+            v-for="u in units"
+            :key="u.id"
+            class="sidebar-item draggable"
+            draggable="true"
+            @dragstart="e => handleSidebarDragStart(e, 'unit', u)"
+          >
+            <span class="dot" style="background: #3498DB"></span>
+            {{ u.name }}
+            <span class="sub">{{ ['', '加工转换', '输送分配', '终端使用'][u.unitType] || '' }}</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <h4>能源品种</h4>
+          <div
+            v-for="e in energies"
+            :key="e.id"
+            class="sidebar-item draggable"
+            draggable="true"
+            @dragstart="ev => handleSidebarDragStart(ev, 'energy', e)"
+          >
+            <span class="dot" style="background: #E74C3C"></span>
+            {{ e.name }}
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <h4>产品</h4>
+          <div
+            v-for="p in products"
+            :key="p.id"
+            class="sidebar-item draggable"
+            draggable="true"
+            @dragstart="e => handleSidebarDragStart(e, 'product', p)"
+          >
+            <span class="dot" style="background: #27AE60"></span>
+            {{ p.name }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Center Canvas -->
+      <div class="canvas-area" v-loading="loading">
+        <svg
+          ref="svgRef"
+          :width="canvasWidth"
+          :height="canvasHeight"
+          :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`"
+          xmlns="http://www.w3.org/2000/svg"
+          class="flow-canvas"
+          @mousemove="handleCanvasMouseMove"
+          @mouseup="handleCanvasMouseUp"
+          @click="handleCanvasClick"
+          @drop="handleCanvasDrop"
+          @dragover="handleCanvasDragOver"
+        >
+          <!-- Background -->
+          <rect :width="canvasWidth" :height="canvasHeight" fill="#fff" />
+
+          <!-- Title -->
+          <text :x="canvasWidth / 2" y="30" text-anchor="middle" font-size="16" font-weight="bold" fill="#1f3a68">
+            {{ enterpriseName }} {{ auditYear }}年 能源流程图
+          </text>
+
+          <!-- Defs: arrow markers -->
+          <defs>
+            <marker
+              v-for="(c, ci) in EDGE_COLORS"
+              :key="ci"
+              :id="`arrow-cfg-${c.replace('#', '')}`"
+              markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"
+            >
+              <path d="M0,0 L8,4 L0,8 z" :fill="c" />
+            </marker>
+          </defs>
+
+          <!-- Edges -->
+          <g class="edges-layer">
+            <template v-for="(e, ei) in edges" :key="e.edgeId">
+              <path
+                v-if="(e.visible ?? 1) !== 0"
+                :d="edgePath(e)"
+                :stroke="edgeColor(e, ei)"
+                :stroke-width="e.lineWidth || 2"
+                fill="none"
+                :marker-end="`url(#arrow-cfg-${edgeColor(e, ei).replace('#', '')})`"
+                style="cursor: pointer"
+                :class="{ 'edge-selected': selectedEdgeId === e.edgeId }"
+                @click.stop="handleEdgeClick(e.edgeId, $event)"
+              />
+              <text
+                v-if="(e.visible ?? 1) !== 0 && e.labelText"
+                :x="edgeLabelPos(e).x"
+                :y="edgeLabelPos(e).y"
+                text-anchor="middle"
+                font-size="11"
+                :fill="edgeColor(e, ei)"
+                stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"
+              >{{ e.labelText }}</text>
+            </template>
+          </g>
+
+          <!-- Nodes -->
+          <g class="nodes-layer">
+            <template v-for="n in nodes" :key="n.nodeId">
+              <g
+                v-if="(n.visible ?? 1) !== 0"
+                :class="{ 'node-selected': selectedNodeId === n.nodeId, 'node-locked': n.locked }"
+                style="cursor: move"
+                @mousedown.stop="handleNodeMouseDown(n.nodeId, $event)"
+              >
+                <!-- Energy input: circle -->
+                <template v-if="n.nodeType === 'energy_input'">
+                  <circle
+                    :cx="n.positionX + (n.width || 60) / 2"
+                    :cy="n.positionY + (n.height || 60) / 2"
+                    :r="(n.width || 60) / 2"
+                    :stroke="nodeColor(n)"
+                    stroke-width="2"
+                    fill="#fff"
+                  />
+                  <text
+                    :x="n.positionX + (n.width || 60) / 2"
+                    :y="n.positionY + (n.height || 60) / 2 + 4"
+                    text-anchor="middle" font-size="11" :fill="nodeColor(n)"
+                  >{{ n.label }}</text>
+                </template>
+
+                <!-- Product output: rounded rect -->
+                <template v-else-if="n.nodeType === 'product_output'">
+                  <rect
+                    :x="n.positionX" :y="n.positionY"
+                    :width="n.width || 100" :height="n.height || 50"
+                    :stroke="nodeColor(n)" stroke-width="2" fill="#f0fff0" rx="8"
+                  />
+                  <text
+                    :x="n.positionX + (n.width || 100) / 2"
+                    :y="n.positionY + (n.height || 50) / 2 + 4"
+                    text-anchor="middle" font-size="11" fill="#222"
+                  >{{ n.label }}</text>
+                </template>
+
+                <!-- Unit / custom: rect -->
+                <template v-else>
+                  <rect
+                    :x="n.positionX" :y="n.positionY"
+                    :width="n.width || 100" :height="n.height || 50"
+                    :stroke="nodeColor(n)" stroke-width="2" fill="#fff" rx="3"
+                  />
+                  <text
+                    :x="n.positionX + (n.width || 100) / 2"
+                    :y="n.positionY + (n.height || 50) / 2 + 4"
+                    text-anchor="middle" font-size="11" fill="#222"
+                  >{{ n.label }}</text>
+                </template>
+              </g>
+            </template>
+          </g>
+
+          <!-- Legend -->
+          <g v-if="nodes.length > 0" :transform="`translate(20, ${canvasHeight - 60})`">
+            <rect width="200" height="50" fill="#f9f9f9" stroke="#ddd" rx="4" />
+            <circle cx="20" cy="15" r="6" fill="#E74C3C" stroke="#E74C3C" />
+            <text x="32" y="19" font-size="10" fill="#333">能源输入</text>
+            <rect x="90" y="9" width="12" height="12" fill="#fff" stroke="#3498DB" rx="2" />
+            <text x="108" y="19" font-size="10" fill="#333">用能单元</text>
+            <rect x="8" y="29" width="12" height="12" fill="#f0fff0" stroke="#27AE60" rx="4" />
+            <text x="26" y="39" font-size="10" fill="#333">产品产出</text>
+            <line x1="90" y1="35" x2="120" y2="35" stroke="#F39C12" stroke-width="2" />
+            <text x="126" y="39" font-size="10" fill="#333">能源流向</text>
+          </g>
+        </svg>
+      </div>
+
+      <!-- Right Properties Panel -->
+      <div class="sidebar-right">
+        <template v-if="selectedNode">
+          <h4>节点属性</h4>
+          <div class="prop-row">
+            <label>名称</label>
+            <el-input :model-value="selectedNode.label" size="small" @update:model-value="v => updateNodeProp('label', v)" />
+          </div>
+          <div class="prop-row">
+            <label>类型</label>
+            <el-select :model-value="selectedNode.nodeType" size="small" @update:model-value="v => updateNodeProp('nodeType', v)">
+              <el-option label="能源输入" value="energy_input" />
+              <el-option label="用能单元" value="unit" />
+              <el-option label="产品产出" value="product_output" />
+              <el-option label="自定义" value="custom" />
+            </el-select>
+          </div>
+          <div class="prop-row">
+            <label>颜色</label>
+            <el-color-picker :model-value="selectedNode.color || '#666'" size="small" @update:model-value="v => updateNodeProp('color', v)" />
+          </div>
+          <div class="prop-row">
+            <label>宽度</label>
+            <el-input-number :model-value="selectedNode.width || 100" size="small" :min="30" @update:model-value="v => updateNodeProp('width', v)" />
+          </div>
+          <div class="prop-row">
+            <label>高度</label>
+            <el-input-number :model-value="selectedNode.height || 50" size="small" :min="20" @update:model-value="v => updateNodeProp('height', v)" />
+          </div>
+          <div class="prop-row">
+            <el-checkbox :model-value="selectedNode.visible === 1" @update:model-value="v => updateNodeProp('visible', v ? 1 : 0)">可见</el-checkbox>
+            <el-checkbox :model-value="selectedNode.locked === 1" @update:model-value="v => updateNodeProp('locked', v ? 1 : 0)">锁定</el-checkbox>
+          </div>
+          <el-button type="danger" size="small" @click="deleteSelectedNode" style="margin-top: 8px">删除节点</el-button>
+        </template>
+
+        <template v-else-if="selectedEdge">
+          <h4>连线属性</h4>
+          <div class="prop-row">
+            <label>标签</label>
+            <el-input :model-value="selectedEdge.labelText || ''" size="small" @update:model-value="v => updateEdgeProp('labelText', v)" />
+          </div>
+          <div class="prop-row">
+            <label>颜色</label>
+            <el-color-picker :model-value="selectedEdge.color || '#666'" size="small" @update:model-value="v => updateEdgeProp('color', v)" />
+          </div>
+          <div class="prop-row">
+            <label>线宽</label>
+            <el-input-number :model-value="selectedEdge.lineWidth || 2" size="small" :min="1" :max="10" @update:model-value="v => updateEdgeProp('lineWidth', v)" />
+          </div>
+          <div class="prop-row">
+            <el-checkbox :model-value="(selectedEdge.visible ?? 1) === 1" @update:model-value="v => updateEdgeProp('visible', v ? 1 : 0)">可见</el-checkbox>
+          </div>
+          <el-button type="danger" size="small" @click="deleteSelectedEdge" style="margin-top: 8px">删除连线</el-button>
+        </template>
+
+        <template v-else>
+          <h4>画布属性</h4>
+          <div class="prop-row">
+            <label>宽度</label>
+            <el-input-number v-model="canvasWidth" size="small" :min="600" :step="100" />
+          </div>
+          <div class="prop-row">
+            <label>高度</label>
+            <el-input-number v-model="canvasHeight" size="small" :min="400" :step="100" />
+          </div>
+          <p class="hint">点击节点或连线编辑属性</p>
+        </template>
+      </div>
+    </div>
+
+    <!-- Bottom Record Table -->
+    <div class="record-table-area">
+      <div class="record-header">
+        <h4>填报记录</h4>
+        <el-button type="primary" size="small" @click="addRecord">新增记录</el-button>
+      </div>
+      <el-table :data="flowRecords" size="small" max-height="220" border stripe>
+        <el-table-column type="index" width="50" label="#" />
+        <el-table-column prop="sourceUnit" label="来源" width="100" />
+        <el-table-column prop="targetUnit" label="目的" width="100" />
+        <el-table-column prop="energyProduct" label="能源/产品" width="100" />
+        <el-table-column prop="itemType" label="类型" width="70">
+          <template #default="{ row }">
+            {{ row.itemType === 'energy' ? '能源' : row.itemType === 'product' ? '产品' : row.itemType || '待确认' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="physicalQuantity" label="实物量" width="100" align="right">
+          <template #default="{ row }">{{ formatNum(row.physicalQuantity) }}</template>
+        </el-table-column>
+        <el-table-column prop="calculatedValue" label="折标量/价格" width="110" align="right">
+          <template #default="{ row }">{{ formatNum(row.calculatedValue) }}</template>
+        </el-table-column>
+        <el-table-column prop="remark" label="备注" min-width="120" />
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row, $index }">
+            <el-button link type="primary" size="small" @click="editRecord(row)">编辑</el-button>
+            <el-button link type="danger" size="small" @click="deleteRecord($index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- Record Edit Dialog -->
+    <el-dialog v-model="showRecordDialog" title="编辑填报记录" width="600px" :close-on-click-modal="false">
+      <el-form v-if="editingRecord" label-width="100px" size="small">
+        <el-form-item label="来源类型">
+          <el-select v-model="editingRecord.sourceType" style="width: 100%">
+            <el-option label="外购能源" value="external_energy" />
+            <el-option label="用能单元" value="unit" />
+            <el-option label="系统" value="system" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingRecord.sourceType === 'unit'" label="来源单元">
+          <el-select v-model="editingRecord.sourceRefId" style="width: 100%" filterable>
+            <el-option v-for="u in units" :key="u.id" :label="u.name" :value="u.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="目的类型">
+          <el-select v-model="editingRecord.targetType" style="width: 100%">
+            <el-option label="用能单元" value="unit" />
+            <el-option label="生产系统" value="production_system" />
+            <el-option label="产出节点" value="product_output" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingRecord.targetType === 'unit'" label="目的单元">
+          <el-select v-model="editingRecord.targetRefId" style="width: 100%" filterable>
+            <el-option v-for="u in units" :key="u.id" :label="u.name" :value="u.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="品目类型">
+          <el-select v-model="editingRecord.itemType" style="width: 100%">
+            <el-option label="能源" value="energy" />
+            <el-option label="产品" value="product" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="品目">
+          <el-select v-model="editingRecord.itemId" style="width: 100%" filterable>
+            <template v-if="editingRecord.itemType === 'energy'">
+              <el-option v-for="e in energies" :key="e.id" :label="e.name" :value="e.id" />
+            </template>
+            <template v-else>
+              <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
+            </template>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="实物量">
+          <el-input-number v-model="editingRecord.physicalQuantity" style="width: 100%" :precision="4" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="editingRecord.remark" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRecordDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveRecord">确定</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<style scoped lang="scss">
+.energy-flow-config-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid #e6e6e6;
+  background: #fafafa;
+  flex-shrink: 0;
+
+  .toolbar-left {
+    display: flex;
+    align-items: center;
+    h3 { margin: 0; font-size: 16px; color: #303133; }
+  }
+  .toolbar-actions {
+    display: flex;
+    gap: 6px;
+  }
+}
+
+.main-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar-left {
+  width: 200px;
+  border-right: 1px solid #e6e6e6;
+  overflow-y: auto;
+  padding: 8px;
+  flex-shrink: 0;
+  background: #fafbfc;
+
+  .sidebar-section {
+    margin-bottom: 12px;
+    h4 { margin: 0 0 6px; font-size: 13px; color: #606266; }
+  }
+
+  .validation-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .sidebar-item {
+    padding: 4px 8px;
+    font-size: 12px;
+    border-radius: 3px;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: grab;
+
+    &:hover { background: #ecf5ff; }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .sub {
+      color: #999;
+      font-size: 11px;
+      margin-left: auto;
+    }
+  }
+}
+
+.canvas-area {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+  background: #f5f5f5;
+
+  .flow-canvas {
+    display: block;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  }
+}
+
+.sidebar-right {
+  width: 220px;
+  border-left: 1px solid #e6e6e6;
+  padding: 12px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  background: #fafbfc;
+
+  h4 { margin: 0 0 10px; font-size: 13px; color: #606266; }
+
+  .prop-row {
+    margin-bottom: 8px;
+    label {
+      display: block;
+      font-size: 12px;
+      color: #909399;
+      margin-bottom: 2px;
+    }
+  }
+  .hint {
+    color: #c0c4cc;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 20px;
+  }
+}
+
+.record-table-area {
+  border-top: 1px solid #e6e6e6;
+  padding: 8px 16px;
+  flex-shrink: 0;
+  max-height: 260px;
+  overflow-y: auto;
+
+  .record-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    h4 { margin: 0; font-size: 13px; }
+  }
+}
+
+.node-selected circle,
+.node-selected rect {
+  stroke-dasharray: 4 2;
+  stroke-width: 3;
+}
+
+.edge-selected {
+  stroke-dasharray: 6 3;
+  stroke-width: 3 !important;
+}
+</style>

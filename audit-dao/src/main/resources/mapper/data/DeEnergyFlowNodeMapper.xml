@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.data.DeEnergyFlowNodeMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.extraction.DeEnergyFlowNode">
+        <id column="id" property="id"/>
+        <result column="diagram_id" property="diagramId"/>
+        <result column="node_id" property="nodeId"/>
+        <result column="node_type" property="nodeType"/>
+        <result column="ref_type" property="refType"/>
+        <result column="ref_id" property="refId"/>
+        <result column="label" property="label"/>
+        <result column="position_x" property="positionX"/>
+        <result column="position_y" property="positionY"/>
+        <result column="width" property="width"/>
+        <result column="height" property="height"/>
+        <result column="color" property="color"/>
+        <result column="visible" property="visible"/>
+        <result column="locked" property="locked"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <select id="selectByDiagramId" resultMap="BaseResultMap">
+        SELECT * FROM de_energy_flow_node
+        WHERE diagram_id = #{diagramId}
+          AND deleted = 0
+        ORDER BY id ASC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO de_energy_flow_node (
+            diagram_id, node_id, node_type, ref_type, ref_id,
+            label, position_x, position_y, width, height,
+            color, visible, locked,
+            create_by, update_by
+        ) VALUES (
+            #{diagramId}, #{nodeId}, #{nodeType}, #{refType}, #{refId},
+            #{label}, #{positionX}, #{positionY}, #{width}, #{height},
+            #{color}, #{visible}, #{locked},
+            #{createBy}, #{updateBy}
+        )
+    </insert>
+
+    <update id="deleteByDiagramId">
+        UPDATE de_energy_flow_node
+        SET deleted = 1, update_by = #{updateBy}, update_time = CURRENT_TIMESTAMP
+        WHERE diagram_id = #{diagramId} AND deleted = 0
+    </update>
+
+</mapper>

@@ -17,6 +17,13 @@
         <result column="physical_quantity" property="physicalQuantity"/>
         <result column="standard_quantity" property="standardQuantity"/>
         <result column="remark" property="remark"/>
+        <result column="source_type" property="sourceType"/>
+        <result column="source_ref_id" property="sourceRefId"/>
+        <result column="target_type" property="targetType"/>
+        <result column="target_ref_id" property="targetRefId"/>
+        <result column="item_type" property="itemType"/>
+        <result column="item_id" property="itemId"/>
+        <result column="calculated_value" property="calculatedValue"/>
         <result column="create_by" property="createBy"/>
         <result column="create_time" property="createTime"/>
         <result column="update_by" property="updateBy"/>
@@ -28,7 +35,9 @@
         id, submission_id, enterprise_id, audit_year, flow_stage, seq_no,
         source_unit, source_unit_id, target_unit, target_unit_id,
         energy_product, physical_quantity, standard_quantity,
-        remark, create_by, create_time, update_by, update_time, deleted
+        remark, source_type, source_ref_id, target_type, target_ref_id,
+        item_type, item_id, calculated_value,
+        create_by, create_time, update_by, update_time, deleted
     </sql>
 
     <select id="selectByEnterpriseAndYear" resultMap="BaseResultMap">
@@ -45,12 +54,16 @@
             submission_id, enterprise_id, audit_year, flow_stage, seq_no,
             source_unit, source_unit_id, target_unit, target_unit_id,
             energy_product, physical_quantity, standard_quantity,
-            remark, create_by, update_by
+            remark, source_type, source_ref_id, target_type, target_ref_id,
+            item_type, item_id, calculated_value,
+            create_by, update_by
         ) VALUES (
             #{submissionId}, #{enterpriseId}, #{auditYear}, #{flowStage}, #{seqNo},
             #{sourceUnit}, #{sourceUnitId}, #{targetUnit}, #{targetUnitId},
             #{energyProduct}, #{physicalQuantity}, #{standardQuantity},
-            #{remark}, #{createBy}, #{updateBy}
+            #{remark}, #{sourceType}, #{sourceRefId}, #{targetType}, #{targetRefId},
+            #{itemType}, #{itemId}, #{calculatedValue},
+            #{createBy}, #{updateBy}
         )
     </insert>
 
