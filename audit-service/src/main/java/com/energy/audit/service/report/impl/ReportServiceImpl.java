@@ -400,6 +400,12 @@ public class ReportServiceImpl implements ReportService {
             record.setEnterpriseId(enterpriseId);
             record.setAuditYear(auditYear);
             record.setReportType(rt);
+            // Populate report_name on first upload — it's NOT NULL for the legacy generation
+            // pipeline, and also drives the auditor table label + the legacy /report/{id}/download
+            // filename, which would become "null.docx" without this. The MyBatis <update> guards
+            // report_name with <if test="reportName != null">, so a NULL set here would persist
+            // for the row's lifetime.
+            record.setReportName(auditYear + "年度能源审计报告");
             record.setStatus(2); // "已生成" — repurposed here as "report content uploaded"
             record.setUploadedFilePath(newKey);
             record.setUploadedFileData(fileBytes);
@@ -482,8 +488,25 @@ public class ReportServiceImpl implements ReportService {
                 if (newKey != null && !newKey.equals(report.getUploadedFilePath())) {
                     // Targeted update — must NOT use reportMapper.update(patch), which would
                     // unconditionally set review_comment = NULL and erase any auditor's rejection reason.
-                    reportMapper.updateUploadedFilePathById(reportId, newKey, "system");
-                    log.info("[ReportService] Self-healed local cache for report {} -> {}", reportId, newKey);
+                    // The optimistic guard (uploaded_file_path = expectedOldPath) makes this UPDATE
+                    // a no-op if a concurrent uploadFilledReport committed a fresh path between
+                    // our selectById on line 468 and this UPDATE — otherwise we'd overwrite the
+                    // new upload's path with this stale-content key.
+                    int updated = reportMapper.updateUploadedFilePathById(
+                        reportId, newKey, report.getUploadedFilePath(), "system");
+                    if (updated == 1) {
+                        log.info("[ReportService] Self-healed local cache for report {} -> {}", reportId, newKey);
+                    } else {
+                        log.info("[ReportService] Self-heal skipped for report {} — concurrent upload changed path; deleting stale-content key {}",
+                            reportId, newKey);
+                        // Best-effort cleanup so we don't leak the just-written stale-content file.
+                        try {
+                            reportFileStore.delete(newKey);
+                        } catch (RuntimeException cleanup) {
+                            log.warn("[ReportService] Failed to clean up stale self-heal file {}: {}",
+                                newKey, cleanup.getMessage());
+                        }
+                    }
                 }
             } catch (RuntimeException e) {
                 log.warn("[ReportService] Self-heal failed for report {} (serving BLOB only): {}",

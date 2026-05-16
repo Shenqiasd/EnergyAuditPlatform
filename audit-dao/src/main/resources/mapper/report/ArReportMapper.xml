@@ -131,12 +131,29 @@
       Avoids the general-purpose <update id="update"> which has an unconditional
       review_comment = #{reviewComment} clause that would clobber existing comments.
     -->
+    <!--
+      Optimistic guard via `uploaded_file_path = #{expectedOldPath}`. The self-heal flow
+      reads the BLOB then re-saves it under a new key; if a concurrent uploadFilledReport
+      committed a fresh `uploaded_file_path` between those two steps, this UPDATE matches
+      0 rows and the stale-content key is silently discarded. Without the guard the
+      self-heal would overwrite the new upload's path with stale content and every
+      subsequent filesystem-first download would serve the old bytes.
+    -->
     <update id="updateUploadedFilePathById">
         UPDATE ar_report
         SET uploaded_file_path = #{path},
             update_by          = #{updateBy},
             update_time        = CURRENT_TIMESTAMP
-        WHERE id = #{id} AND deleted = 0
+        WHERE id = #{id}
+          AND deleted = 0
+          <choose>
+              <when test="expectedOldPath == null">
+                  AND uploaded_file_path IS NULL
+              </when>
+              <otherwise>
+                  AND uploaded_file_path = #{expectedOldPath}
+              </otherwise>
+          </choose>
     </update>
 
     <select id="selectByEnterprise" resultMap="LightResultMap">

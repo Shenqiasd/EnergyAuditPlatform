@@ -26,9 +26,16 @@ public interface ArReportMapper {
      * Targeted update for the self-heal path in {@code downloadUploadedReportBytes}.
      * Only touches {@code uploaded_file_path} so it can't accidentally clobber other columns
      * (notably {@code review_comment}, which the general-purpose {@code update} sets unconditionally).
+     *
+     * <p>Includes an optimistic guard {@code AND uploaded_file_path = #{expectedOldPath}} so the
+     * self-heal becomes a no-op if a concurrent {@code uploadFilledReport} has already changed the
+     * path. Without this guard the self-heal can overwrite a fresh upload's path with the stale
+     * BLOB-restored path, causing every subsequent download to serve the old content from the
+     * filesystem first-hit cache. Returns the row count so callers can detect the no-op case.
      */
     int updateUploadedFilePathById(@Param("id") Long id,
                                    @Param("path") String path,
+                                   @Param("expectedOldPath") String expectedOldPath,
                                    @Param("updateBy") String updateBy);
 
     List<ArReport> selectByEnterprise(@Param("enterpriseId") Long enterpriseId,
