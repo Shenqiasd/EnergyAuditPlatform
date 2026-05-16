@@ -245,11 +245,17 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 exportErrors.add(msg);
             }
         }
-        // Validate visible edges: each must bind to an active flow record
+        // Validate visible edges: record binding + endpoint node existence
         Set<Long> activeFlowIds = flows.stream()
                 .filter(f -> f.getId() != null)
                 .map(DeEnergyFlow::getId)
                 .collect(Collectors.toSet());
+        Set<String> getNodeIds = new HashSet<>();
+        if (result.getDiagram() != null && result.getDiagram().getNodes() != null) {
+            for (DiagramConfigDTO.FlowNodeDTO nd : result.getDiagram().getNodes()) {
+                if (nd.getNodeId() != null) getNodeIds.add(nd.getNodeId());
+            }
+        }
         if (result.getDiagram() != null && result.getDiagram().getEdges() != null) {
             for (DiagramConfigDTO.FlowEdgeDTO ed : result.getDiagram().getEdges()) {
                 Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
@@ -260,6 +266,16 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     exportErrors.add(msg);
                 } else if (!activeFlowIds.contains(ed.getFlowRecordId())) {
                     String msg = "连线 [" + ed.getEdgeId() + "] 绑定的填报记录(id=" + ed.getFlowRecordId() + ")不存在或已删除（待确认）";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
+                }
+                if (ed.getSourceNodeId() != null && !getNodeIds.contains(ed.getSourceNodeId())) {
+                    String msg = "连线 [" + ed.getEdgeId() + "] 的起点节点(" + ed.getSourceNodeId() + ")不存在（待确认）";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
+                }
+                if (ed.getTargetNodeId() != null && !getNodeIds.contains(ed.getTargetNodeId())) {
+                    String msg = "连线 [" + ed.getEdgeId() + "] 的终点节点(" + ed.getTargetNodeId() + ")不存在（待确认）";
                     warnings.add(msg);
                     exportErrors.add(msg);
                 }
@@ -380,7 +396,15 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
 
-            // Pre-validate edges: resolve flowRecordId and reject invalid visible edges BEFORE deleting
+            // Build active node ID set for endpoint validation
+            Set<String> activeNodeIds = new HashSet<>();
+            if (dc.getNodes() != null) {
+                for (DiagramConfigDTO.FlowNodeDTO nd : dc.getNodes()) {
+                    if (nd.getNodeId() != null) activeNodeIds.add(nd.getNodeId());
+                }
+            }
+
+            // Pre-validate edges: resolve flowRecordId, validate endpoints, reject invalid visible edges BEFORE deleting
             List<Long> resolvedEdgeRecordIds = new ArrayList<>();
             if (dc.getEdges() != null) {
                 for (DiagramConfigDTO.FlowEdgeDTO ed : dc.getEdges()) {
@@ -405,6 +429,19 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                         throw new IllegalArgumentException(
                                 String.format("连线 [%s] 没有绑定到有效的填报记录，无法保存。请先删除该连线或重新绑定填报记录。",
                                         ed.getEdgeId()));
+                    }
+                    // Validate source/target node endpoints exist in the incoming node set
+                    if (edgeVisible == 1) {
+                        if (ed.getSourceNodeId() != null && !activeNodeIds.contains(ed.getSourceNodeId())) {
+                            throw new IllegalArgumentException(
+                                    String.format("连线 [%s] 的起点节点(%s)不存在于当前节点集合中，无法保存。",
+                                            ed.getEdgeId(), ed.getSourceNodeId()));
+                        }
+                        if (ed.getTargetNodeId() != null && !activeNodeIds.contains(ed.getTargetNodeId())) {
+                            throw new IllegalArgumentException(
+                                    String.format("连线 [%s] 的终点节点(%s)不存在于当前节点集合中，无法保存。",
+                                            ed.getEdgeId(), ed.getTargetNodeId()));
+                        }
                     }
                     resolvedEdgeRecordIds.add(resolvedRecordId);
                 }

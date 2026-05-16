@@ -424,9 +424,9 @@ function findNodeForRecordSource(r: FlowRecord): FlowNodeConfig | undefined {
   }
   if (r.sourceType === 'external_energy') {
     if (r.itemType === 'energy' && r.itemId) {
-      const match = nodes.value.find(n => n.nodeType === 'energy_input' && n.refId === r.itemId)
-      if (match) return match
+      return nodes.value.find(n => n.nodeType === 'energy_input' && n.refId === r.itemId)
     }
+    // No itemId — use generic fallback only in this case
     return nodes.value.find(n => n.nodeType === 'energy_input')
   }
   if (r.sourceType === 'system' && r.sourceUnit) {
@@ -441,9 +441,9 @@ function findNodeForRecordTarget(r: FlowRecord): FlowNodeConfig | undefined {
   }
   if (r.targetType === 'product_output') {
     if (r.itemType === 'product' && r.itemId) {
-      const match = nodes.value.find(n => n.nodeType === 'product_output' && n.refId === r.itemId)
-      if (match) return match
+      return nodes.value.find(n => n.nodeType === 'product_output' && n.refId === r.itemId)
     }
+    // No itemId — use generic fallback only in this case
     return nodes.value.find(n => n.nodeType === 'product_output')
   }
   if (r.targetType === 'production_system' && r.targetUnit) {
@@ -963,7 +963,8 @@ function computeLocalExportErrors(): string[] {
       errors.push(`填报记录 [${r.energyProduct}] 为旧数据（待确认），请编辑确认品目类型和品目`)
     }
   }
-  // Check visible edges for valid record bindings
+  // Check visible edges for valid record bindings and endpoint nodes
+  const nodeIdSet = new Set(nodes.value.map(n => n.nodeId))
   for (const e of edges.value) {
     if (e.visible === 0) continue
     if (!e._flowRecordClientKey && !e.flowRecordId) {
@@ -974,6 +975,13 @@ function computeLocalExportErrors(): string[] {
     } else if (e.flowRecordId) {
       const rec = flowRecords.value.find(r => r.id === e.flowRecordId)
       if (!rec) errors.push(`连线 [${e.edgeId}] 绑定的填报记录(id=${e.flowRecordId})不存在`)
+    }
+    // Validate endpoint nodes exist
+    if (e.sourceNodeId && !nodeIdSet.has(e.sourceNodeId)) {
+      errors.push(`连线 [${e.edgeId}] 的起点节点(${e.sourceNodeId})不存在`)
+    }
+    if (e.targetNodeId && !nodeIdSet.has(e.targetNodeId)) {
+      errors.push(`连线 [${e.edgeId}] 的终点节点(${e.targetNodeId})不存在`)
     }
   }
   return [...new Set(errors)]
