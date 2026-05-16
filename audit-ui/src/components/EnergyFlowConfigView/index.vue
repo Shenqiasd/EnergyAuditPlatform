@@ -28,7 +28,7 @@ const cw = computed(() => props.canvasWidth || 1200)
 const ch = computed(() => props.canvasHeight || 800)
 
 // ── Number formatting (canonical spec) ──────────────────────
-// Thousands separator, default 1 decimal, hide trailing .0,
+// Thousands separator, default 1 decimal, hide trailing .0 for integers,
 // 0 is visible, null/undefined/NaN → empty string,
 // one space between value and unit
 function fmtNum(v: number | null | undefined, decimals = 1): string {
@@ -39,13 +39,13 @@ function fmtNum(v: number | null | undefined, decimals = 1): string {
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   return parts.join('.')
 }
-// Percentages: 2 decimals, format as (12.45%)
+// Percentages: exactly 2 decimals always (do NOT strip trailing zeros)
+// Format as (12.45%), (12.00%), (0.00%), blank for null/NaN
 function fmtPct(v: number | null | undefined): string {
   if (v == null || (typeof v === 'number' && isNaN(v))) return ''
   const pctVal = v * 100
   const fixed = pctVal.toFixed(2)
-  const cleaned = fixed.replace(/\.?0+$/, '')
-  const parts = cleaned.split('.')
+  const parts = fixed.split('.')
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   return '(' + parts.join('.') + '%)'
 }
@@ -157,10 +157,29 @@ const NODE_COLORS: Record<string, string> = {
 }
 function nodeColor(n: FlowNodeConfig): string { return n.color || NODE_COLORS[n.nodeType] || '#666' }
 
+// ── Energy node: name + total quantity/unit (two lines in circle) ─
+function energyNodeTotalLine(n: FlowNodeConfig): string {
+  if (n.nodeType !== 'energy_input' || !n.refId) return ''
+  const cons = consumptionByEnergyId.value.get(n.refId)
+  const en = energyMap.value.get(n.refId)
+  if (!cons) return ''
+  const usage = (cons.purchaseTotal ?? 0) + (cons.openingStock ?? 0)
+    - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
+  const unit = en?.measurementUnit ?? cons.measurementUnit ?? ''
+  const v = fmtNum(usage)
+  return v ? v + ' ' + unit : ''
+}
+
 // ── Inventory 4-line indicators (energy_input circles) ────
 // Order: 期末库存 / 外供 / 期初库存 / 购入 (canonical spec)
-// Always show fixed slots with unit; blank value when no data
-function inventoryLines(n: FlowNodeConfig): { label: string; value: string }[] {
+// Always show fixed slots; blank value when no data but preserve slot position
+// Each line has: label, value text, direction arrow (← for outgoing, → for incoming)
+interface InventorySlot {
+  label: string
+  value: string
+  arrow: string // '→' incoming (购入/期初库存), '←' outgoing (期末库存/外供), '' if none
+}
+function inventoryLines(n: FlowNodeConfig): InventorySlot[] {
   if (n.nodeType !== 'energy_input') return []
   const en = n.refId ? energyMap.value.get(n.refId) : undefined
   const unit = en?.measurementUnit ?? ''
@@ -170,10 +189,10 @@ function inventoryLines(n: FlowNodeConfig): { label: string; value: string }[] {
     return s ? s + ' ' + unit : ''
   }
   return [
-    { label: '期末库存', value: fmt(cons?.closingStock) },
-    { label: '外供', value: fmt(cons?.externalSupply) },
-    { label: '期初库存', value: fmt(cons?.openingStock) },
-    { label: '购入', value: fmt(cons?.purchaseTotal) },
+    { label: '期末库存', value: fmt(cons?.closingStock), arrow: '←' },
+    { label: '外供', value: fmt(cons?.externalSupply), arrow: '←' },
+    { label: '期初库存', value: fmt(cons?.openingStock), arrow: '→' },
+    { label: '购入', value: fmt(cons?.purchaseTotal), arrow: '→' },
   ]
 }
 
@@ -195,7 +214,9 @@ function unitEfficiency(n: FlowNodeConfig): string {
   return fmtPct(outputTotal / inputTotal)
 }
 
-// ── Equivalence / equivalent double lines (stage 0->1) ─────
+// ── Equivalence / equivalent double lines (stage 0→1) ─────
+// Always-present double solid line region (mandatory layout element)
+// Show blank values where data is missing
 interface EquivLine { y: number; equivVal: string; equalVal: string; equivPct: string; equalPct: string }
 const equivLines = computed<EquivLine[]>(() => {
   const energyNodes = layoutNodes.value.filter(ln => ln.node.nodeType === 'energy_input' && ln.node.refId)
@@ -205,11 +226,12 @@ const equivLines = computed<EquivLine[]>(() => {
   for (const ln of energyNodes) {
     const cons = consumptionByEnergyId.value.get(ln.node.refId!)
     const en = energyMap.value.get(ln.node.refId!)
-    if (!cons || !en) continue
-    const usage = (cons.purchaseTotal ?? 0) + (cons.openingStock ?? 0)
-      - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
-    const equivF = en.equivalentValue ?? cons.equivFactor ?? 0
-    const equalF = en.equalValue ?? cons.equalFactor ?? 0
+    const usage = cons
+      ? (cons.purchaseTotal ?? 0) + (cons.openingStock ?? 0)
+        - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
+      : 0
+    const equivF = en?.equivalentValue ?? cons?.equivFactor ?? 0
+    const equalF = en?.equalValue ?? cons?.equalFactor ?? 0
     const equiv = usage * equivF
     const equal = usage * equalF
     totalEquiv += equiv; totalEqual += equal
@@ -224,6 +246,8 @@ const equivLines = computed<EquivLine[]>(() => {
   }))
 })
 const equivLineX = computed(() => stageDividers.value[0] ?? stageX.value[1] ?? cw.value * 0.3)
+// Double line region is always present when energy nodes exist
+const hasEnergyNodes = computed(() => layoutNodes.value.some(ln => ln.node.nodeType === 'energy_input'))
 
 // ── Edge classification ─────────────────────────────────────
 function isBackflow(e: FlowEdgeConfig): boolean {
@@ -258,29 +282,175 @@ function tgtEntryPt(ln: LayoutNode): { x: number; y: number } {
   return { x: ln.cx - ln.w / 2, y: ln.cy }
 }
 
-function edgePath(edge: FlowEdgeConfig): string {
+// ── Canonical 90° orthogonal routing ─────────────────────────
+// Every rendered/exported path must be strictly 90° orthogonal.
+// Editor routePoints are treated as hints (Y-levels) not raw SVG paths.
+// Bus expansion: edges sharing the same source energy use the same trunk X.
+// Return-flow edges route along the top channel.
+// Half-circle line jumps at crossing points.
+
+// Build trunk X map: group edges by energy itemId sharing same source stage
+const trunkXMap = computed(() => {
+  const m = new Map<string, number>()
+  const edgesByTrunk = new Map<string, FlowEdgeConfig[]>()
+  for (const e of visibleEdges.value) {
+    if (isProductEdge(e) || isBackflow(e)) continue
+    const sln = layoutNodeMap.value.get(e.sourceNodeId)
+    if (!sln) continue
+    const rec = resolveRecord(e)
+    const iId = rec?.itemId ?? e.itemId
+    const key = `${sln.stage}-${iId ?? e.edgeId}`
+    if (!edgesByTrunk.has(key)) edgesByTrunk.set(key, [])
+    edgesByTrunk.get(key)!.push(e)
+  }
+  let slotIdx = 0
+  for (const [key, edges] of edgesByTrunk) {
+    const sln = layoutNodeMap.value.get(edges[0].sourceNodeId)
+    if (!sln) continue
+    const baseX = sln.cx + sln.w / 2 + 20 + slotIdx * 16
+    m.set(key, baseX)
+    slotIdx++
+  }
+  return m
+})
+
+function trunkKey(e: FlowEdgeConfig): string {
+  const sln = layoutNodeMap.value.get(e.sourceNodeId)
+  if (!sln) return e.edgeId
+  const rec = resolveRecord(e)
+  const iId = rec?.itemId ?? e.itemId
+  return `${sln.stage}-${iId ?? e.edgeId}`
+}
+
+// Collect all horizontal segment Y positions for crossing detection
+interface HSegment { y: number; x1: number; x2: number; edgeId: string }
+interface VSegment { x: number; y1: number; y2: number; edgeId: string }
+
+function buildOrthoPath(edge: FlowEdgeConfig): { x: number; y: number }[] {
   const sln = layoutNodeMap.value.get(edge.sourceNodeId)
   const tln = layoutNodeMap.value.get(edge.targetNodeId)
-  if (!sln || !tln) return ''
-  if (isProductEdge(edge)) return '' // product edges are rendered as productLines
-  const s = srcExitPt(sln), t = tgtEntryPt(tln)
+  if (!sln || !tln) return []
+  if (isProductEdge(edge)) return []
 
-  if (edge.routePoints) {
-    try {
-      const pts = JSON.parse(edge.routePoints) as { x: number; y: number }[]
-      if (pts.length) {
-        let d = `M ${s.x} ${s.y}`
-        for (const p of pts) d += ` L ${p.x} ${p.y}`
-        return d + ` L ${t.x} ${t.y}`
-      }
-    } catch { /* fall through */ }
-  }
+  const s = srcExitPt(sln)
+  const t = tgtEntryPt(tln)
+
   if (isBackflow(edge)) {
-    const topY = HEADER_Y - 5
-    return `M ${s.x} ${s.y} L ${s.x} ${topY} L ${t.x} ${topY} L ${t.x} ${t.y}`
+    // Return-flow: route along top channel
+    const topY = HEADER_Y - 10
+    return [s, { x: s.x, y: topY }, { x: t.x, y: topY }, t]
   }
+
+  // Forward edge: use trunk X for same-energy grouping
+  const tk = trunkKey(edge)
+  const trunkX = trunkXMap.value.get(tk)
+  if (trunkX && Math.abs(trunkX - s.x) > 5) {
+    // Route: exit right → go to trunk X → vertical to target Y → enter target
+    return [s, { x: trunkX, y: s.y }, { x: trunkX, y: t.y }, t]
+  }
+
+  // Default orthogonal: midpoint routing
   const midX = (s.x + t.x) / 2
-  return `M ${s.x} ${s.y} L ${midX} ${s.y} L ${midX} ${t.y} L ${t.x} ${t.y}`
+  return [s, { x: midX, y: s.y }, { x: midX, y: t.y }, t]
+}
+
+// Collect all segments for crossing detection
+const allSegments = computed(() => {
+  const hSegs: HSegment[] = []
+  const vSegs: VSegment[] = []
+  for (const e of visibleEdges.value) {
+    if (isProductEdge(e)) continue
+    const pts = buildOrthoPath(e)
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1]
+      if (a.y === b.y) {
+        hSegs.push({ y: a.y, x1: Math.min(a.x, b.x), x2: Math.max(a.x, b.x), edgeId: e.edgeId })
+      } else if (a.x === b.x) {
+        vSegs.push({ x: a.x, y1: Math.min(a.y, b.y), y2: Math.max(a.y, b.y), edgeId: e.edgeId })
+      }
+    }
+  }
+  return { hSegs, vSegs }
+})
+
+// Find crossings for a given edge: where its segments cross other edges' segments
+function findCrossings(edgeId: string): { x: number; y: number }[] {
+  const { hSegs, vSegs } = allSegments.value
+  const crossings: { x: number; y: number }[] = []
+  // Check this edge's H segments against other edges' V segments
+  for (const hs of hSegs) {
+    if (hs.edgeId !== edgeId) continue
+    for (const vs of vSegs) {
+      if (vs.edgeId === edgeId) continue
+      if (vs.x > hs.x1 + 2 && vs.x < hs.x2 - 2 && hs.y > vs.y1 + 2 && hs.y < vs.y2 - 2) {
+        crossings.push({ x: vs.x, y: hs.y })
+      }
+    }
+  }
+  // Check this edge's V segments against other edges' H segments
+  for (const vs of vSegs) {
+    if (vs.edgeId !== edgeId) continue
+    for (const hs of hSegs) {
+      if (hs.edgeId === edgeId) continue
+      if (hs.y > vs.y1 + 2 && hs.y < vs.y2 - 2 && vs.x > hs.x1 + 2 && vs.x < hs.x2 - 2) {
+        crossings.push({ x: vs.x, y: hs.y })
+      }
+    }
+  }
+  return crossings
+}
+
+// Build SVG path with half-circle line jumps at crossings
+function edgePath(edge: FlowEdgeConfig): string {
+  const pts = buildOrthoPath(edge)
+  if (pts.length < 2) return ''
+
+  const crossings = findCrossings(edge.edgeId)
+  if (!crossings.length) {
+    // Simple orthogonal path
+    let d = `M ${pts[0].x} ${pts[0].y}`
+    for (let i = 1; i < pts.length; i++) {
+      d += ` L ${pts[i].x} ${pts[i].y}`
+    }
+    return d
+  }
+
+  // Build path with half-circle jumps at crossing points
+  const JUMP_R = 5
+  let d = `M ${pts[0].x} ${pts[0].y}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1]
+    const isH = a.y === b.y
+    // Find crossings on this segment
+    const segCrossings = crossings.filter(c => {
+      if (isH) return Math.abs(c.y - a.y) < 1 && c.x > Math.min(a.x, b.x) + 2 && c.x < Math.max(a.x, b.x) - 2
+      return Math.abs(c.x - a.x) < 1 && c.y > Math.min(a.y, b.y) + 2 && c.y < Math.max(a.y, b.y) - 2
+    })
+    if (!segCrossings.length) {
+      d += ` L ${b.x} ${b.y}`
+      continue
+    }
+    // Sort crossings along segment direction
+    if (isH) {
+      const dir = b.x > a.x ? 1 : -1
+      segCrossings.sort((p, q) => (p.x - q.x) * dir)
+      for (const c of segCrossings) {
+        d += ` L ${c.x - JUMP_R * dir} ${c.y}`
+        // Half-circle jump (arc over the crossing)
+        d += ` A ${JUMP_R} ${JUMP_R} 0 0 ${dir > 0 ? 1 : 0} ${c.x + JUMP_R * dir} ${c.y}`
+      }
+      d += ` L ${b.x} ${b.y}`
+    } else {
+      const dir = b.y > a.y ? 1 : -1
+      segCrossings.sort((p, q) => (p.y - q.y) * dir)
+      for (const c of segCrossings) {
+        d += ` L ${c.x} ${c.y - JUMP_R * dir}`
+        d += ` A ${JUMP_R} ${JUMP_R} 0 0 ${dir > 0 ? 0 : 1} ${c.x} ${c.y + JUMP_R * dir}`
+      }
+      d += ` L ${b.x} ${b.y}`
+    }
+  }
+  return d
 }
 
 // ── Product output lines: horizontal to right boundary ──────
@@ -304,19 +474,34 @@ const productLines = computed<ProductLine[]>(() => {
 })
 
 // ── Dual-line labels on edges (resolved from flowRecords) ──
+// Spec: top = energy name + equivalent/actual-value display
+//        bottom = physical quantity + energy unit
 interface DualLabel { x: number; y: number; top: string; bottom: string }
 function edgeDualLabel(edge: FlowEdgeConfig): DualLabel {
-  if (isProductEdge(edge)) return { x: 0, y: 0, top: '', bottom: '' } // handled by productLines
+  if (isProductEdge(edge)) return { x: 0, y: 0, top: '', bottom: '' }
   const sln = layoutNodeMap.value.get(edge.sourceNodeId)
   const tln = layoutNodeMap.value.get(edge.targetNodeId)
   if (!sln || !tln) return { x: 0, y: 0, top: '', bottom: '' }
-  const s = srcExitPt(sln), t = tgtEntryPt(tln)
 
+  const pts = buildOrthoPath(edge)
+  // Place label at the midpoint of the longest horizontal segment
   let lx: number, ly: number
   if (isBackflow(edge)) {
-    lx = (s.x + t.x) / 2; ly = HEADER_Y - 12
+    lx = (pts[1]?.x ?? sln.cx + sln.w / 2 + (tln.cx - tln.w / 2)) / 2
+    if (pts.length >= 3) lx = (pts[1].x + pts[2].x) / 2
+    ly = HEADER_Y - 18
   } else {
-    lx = (s.x + t.x) / 2; ly = (s.y + t.y) / 2 - 4
+    // Find midpoint of first horizontal segment for label placement
+    lx = (sln.cx + sln.w / 2 + tln.cx - tln.w / 2) / 2
+    ly = (sln.cy + tln.cy) / 2 - 4
+    // Better: place on the horizontal segment of the ortho path
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (pts[i].y === pts[i + 1].y && Math.abs(pts[i].x - pts[i + 1].x) > 20) {
+        lx = (pts[i].x + pts[i + 1].x) / 2
+        ly = pts[i].y - 8
+        break
+      }
+    }
   }
 
   const rec = resolveRecord(edge)
@@ -329,9 +514,11 @@ function edgeDualLabel(edge: FlowEdgeConfig): DualLabel {
   if (iType === 'energy') {
     const en = iId ? energyMap.value.get(iId) : undefined
     const name = en?.name ?? ''
-    const unit = en?.measurementUnit ?? ''
-    topTxt = fmtNum(pq) ? `${name} ${fmtNum(pq)} ${unit}` : name
-    bottomTxt = fmtNum(cv) ? `${fmtNum(cv)} tce` : ''
+    const energyUnit = en?.measurementUnit ?? ''
+    // Top: energy name + equivalent/actual value (from record calculatedValue)
+    topTxt = cv != null ? `${name} ${fmtNum(cv)} tce` : name
+    // Bottom: physical quantity + energy unit
+    bottomTxt = fmtNum(pq) ? `${fmtNum(pq)} ${energyUnit}` : ''
   } else {
     topTxt = edge.labelText || ''
   }
@@ -342,6 +529,7 @@ function edgeDualLabel(edge: FlowEdgeConfig): DualLabel {
 const markerColors = computed(() => {
   const s = new Set<string>()
   visibleEdges.value.forEach(e => s.add(edgeStrokeColor(e)))
+  s.add('#000') // always include black for product lines
   return Array.from(s)
 })
 function markerId(color: string): string { return `arrow-v-${color.replace('#', '')}` }
@@ -414,10 +602,13 @@ function fitView() { svgRef.value?.scrollIntoView({ behavior: 'smooth', block: '
         </marker>
       </defs>
 
-      <!-- Equivalence / equivalent double vertical lines between stage 0 and 1 -->
-      <g v-if="equivLines.length" class="equiv-lines">
+      <!-- Equivalence / equivalent double vertical lines (always present when energy nodes exist) -->
+      <g v-if="hasEnergyNodes" class="equiv-lines">
         <line :x1="equivLineX - 3" :y1="HEADER_Y + 12" :x2="equivLineX - 3" :y2="ch - 50" stroke="#666" stroke-width="1.5" />
         <line :x1="equivLineX + 3" :y1="HEADER_Y + 12" :x2="equivLineX + 3" :y2="ch - 50" stroke="#666" stroke-width="1.5" />
+        <!-- Column headers for double line -->
+        <text :x="equivLineX - 10" :y="HEADER_Y + 10" text-anchor="end" font-size="8" fill="#888">等价值</text>
+        <text :x="equivLineX + 10" :y="HEADER_Y + 10" text-anchor="start" font-size="8" fill="#888">当量值</text>
         <template v-for="(eq, ei) in equivLines" :key="'eq'+ei">
           <text :x="equivLineX - 10" :y="eq.y - 8" text-anchor="end" font-size="9" fill="#444">{{ eq.equivVal }}</text>
           <text :x="equivLineX - 10" :y="eq.y + 4" text-anchor="end" font-size="8" fill="#888">{{ eq.equivPct }}</text>
@@ -426,7 +617,7 @@ function fitView() { svgRef.value?.scrollIntoView({ behavior: 'smooth', block: '
         </template>
       </g>
 
-      <!-- Edges (non-product) -->
+      <!-- Edges (non-product) with canonical 90° orthogonal routing -->
       <g class="edges-layer">
         <template v-for="e in visibleEdges" :key="e.edgeId">
           <template v-if="edgePath(e)">
@@ -456,10 +647,11 @@ function fitView() { svgRef.value?.scrollIntoView({ behavior: 'smooth', block: '
         </template>
       </g>
 
-      <!-- Product output lines: black horizontal to right boundary -->
+      <!-- Product output lines: black horizontal to right boundary with arrow -->
       <g class="product-lines-layer">
         <template v-for="(pl, pi) in productLines" :key="'pl'+pi">
-          <line :x1="pl.x1" :y1="pl.y" :x2="cw - 30" :y2="pl.y" stroke="#000" stroke-width="2" />
+          <line :x1="pl.x1" :y1="pl.y" :x2="cw - 30" :y2="pl.y" stroke="#000" stroke-width="2"
+            :marker-end="`url(#${markerId('#000')})`" />
           <text
             v-if="pl.topText"
             :x="(pl.x1 + cw - 30) / 2" :y="pl.y - 8"
@@ -475,27 +667,48 @@ function fitView() { svgRef.value?.scrollIntoView({ behavior: 'smooth', block: '
         </template>
       </g>
 
-      <!-- Nodes (from layout, excluding product_output which are rendered as lines) -->
+      <!-- Nodes (from layout, excluding product_output) -->
       <g class="nodes-layer">
         <template v-for="ln in shapeNodes" :key="ln.node.nodeId">
-          <!-- energy_input: circle -->
+          <!-- energy_input: circle with name + total quantity -->
           <g v-if="ln.isCircle">
             <circle
               :cx="ln.cx" :cy="ln.cy" :r="ln.w / 2"
               :stroke="nodeColor(ln.node)" stroke-width="2" fill="#fff"
             />
-            <text :x="ln.cx" :y="ln.cy + 4" text-anchor="middle" font-size="11" :fill="nodeColor(ln.node)">
+            <!-- Energy name (line 1) -->
+            <text :x="ln.cx" :y="ln.cy - 2" text-anchor="middle" font-size="10" :fill="nodeColor(ln.node)">
               {{ ln.node.label }}
             </text>
-            <!-- Inventory 4-line indicators -->
-            <template v-if="inventoryLines(ln.node).length">
-              <text
-                v-for="(line, li) in inventoryLines(ln.node)" :key="li"
-                :x="ln.cx - ln.w / 2 - 4"
-                :y="ln.cy - ln.h / 2 + 8 + li * 13"
-                text-anchor="end" font-size="9" fill="#555"
-              >{{ line.label }}: {{ line.value }}</text>
-            </template>
+            <!-- Total quantity/unit (line 2) -->
+            <text v-if="energyNodeTotalLine(ln.node)"
+              :x="ln.cx" :y="ln.cy + 11" text-anchor="middle" font-size="8" fill="#666">
+              {{ energyNodeTotalLine(ln.node) }}
+            </text>
+            <!-- Inventory 4-line fixed slots with arrows -->
+            <g class="inventory-slots">
+              <template v-for="(slot, si) in inventoryLines(ln.node)" :key="si">
+                <!-- Arrow line geometry -->
+                <line
+                  :x1="ln.cx - ln.w / 2 - 50" :y1="ln.cy - ln.h / 2 + 10 + si * 15"
+                  :x2="ln.cx - ln.w / 2 - 8" :y2="ln.cy - ln.h / 2 + 10 + si * 15"
+                  stroke="#999" stroke-width="1"
+                  :stroke-dasharray="slot.value ? undefined : '2,2'"
+                />
+                <!-- Arrow direction indicator -->
+                <text
+                  :x="slot.arrow === '→' ? (ln.cx - ln.w / 2 - 6) : (ln.cx - ln.w / 2 - 52)"
+                  :y="ln.cy - ln.h / 2 + 14 + si * 15"
+                  font-size="9" fill="#999"
+                >{{ slot.arrow }}</text>
+                <!-- Label + value -->
+                <text
+                  :x="ln.cx - ln.w / 2 - 55"
+                  :y="ln.cy - ln.h / 2 + 14 + si * 15"
+                  text-anchor="end" font-size="8" fill="#555"
+                >{{ slot.label }}{{ slot.value ? ': ' + slot.value : '' }}</text>
+              </template>
+            </g>
           </g>
 
           <!-- unit / custom: rectangle -->
