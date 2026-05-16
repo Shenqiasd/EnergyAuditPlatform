@@ -274,7 +274,7 @@ function autoLayout() {
   const PAD_Y = 80
   const COL_W = 250
   const ROW_H = 80
-  const layerNodes: Map<string, { nodeType: string; refType: string; refId?: number | null; layer: number }> = new Map()
+  const layerNodes: Map<string, { nodeType: string; refType: string; refId?: number | null; layer: number; label?: string }> = new Map()
 
   for (const r of flowRecords.value) {
     // Source node
@@ -302,21 +302,29 @@ function autoLayout() {
 
     // Target node
     const tgtName = r.targetUnit || '产出'
-    if (!layerNodes.has(tgtName)) {
+    // For product_output with itemId, use product-keyed name for distinct nodes
+    const tgtKey = (r.targetType === 'product_output' || tgtName === '产出') && r.itemType === 'product' && r.itemId
+      ? `产出-product-${r.itemId}`
+      : tgtName
+    if (!layerNodes.has(tgtKey)) {
       let nodeType = 'custom'
       let refType = 'custom'
       let refId: number | null = null
-      if (r.targetType === 'product_output' || tgtName === '产出') {
+      if (r.targetType === 'product_output' || tgtKey.startsWith('产出-product-') || tgtName === '产出') {
         nodeType = 'product_output'
         refType = 'product'
+        if (r.itemType === 'product' && r.itemId) refId = r.itemId
       } else if (r.targetType === 'unit' || r.targetUnitId) {
         nodeType = 'unit'
         refType = 'unit'
         refId = r.targetRefId ?? r.targetUnitId ?? null
       }
       const unit = units.value.find(u => u.name === tgtName)
-      const layer = tgtName === '产出' || nodeType === 'product_output' ? 4 : unit ? unit.unitType : 2
-      layerNodes.set(tgtName, { nodeType, refType, refId, layer })
+      const layer = tgtKey.startsWith('产出-product-') || tgtName === '产出' || nodeType === 'product_output' ? 4 : unit ? unit.unitType : 2
+      const tgtLabel = nodeType === 'product_output' && r.itemType === 'product' && r.itemId
+        ? (products.value.find(p => p.id === r.itemId)?.name ?? tgtName)
+        : tgtName
+      layerNodes.set(tgtKey, { nodeType, refType, refId, layer, label: tgtLabel })
     }
   }
 
@@ -353,7 +361,7 @@ function autoLayout() {
         nodeType: info.nodeType,
         refType: info.refType,
         refId: info.refId,
-        label: name,
+        label: info.label || name,
         positionX: PAD_X + colIdx * COL_W,
         positionY: PAD_Y + rowIdx * ROW_H,
         width: info.nodeType === 'energy_input' ? 60 : 100,
@@ -372,7 +380,10 @@ function autoLayout() {
   for (let i = 0; i < flowRecords.value.length; i++) {
     const r = flowRecords.value[i]
     let srcNodeId: string
-    const tgtNodeId = `node-${r.targetUnit || '产出'}`
+    const tgtKey = (r.targetType === 'product_output' || (r.targetUnit || '产出') === '产出') && r.itemType === 'product' && r.itemId
+      ? `产出-product-${r.itemId}`
+      : (r.targetUnit || '产出')
+    const tgtNodeId = `node-${tgtKey}`
 
     if (r.sourceUnit === '外购' && r.energyProduct && nodeSet.has(r.energyProduct)) {
       srcNodeId = `node-${r.energyProduct}`
@@ -716,11 +727,22 @@ async function saveRecord() {
 
   // Mode B: create visual edge when dialog was opened from edge creation
   if (pendingEdgeSrcNodeId.value && pendingEdgeTgtNodeId.value) {
+    // Use ensureNode based on final dialog values (user may have changed source/target)
+    const finalSrcNode = ensureNodeForRecordSource(r)
+    const finalTgtNode = ensureNodeForRecordTarget(r)
+    if (!finalSrcNode || !finalTgtNode) {
+      ElMessage.error('无法为该记录的来源/目的创建或匹配画布节点，请检查填报数据')
+      pendingEdgeSrcNodeId.value = null
+      pendingEdgeTgtNodeId.value = null
+      showRecordDialog.value = false
+      editingRecord.value = null
+      return
+    }
     const edgeId = `edge-${Date.now()}`
     const newEdge: FlowEdgeConfig = {
       edgeId,
-      sourceNodeId: pendingEdgeSrcNodeId.value,
-      targetNodeId: pendingEdgeTgtNodeId.value,
+      sourceNodeId: finalSrcNode.nodeId,
+      targetNodeId: finalTgtNode.nodeId,
       flowRecordId: r.id,
       _flowRecordClientKey: r._clientKey,
       itemType: r.itemType,
@@ -976,11 +998,15 @@ function computeLocalExportErrors(): string[] {
       const rec = flowRecords.value.find(r => r.id === e.flowRecordId)
       if (!rec) errors.push(`连线 [${e.edgeId}] 绑定的填报记录(id=${e.flowRecordId})不存在`)
     }
-    // Validate endpoint nodes exist
-    if (e.sourceNodeId && !nodeIdSet.has(e.sourceNodeId)) {
+    // Validate endpoint nodes: must be non-blank and exist
+    if (!e.sourceNodeId) {
+      errors.push(`连线 [${e.edgeId}] 的起点节点为空`)
+    } else if (!nodeIdSet.has(e.sourceNodeId)) {
       errors.push(`连线 [${e.edgeId}] 的起点节点(${e.sourceNodeId})不存在`)
     }
-    if (e.targetNodeId && !nodeIdSet.has(e.targetNodeId)) {
+    if (!e.targetNodeId) {
+      errors.push(`连线 [${e.edgeId}] 的终点节点为空`)
+    } else if (!nodeIdSet.has(e.targetNodeId)) {
       errors.push(`连线 [${e.edgeId}] 的终点节点(${e.targetNodeId})不存在`)
     }
   }

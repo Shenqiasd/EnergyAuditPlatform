@@ -269,12 +269,20 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     warnings.add(msg);
                     exportErrors.add(msg);
                 }
-                if (ed.getSourceNodeId() != null && !getNodeIds.contains(ed.getSourceNodeId())) {
+                if (isBlank(ed.getSourceNodeId())) {
+                    String msg = "连线 [" + ed.getEdgeId() + "] 的起点节点为空（待确认）";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
+                } else if (!getNodeIds.contains(ed.getSourceNodeId())) {
                     String msg = "连线 [" + ed.getEdgeId() + "] 的起点节点(" + ed.getSourceNodeId() + ")不存在（待确认）";
                     warnings.add(msg);
                     exportErrors.add(msg);
                 }
-                if (ed.getTargetNodeId() != null && !getNodeIds.contains(ed.getTargetNodeId())) {
+                if (isBlank(ed.getTargetNodeId())) {
+                    String msg = "连线 [" + ed.getEdgeId() + "] 的终点节点为空（待确认）";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
+                } else if (!getNodeIds.contains(ed.getTargetNodeId())) {
                     String msg = "连线 [" + ed.getEdgeId() + "] 的终点节点(" + ed.getTargetNodeId() + ")不存在（待确认）";
                     warnings.add(msg);
                     exportErrors.add(msg);
@@ -432,12 +440,22 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     }
                     // Validate source/target node endpoints exist in the incoming node set
                     if (edgeVisible == 1) {
-                        if (ed.getSourceNodeId() != null && !activeNodeIds.contains(ed.getSourceNodeId())) {
+                        if (isBlank(ed.getSourceNodeId())) {
+                            throw new IllegalArgumentException(
+                                    String.format("连线 [%s] 的起点节点为空，无法保存。可见连线必须指定起点节点。",
+                                            ed.getEdgeId()));
+                        }
+                        if (isBlank(ed.getTargetNodeId())) {
+                            throw new IllegalArgumentException(
+                                    String.format("连线 [%s] 的终点节点为空，无法保存。可见连线必须指定终点节点。",
+                                            ed.getEdgeId()));
+                        }
+                        if (!activeNodeIds.contains(ed.getSourceNodeId())) {
                             throw new IllegalArgumentException(
                                     String.format("连线 [%s] 的起点节点(%s)不存在于当前节点集合中，无法保存。",
                                             ed.getEdgeId(), ed.getSourceNodeId()));
                         }
-                        if (ed.getTargetNodeId() != null && !activeNodeIds.contains(ed.getTargetNodeId())) {
+                        if (!activeNodeIds.contains(ed.getTargetNodeId())) {
                             throw new IllegalArgumentException(
                                     String.format("连线 [%s] 的终点节点(%s)不存在于当前节点集合中，无法保存。",
                                             ed.getEdgeId(), ed.getTargetNodeId()));
