@@ -349,6 +349,12 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
         }
+        // Compute fixed-stage layout once for all edge validations (includes dynamic backflow lanes)
+        List<DiagramConfigDTO.FlowEdgeDTO> allEdgeDtos = (result.getDiagram() != null && result.getDiagram().getEdges() != null)
+                ? result.getDiagram().getEdges() : List.of();
+        Map<String, double[]> fixedLayout = computeFixedStageLayout(getNodeMap, unitList,
+                allEdgeDtos,
+                diagram != null && diagram.getCanvasWidth() != null ? diagram.getCanvasWidth() : 1200);
         if (result.getDiagram() != null && result.getDiagram().getEdges() != null) {
             for (DiagramConfigDTO.FlowEdgeDTO ed : result.getDiagram().getEdges()) {
                 Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
@@ -392,8 +398,6 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     }
                 }
                 // Validate routePoints against fixed-stage layout positions (same as final-effect renderer)
-                Map<String, double[]> fixedLayout = computeFixedStageLayout(getNodeMap, unitList,
-                        diagram.getCanvasWidth() != null ? diagram.getCanvasWidth() : 1200);
                 List<String> rpErrs = validateEdgeRoutePoints(ed, fixedLayout);
                 exportErrors.addAll(rpErrs);
             }
@@ -984,12 +988,13 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
      */
     private Map<String, double[]> computeFixedStageLayout(
             Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap,
-            List<BsUnit> unitList, int canvasWidth) {
+            List<BsUnit> unitList,
+            List<DiagramConfigDTO.FlowEdgeDTO> edgeList,
+            int canvasWidth) {
         final int STAGE_MARGIN = 80;
         final int BASE_HEADER_Y = 55;
         final int BF_LANE_SP = 12;
         final int ROW_H = 90;
-        final int TOP_CHANNEL_BASE = 20;
 
         Map<Long, Integer> unitTypeMap = new HashMap<>();
         for (BsUnit u : unitList) {
@@ -1023,8 +1028,24 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
             visibleNodes.add(nd);
         }
 
-        // BODY_TOP depends on backflow lane count (simplified: use 0 if no backflow info)
-        int BODY_TOP = BASE_HEADER_Y + TOP_CHANNEL_BASE;
+        // Count backflow lanes (edges where source stage > target stage)
+        // Same algorithm as EnergyFlowConfigView and config.vue fixedStageLayout
+        Set<String> bfGroups = new HashSet<>();
+        for (DiagramConfigDTO.FlowEdgeDTO ed : edgeList) {
+            Integer eVis = ed.getVisible() != null ? ed.getVisible() : 1;
+            if (eVis == 0) continue;
+            Integer srcStage = nodeStageMap.get(ed.getSourceNodeId());
+            Integer tgtStage = nodeStageMap.get(ed.getTargetNodeId());
+            if (srcStage == null || tgtStage == null) continue;
+            if (srcStage <= tgtStage) continue;
+            Long iId = ed.getItemId();
+            String key = iId != null
+                    ? "bf-" + iId + "-" + ed.getSourceNodeId() + "-" + ed.getTargetNodeId()
+                    : "bf-" + ed.getEdgeId();
+            bfGroups.add(key);
+        }
+        int topChannelH = bfGroups.size() > 0 ? bfGroups.size() * BF_LANE_SP + 10 : 0;
+        int BODY_TOP = BASE_HEADER_Y + topChannelH + 20;
 
         double sw = (canvasWidth - STAGE_MARGIN * 2) / 4.0;
         double[] stageXArr = new double[4];

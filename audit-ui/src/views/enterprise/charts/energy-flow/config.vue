@@ -567,10 +567,10 @@ function handleNodeMouseDown(nodeId: string, event: MouseEvent) {
   const node = nodes.value.find(n => n.nodeId === nodeId)
   if (!node || node.locked) return
 
-  dragging.value = true
-  dragNodeId.value = nodeId
-  dragOffset.x = event.clientX - node.positionX
-  dragOffset.y = event.clientY - node.positionY
+  // Drag updates raw positions only (for persistence), but visual rendering
+  // uses fixed-stage positions so dragging has no visible effect.
+  // Drag is intentionally disabled: positions are determined by fixed-stage layout.
+  // Node click-to-select still works via selectedNodeId above.
 }
 
 function handleCanvasMouseMove(event: MouseEvent) {
@@ -1021,18 +1021,15 @@ function validateEditorRoutePoints(rpts: { x: number; y: number }[], s: { x: num
 // SVG edge path generation (canonical routing — matches final-effect renderer)
 // ============================================================
 function edgePath(edge: FlowEdgeConfig): string {
-  const src = nodes.value.find(n => n.nodeId === edge.sourceNodeId)
-  const dst = nodes.value.find(n => n.nodeId === edge.targetNodeId)
-  if (!src || !dst) return ''
+  // Use fixed-stage layout positions (same as final-effect renderer)
+  const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
+  const dstFixed = fixedStageLayout.value.get(edge.targetNodeId)
+  if (!srcFixed || !dstFixed) return ''
 
-  const srcW = src.width || 100
-  const srcH = src.height || 50
-  const dstH = dst.height || 50
-
-  const sx = src.positionX + srcW
-  const sy = src.positionY + srcH / 2
-  const tx = dst.positionX
-  const ty = dst.positionY + dstH / 2
+  const sx = srcFixed.cx + srcFixed.w / 2
+  const sy = srcFixed.cy
+  const tx = dstFixed.cx - dstFixed.w / 2
+  const ty = dstFixed.cy
 
   // Parse route points as constrained hints (same contract as final renderer)
   const rpts = parseEditorRoutePoints(edge)
@@ -1091,10 +1088,9 @@ const editorProductLines = computed<EditorProductLine[]>(() => {
   for (const e of edges.value) {
     if ((e.visible ?? 1) === 0) continue
     if (!isEditorProductEdge(e)) continue
-    const srcNode = nodes.value.find(n => n.nodeId === e.sourceNodeId)
-    if (!srcNode) continue
-    const srcW = srcNode.width || 100
-    const srcH = srcNode.height || 50
+    // Use fixed-stage layout positions for source node (same as final-effect renderer)
+    const srcFixed = fixedStageLayout.value.get(e.sourceNodeId)
+    if (!srcFixed) continue
     const rec = resolveEdgeRecord(e)
     const itemId = rec?.itemId ?? e.itemId
     const pr = itemId ? products.value.find(p => p.id === itemId) : undefined
@@ -1103,8 +1099,8 @@ const editorProductLines = computed<EditorProductLine[]>(() => {
     const unit = pr?.measurementUnit ?? ''
     const bottomText = pq != null ? `${pq} ${unit}` : ''
     results.push({
-      y: srcNode.positionY + srcH / 2,
-      x1: srcNode.positionX + srcW,
+      y: srcFixed.cy,
+      x1: srcFixed.cx + srcFixed.w / 2,
       topText,
       bottomText,
       edgeId: e.edgeId,
@@ -1179,17 +1175,19 @@ const fixedStageLayout = computed<Map<string, FixedStageNode>>(() => {
 })
 
 function edgeLabelPos(edge: FlowEdgeConfig): { x: number; y: number } {
-  const src = nodes.value.find(n => n.nodeId === edge.sourceNodeId)
-  const dst = nodes.value.find(n => n.nodeId === edge.targetNodeId)
-  if (!src || !dst) return { x: 0, y: 0 }
+  // Use fixed-stage layout positions (same as final-effect renderer)
+  const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
+  const dstFixed = fixedStageLayout.value.get(edge.targetNodeId)
+  if (!srcFixed || !dstFixed) return { x: 0, y: 0 }
 
-  const srcW = src.width || 100
-  const srcH = src.height || 50
-  const dstH = dst.height || 50
+  const sx = srcFixed.cx + srcFixed.w / 2
+  const sy = srcFixed.cy
+  const tx = dstFixed.cx - dstFixed.w / 2
+  const ty = dstFixed.cy
 
   return {
-    x: (src.positionX + srcW + dst.positionX) / 2,
-    y: (src.positionY + srcH / 2 + dst.positionY + dstH / 2) / 2 - 8,
+    x: (sx + tx) / 2,
+    y: (sy + ty) / 2 - 8,
   }
 }
 
@@ -1633,42 +1631,44 @@ function formatNum(n: number | null | undefined): string {
             </template>
           </g>
 
-          <!-- Nodes -->
+          <!-- Nodes (rendered at fixed-stage positions, same as final-effect renderer) -->
           <g class="nodes-layer">
             <template v-for="n in nodes" :key="n.nodeId">
               <g
-                v-if="(n.visible ?? 1) !== 0 && n.nodeType !== 'product_output'"
+                v-if="(n.visible ?? 1) !== 0 && n.nodeType !== 'product_output' && fixedStageLayout.get(n.nodeId)"
                 :class="{ 'node-selected': selectedNodeId === n.nodeId, 'node-locked': n.locked }"
-                style="cursor: move"
+                style="cursor: pointer"
                 @mousedown.stop="handleNodeMouseDown(n.nodeId, $event)"
               >
-                <!-- Energy input: circle -->
+                <!-- Energy input: circle (fixed-stage position) -->
                 <template v-if="n.nodeType === 'energy_input'">
                   <circle
-                    :cx="n.positionX + (n.width || 60) / 2"
-                    :cy="n.positionY + (n.height || 60) / 2"
-                    :r="(n.width || 60) / 2"
+                    :cx="fixedStageLayout.get(n.nodeId)!.cx"
+                    :cy="fixedStageLayout.get(n.nodeId)!.cy"
+                    :r="fixedStageLayout.get(n.nodeId)!.w / 2"
                     :stroke="nodeColor(n)"
                     stroke-width="2"
                     fill="#fff"
                   />
                   <text
-                    :x="n.positionX + (n.width || 60) / 2"
-                    :y="n.positionY + (n.height || 60) / 2 + 4"
+                    :x="fixedStageLayout.get(n.nodeId)!.cx"
+                    :y="fixedStageLayout.get(n.nodeId)!.cy + 4"
                     text-anchor="middle" font-size="11" :fill="nodeColor(n)"
                   >{{ n.label }}</text>
                 </template>
 
-                <!-- Unit / custom: rect -->
+                <!-- Unit / custom: rect (fixed-stage position) -->
                 <template v-else>
                   <rect
-                    :x="n.positionX" :y="n.positionY"
-                    :width="n.width || 100" :height="n.height || 50"
+                    :x="fixedStageLayout.get(n.nodeId)!.cx - fixedStageLayout.get(n.nodeId)!.w / 2"
+                    :y="fixedStageLayout.get(n.nodeId)!.cy - fixedStageLayout.get(n.nodeId)!.h / 2"
+                    :width="fixedStageLayout.get(n.nodeId)!.w"
+                    :height="fixedStageLayout.get(n.nodeId)!.h"
                     :stroke="nodeColor(n)" stroke-width="2" fill="#fff" rx="3"
                   />
                   <text
-                    :x="n.positionX + (n.width || 100) / 2"
-                    :y="n.positionY + (n.height || 50) / 2 + 4"
+                    :x="fixedStageLayout.get(n.nodeId)!.cx"
+                    :y="fixedStageLayout.get(n.nodeId)!.cy + 4"
                     text-anchor="middle" font-size="11" fill="#222"
                   >{{ n.label }}</text>
                 </template>

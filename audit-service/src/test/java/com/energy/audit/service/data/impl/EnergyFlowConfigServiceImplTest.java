@@ -3076,4 +3076,209 @@ class EnergyFlowConfigServiceImplTest {
         assertThat(result.getValidation().getExportErrors())
                 .noneMatch(e -> e.contains("routePoints"));
     }
+
+    @Test
+    void getConfigRoutePointValidationWithBackflowLaneYOffset() {
+        // When backflow edges exist, BODY_TOP shifts down due to top-channel expansion.
+        // Route points must be validated against the shifted Y coordinates.
+        // With 1 backflow lane: topChannelH = 1*12+10 = 22, BODY_TOP = 55+22+20 = 97
+        // cy = 97 + 0*90 + 45 = 142 (instead of 120 without backflow)
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(
+                unit(1L, "锅炉房", 1),    // unitType=1 → stage 1
+                unit(2L, "配电室", 2)     // unitType=2 → stage 2
+        ));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        // Two flow records: forward + backflow
+        DeEnergyFlow forwardFlow = new DeEnergyFlow();
+        forwardFlow.setId(100L);
+        forwardFlow.setSourceType("unit");
+        forwardFlow.setSourceRefId(1L);
+        forwardFlow.setTargetType("unit");
+        forwardFlow.setTargetRefId(2L);
+        forwardFlow.setItemType("energy");
+        forwardFlow.setItemId(1L);
+        forwardFlow.setPhysicalQuantity(new BigDecimal("100"));
+
+        DeEnergyFlow backFlow = new DeEnergyFlow();
+        backFlow.setId(101L);
+        backFlow.setSourceType("unit");
+        backFlow.setSourceRefId(2L);
+        backFlow.setTargetType("unit");
+        backFlow.setTargetRefId(1L);
+        backFlow.setItemType("energy");
+        backFlow.setItemId(1L);
+        backFlow.setPhysicalQuantity(new BigDecimal("20"));
+
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(forwardFlow, backFlow));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+        when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "配电室", 2));
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("test");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        // stage1 node and stage2 node
+        DeEnergyFlowNode node1 = new DeEnergyFlowNode();
+        node1.setNodeId("node-s1");
+        node1.setNodeType("unit");
+        node1.setRefType("unit");
+        node1.setRefId(1L);
+        node1.setPositionX(300.0);
+        node1.setPositionY(300.0);
+        node1.setWidth(100.0);
+        node1.setHeight(50.0);
+        node1.setVisible(1);
+
+        DeEnergyFlowNode node2 = new DeEnergyFlowNode();
+        node2.setNodeId("node-s2");
+        node2.setNodeType("unit");
+        node2.setRefType("unit");
+        node2.setRefId(2L);
+        node2.setPositionX(600.0);
+        node2.setPositionY(300.0);
+        node2.setWidth(100.0);
+        node2.setHeight(50.0);
+        node2.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(node1, node2));
+
+        // Forward edge (stage1→stage2) with route points using Y=142 (backflow-shifted cy)
+        // sw=(1200-160)/4=260; stage1 cx=80+260+130=470; stage2 cx=80+2*260+130=730
+        // With backflow: BODY_TOP=97, cy=97+45=142
+        // exit=(470+50,142)=(520,142), entry=(730-50,142)=(680,142)
+        DeEnergyFlowEdge fwdEdge = new DeEnergyFlowEdge();
+        fwdEdge.setEdgeId("edge-fwd");
+        fwdEdge.setSourceNodeId("node-s1");
+        fwdEdge.setTargetNodeId("node-s2");
+        fwdEdge.setFlowRecordId(100L);
+        fwdEdge.setItemId(1L);
+        fwdEdge.setVisible(1);
+        fwdEdge.setRoutePoints("[{\"x\":600,\"y\":142},{\"x\":600,\"y\":200},{\"x\":650,\"y\":200},{\"x\":650,\"y\":142}]");
+
+        // Backflow edge (stage2→stage1) — this triggers backflow lane counting
+        DeEnergyFlowEdge bfEdge = new DeEnergyFlowEdge();
+        bfEdge.setEdgeId("edge-bf");
+        bfEdge.setSourceNodeId("node-s2");
+        bfEdge.setTargetNodeId("node-s1");
+        bfEdge.setFlowRecordId(101L);
+        bfEdge.setItemId(1L);
+        bfEdge.setVisible(1);
+        // Backflow route points go above nodes (Y < topBound=142-25=117)
+        bfEdge.setRoutePoints("[{\"x\":780,\"y\":50},{\"x\":420,\"y\":50}]");
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(fwdEdge, bfEdge));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        // Route points should pass validation when using backflow-shifted coordinates
+        assertThat(result.getValidation().getExportErrors())
+                .noneMatch(e -> e.contains("routePoints") && e.contains("正交"));
+    }
+
+    @Test
+    void getConfigRoutePointValidationRejectsPointsValidOnlyAgainstNonBackflowLayout() {
+        // Route points valid against static BODY_TOP=75 (cy=120) but INVALID
+        // against dynamic BODY_TOP=97 (cy=142) when backflow lanes exist.
+        // This proves backend uses dynamic backflow-aware layout.
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(
+                unit(1L, "锅炉房", 1),
+                unit(2L, "配电室", 2)
+        ));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow forwardFlow = new DeEnergyFlow();
+        forwardFlow.setId(100L);
+        forwardFlow.setSourceType("unit");
+        forwardFlow.setSourceRefId(1L);
+        forwardFlow.setTargetType("unit");
+        forwardFlow.setTargetRefId(2L);
+        forwardFlow.setItemType("energy");
+        forwardFlow.setItemId(1L);
+        forwardFlow.setPhysicalQuantity(new BigDecimal("100"));
+
+        DeEnergyFlow backFlow = new DeEnergyFlow();
+        backFlow.setId(101L);
+        backFlow.setSourceType("unit");
+        backFlow.setSourceRefId(2L);
+        backFlow.setTargetType("unit");
+        backFlow.setTargetRefId(1L);
+        backFlow.setItemType("energy");
+        backFlow.setItemId(1L);
+        backFlow.setPhysicalQuantity(new BigDecimal("20"));
+
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(forwardFlow, backFlow));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+        when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "配电室", 2));
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("test");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        DeEnergyFlowNode node1 = new DeEnergyFlowNode();
+        node1.setNodeId("node-s1");
+        node1.setNodeType("unit");
+        node1.setRefType("unit");
+        node1.setRefId(1L);
+        node1.setPositionX(300.0);
+        node1.setPositionY(300.0);
+        node1.setWidth(100.0);
+        node1.setHeight(50.0);
+        node1.setVisible(1);
+
+        DeEnergyFlowNode node2 = new DeEnergyFlowNode();
+        node2.setNodeId("node-s2");
+        node2.setNodeType("unit");
+        node2.setRefType("unit");
+        node2.setRefId(2L);
+        node2.setPositionX(600.0);
+        node2.setPositionY(300.0);
+        node2.setWidth(100.0);
+        node2.setHeight(50.0);
+        node2.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(node1, node2));
+
+        // Forward edge route points use Y=120 (no-backflow cy), which is WRONG
+        // when backflow exists because actual cy=142
+        // exit=(520,142) but route point at (520,120) creates a diagonal to (600,120)→...
+        DeEnergyFlowEdge fwdEdge = new DeEnergyFlowEdge();
+        fwdEdge.setEdgeId("edge-fwd");
+        fwdEdge.setSourceNodeId("node-s1");
+        fwdEdge.setTargetNodeId("node-s2");
+        fwdEdge.setFlowRecordId(100L);
+        fwdEdge.setItemId(1L);
+        fwdEdge.setVisible(1);
+        // This route uses Y=120 (valid without backflow) but with backflow cy=142,
+        // the source exit is at (520,142), so segment (520,142)→(520,120) is vertical (ok),
+        // then (520,120)→(680,120) is horizontal (ok), then (680,120)→(680,142) is vertical (ok).
+        // Actually this IS valid orthogonally. Let me use a truly invalid path instead.
+        // Route point at (550,120): source exit (520,142)→(550,120) is diagonal (non-orthogonal).
+        fwdEdge.setRoutePoints("[{\"x\":550,\"y\":120}]");
+
+        DeEnergyFlowEdge bfEdge = new DeEnergyFlowEdge();
+        bfEdge.setEdgeId("edge-bf");
+        bfEdge.setSourceNodeId("node-s2");
+        bfEdge.setTargetNodeId("node-s1");
+        bfEdge.setFlowRecordId(101L);
+        bfEdge.setItemId(1L);
+        bfEdge.setVisible(1);
+        bfEdge.setRoutePoints("[{\"x\":780,\"y\":50},{\"x\":420,\"y\":50}]");
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(fwdEdge, bfEdge));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        // Should FAIL: route point (550,120) is diagonal from source exit (520,142)
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("edge-fwd") && e.contains("正交"));
+    }
 }
