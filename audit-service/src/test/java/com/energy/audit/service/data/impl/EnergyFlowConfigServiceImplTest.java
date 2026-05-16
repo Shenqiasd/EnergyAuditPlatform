@@ -391,7 +391,12 @@ class EnergyFlowConfigServiceImplTest {
             node.setLabel("锅炉房");
             node.setPositionX(100.0);
             node.setPositionY(200.0);
-            dc.setNodes(List.of(node));
+            DiagramConfigDTO.FlowNodeDTO node2 = new DiagramConfigDTO.FlowNodeDTO();
+            node2.setNodeId("node-2");
+            node2.setNodeType("energy_input");
+            node2.setPositionX(300.0);
+            node2.setPositionY(200.0);
+            dc.setNodes(List.of(node, node2));
 
             DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
             edge.setEdgeId("edge-1");
@@ -470,7 +475,17 @@ class EnergyFlowConfigServiceImplTest {
             dc.setName("绑定测试图");
             dc.setCanvasWidth(1200);
             dc.setCanvasHeight(800);
-            dc.setNodes(Collections.emptyList());
+            DiagramConfigDTO.FlowNodeDTO nodeN1 = new DiagramConfigDTO.FlowNodeDTO();
+            nodeN1.setNodeId("n1");
+            nodeN1.setNodeType("energy_input");
+            nodeN1.setPositionX(100.0);
+            nodeN1.setPositionY(100.0);
+            DiagramConfigDTO.FlowNodeDTO nodeN2 = new DiagramConfigDTO.FlowNodeDTO();
+            nodeN2.setNodeId("n2");
+            nodeN2.setNodeType("unit");
+            nodeN2.setPositionX(300.0);
+            nodeN2.setPositionY(100.0);
+            dc.setNodes(List.of(nodeN1, nodeN2));
 
             DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
             edge.setEdgeId("edge-binding");
@@ -595,7 +610,17 @@ class EnergyFlowConfigServiceImplTest {
             dc.setName("idx resolve test");
             dc.setCanvasWidth(1200);
             dc.setCanvasHeight(800);
-            dc.setNodes(Collections.emptyList());
+            DiagramConfigDTO.FlowNodeDTO nodeN1 = new DiagramConfigDTO.FlowNodeDTO();
+            nodeN1.setNodeId("n1");
+            nodeN1.setNodeType("energy_input");
+            nodeN1.setPositionX(100.0);
+            nodeN1.setPositionY(100.0);
+            DiagramConfigDTO.FlowNodeDTO nodeN2 = new DiagramConfigDTO.FlowNodeDTO();
+            nodeN2.setNodeId("n2");
+            nodeN2.setNodeType("unit");
+            nodeN2.setPositionX(300.0);
+            nodeN2.setPositionY(100.0);
+            dc.setNodes(List.of(nodeN1, nodeN2));
 
             DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
             edge.setEdgeId("edge-idx");
