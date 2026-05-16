@@ -186,3 +186,12 @@ export function findAnchorRow(
   }
   return -1
 }
+
+export function isSpreadCalcErrorValue(value: unknown): boolean {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  const marker = record._calcError ?? record._error ?? record.error
+  if (typeof marker === 'string' && marker.startsWith('#')) return true
+  const code = record._code ?? record.code
+  return typeof code === 'number' && String(value).startsWith('#')
+}

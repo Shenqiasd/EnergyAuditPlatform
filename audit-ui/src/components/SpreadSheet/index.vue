@@ -25,6 +25,7 @@ import {
   computeRowDelta,
   generateOps,
   findAnchorRow,
+  isSpreadCalcErrorValue,
   SHEET14_PRODUCT_AREA_START,
 } from '@/utils/sheet14-product-split'
 
@@ -900,7 +901,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isCalcErrorValue(value: unknown): boolean {
-  return isRecord(value) && typeof value._calcError === 'string'
+  return isSpreadCalcErrorValue(value)
 }
 
 /** Column definition type for CONFIG_PREFILL mappings */
