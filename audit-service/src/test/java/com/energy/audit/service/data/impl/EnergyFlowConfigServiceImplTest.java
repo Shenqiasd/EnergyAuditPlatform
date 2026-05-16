@@ -412,7 +412,7 @@ class EnergyFlowConfigServiceImplTest {
             service.saveConfig(ENT_ID, YEAR, dto);
 
             verify(diagramMapper).insert(any(DeEnergyFlowDiagram.class));
-            verify(nodeMapper).insert(any(DeEnergyFlowNode.class));
+            verify(nodeMapper, times(2)).insert(any(DeEnergyFlowNode.class));
             verify(edgeMapper).insert(any(DeEnergyFlowEdge.class));
         } finally {
             com.energy.audit.common.util.SecurityUtils.clear();
