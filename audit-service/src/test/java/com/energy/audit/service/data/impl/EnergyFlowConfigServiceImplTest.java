@@ -2909,8 +2909,9 @@ class EnergyFlowConfigServiceImplTest {
         edge.setTargetNodeId("node-tgt");
         edge.setFlowRecordId(100L);
         edge.setVisible(1);
-        // Route point at (300, 225) is inside midNode (250-350, 200-250)
-        edge.setRoutePoints("[{\"x\":200,\"y\":225},{\"x\":300,\"y\":225}]");
+        // Fixed-stage layout: node-src(energy_input)→stage0 cx=210,cy=120,w=60; node-mid(unit,ut=1)→stage1 cx=470,cy=120,w=100; node-tgt(unit,ut=3)→stage3 cx=990,cy=120,w=100
+        // Source exit: (240,120), target entry: (940,120). Route point at (470,120) is inside node-mid [420-520, 95-145]
+        edge.setRoutePoints("[{\"x\":240,\"y\":120},{\"x\":470,\"y\":120}]");
         when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
 
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
@@ -2988,21 +2989,90 @@ class EnergyFlowConfigServiceImplTest {
 
     @Test
     void getConfigExportBlockedWhenForwardRoutePointsTrunkIncompatible() {
-        // Forward edge: route point X far outside source-exit..target-entry range
-        // Source exit X = 200 (100+100), target entry X = 400
-        // Route point at x=800 is outside [195, 405] → trunk-incompatible
-        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":200,\"y\":225},{\"x\":200,\"y\":100},{\"x\":800,\"y\":100},{\"x\":800,\"y\":225}]");
+        // Fixed-stage: src(energy_input)→stage0 exit=(240,120); tgt(unit,ut=3)→stage3 entry=(940,120)
+        // Route point at x=2000 is far outside [235, 945] → trunk-incompatible
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":240,\"y\":120},{\"x\":240,\"y\":50},{\"x\":2000,\"y\":50},{\"x\":2000,\"y\":120}]");
         assertThat(result.getValidation().isExportReady()).isFalse();
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(e -> e.contains("routePoints") && e.contains("超出有效路由范围"));
+                .anyMatch(e -> e.contains("routePoints") && e.contains("超出固定布局有效路由范围"));
     }
 
     @Test
     void getConfigExportPassesWhenRoutePointsValidOrthogonal() {
-        // Valid orthogonal route points within source-exit..target-entry range
-        // Source exit X = 200 (100+100), target entry X = 400
-        // Route points at x=250 (between source exit and target entry) are valid
-        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":250,\"y\":225},{\"x\":250,\"y\":300},{\"x\":350,\"y\":300},{\"x\":350,\"y\":225}]");
+        // Fixed-stage: src(energy_input)→stage0 exit=(240,120); tgt(unit,ut=3)→stage3 entry=(940,120)
+        // Route points form valid orthogonal path within [235, 945] range
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":500,\"y\":120},{\"x\":500,\"y\":200},{\"x\":800,\"y\":200},{\"x\":800,\"y\":120}]");
+        assertThat(result.getValidation().getExportErrors())
+                .noneMatch(e -> e.contains("routePoints"));
+    }
+
+    @Test
+    void getConfigRoutePointValidationUsesFixedStageNotRawPositions() {
+        // Verify that route-point validation uses fixed-stage layout coordinates,
+        // NOT raw positionX/positionY. Nodes have raw positions that differ from
+        // their fixed-stage positions. Route points valid against fixed-stage
+        // but invalid against raw positions should PASS.
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setId(100L);
+        flow.setSourceType("external_energy");
+        flow.setTargetType("unit");
+        flow.setTargetRefId(1L);
+        flow.setItemType("energy");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("test");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        // Raw positions are very different from fixed-stage positions:
+        // energy_input → stage0: fixed cx=210,cy=120,w=60 (exit=240,120)
+        // unit(ut=3)  → stage3: fixed cx=990,cy=120,w=100 (entry=940,120)
+        DeEnergyFlowNode srcNode = new DeEnergyFlowNode();
+        srcNode.setNodeId("node-src");
+        srcNode.setNodeType("energy_input");
+        srcNode.setRefType("energy");
+        srcNode.setRefId(1L);
+        srcNode.setPositionX(50.0);  // Raw X differs from fixed cx=210
+        srcNode.setPositionY(400.0); // Raw Y differs from fixed cy=120
+        srcNode.setWidth(60.0);
+        srcNode.setHeight(60.0);
+        srcNode.setVisible(1);
+        DeEnergyFlowNode tgtNode = new DeEnergyFlowNode();
+        tgtNode.setNodeId("node-tgt");
+        tgtNode.setNodeType("unit");
+        tgtNode.setRefType("unit");
+        tgtNode.setRefId(1L);
+        tgtNode.setPositionX(800.0);  // Raw X differs from fixed cx=990
+        tgtNode.setPositionY(400.0);  // Raw Y differs from fixed cy=120
+        tgtNode.setWidth(100.0);
+        tgtNode.setHeight(50.0);
+        tgtNode.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgtNode));
+
+        // Route points valid against fixed-stage exit=(240,120) → entry=(940,120)
+        DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
+        edge.setEdgeId("edge-fixed");
+        edge.setSourceNodeId("node-src");
+        edge.setTargetNodeId("node-tgt");
+        edge.setFlowRecordId(100L);
+        edge.setVisible(1);
+        edge.setRoutePoints("[{\"x\":500,\"y\":120},{\"x\":500,\"y\":200},{\"x\":700,\"y\":200},{\"x\":700,\"y\":120}]");
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        // Should pass: route points are valid against fixed-stage coordinates
         assertThat(result.getValidation().getExportErrors())
                 .noneMatch(e -> e.contains("routePoints"));
     }

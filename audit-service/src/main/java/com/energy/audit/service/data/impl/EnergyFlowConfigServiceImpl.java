@@ -391,8 +391,10 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                         }
                     }
                 }
-                // Validate routePoints (malformed JSON, non-orthogonal, out-of-canvas, node crossing)
-                List<String> rpErrs = validateEdgeRoutePoints(ed, getNodeMap);
+                // Validate routePoints against fixed-stage layout positions (same as final-effect renderer)
+                Map<String, double[]> fixedLayout = computeFixedStageLayout(getNodeMap, unitList,
+                        diagram.getCanvasWidth() != null ? diagram.getCanvasWidth() : 1200);
+                List<String> rpErrs = validateEdgeRoutePoints(ed, fixedLayout);
                 exportErrors.addAll(rpErrs);
             }
         }
@@ -976,11 +978,88 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
     }
 
     /**
-     * Validate route points on an edge: malformed JSON, typed-invalid, non-orthogonal,
-     * out-of-canvas, node crossing. Returns list of export errors (empty if valid or absent).
+     * Compute fixed-stage layout positions for all visible non-product-output nodes.
+     * Uses the same algorithm as the final-effect renderer (EnergyFlowConfigView).
+     * Returns map of nodeId -> [cx, cy, w, h] in fixed-stage coordinates.
+     */
+    private Map<String, double[]> computeFixedStageLayout(
+            Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap,
+            List<BsUnit> unitList, int canvasWidth) {
+        final int STAGE_MARGIN = 80;
+        final int BASE_HEADER_Y = 55;
+        final int BF_LANE_SP = 12;
+        final int ROW_H = 90;
+        final int TOP_CHANNEL_BASE = 20;
+
+        Map<Long, Integer> unitTypeMap = new HashMap<>();
+        for (BsUnit u : unitList) {
+            if (u.getId() != null && u.getUnitType() != null) {
+                unitTypeMap.put(u.getId(), u.getUnitType());
+            }
+        }
+
+        // Determine stage for each node
+        Map<String, Integer> nodeStageMap = new HashMap<>();
+        List<DiagramConfigDTO.FlowNodeDTO> visibleNodes = new ArrayList<>();
+        for (DiagramConfigDTO.FlowNodeDTO nd : nodeMap.values()) {
+            if (nd.getNodeId() == null) continue;
+            Integer vis = nd.getVisible() != null ? nd.getVisible() : 1;
+            if (vis == 0) continue;
+            if ("product_output".equals(nd.getNodeType())) continue;
+            int stage;
+            if ("energy_input".equals(nd.getNodeType())) {
+                stage = 0;
+            } else if ("unit".equals(nd.getNodeType()) && nd.getRefId() != null) {
+                Integer ut = unitTypeMap.get(nd.getRefId());
+                if (ut != null) {
+                    stage = (ut == 1) ? 1 : (ut == 2) ? 2 : (ut == 3) ? 3 : 2;
+                } else {
+                    stage = 2;
+                }
+            } else {
+                stage = 2;
+            }
+            nodeStageMap.put(nd.getNodeId(), stage);
+            visibleNodes.add(nd);
+        }
+
+        // BODY_TOP depends on backflow lane count (simplified: use 0 if no backflow info)
+        int BODY_TOP = BASE_HEADER_Y + TOP_CHANNEL_BASE;
+
+        double sw = (canvasWidth - STAGE_MARGIN * 2) / 4.0;
+        double[] stageXArr = new double[4];
+        for (int i = 0; i < 4; i++) stageXArr[i] = STAGE_MARGIN + i * sw;
+
+        // Bucket by stage
+        Map<Integer, List<DiagramConfigDTO.FlowNodeDTO>> buckets = new HashMap<>();
+        for (DiagramConfigDTO.FlowNodeDTO nd : visibleNodes) {
+            int s = nodeStageMap.getOrDefault(nd.getNodeId(), 2);
+            buckets.computeIfAbsent(s, k -> new ArrayList<>()).add(nd);
+        }
+
+        Map<String, double[]> result = new HashMap<>();
+        for (Map.Entry<Integer, List<DiagramConfigDTO.FlowNodeDTO>> entry : buckets.entrySet()) {
+            int stage = entry.getKey();
+            List<DiagramConfigDTO.FlowNodeDTO> nodes = entry.getValue();
+            for (int rowIdx = 0; rowIdx < nodes.size(); rowIdx++) {
+                DiagramConfigDTO.FlowNodeDTO nd = nodes.get(rowIdx);
+                boolean isCircle = "energy_input".equals(nd.getNodeType());
+                double w = isCircle ? 60 : 100;
+                double h = isCircle ? 60 : 50;
+                double cx = stageXArr[stage] + sw / 2;
+                double cy = BODY_TOP + rowIdx * ROW_H + ROW_H / 2.0;
+                result.put(nd.getNodeId(), new double[]{cx, cy, w, h});
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Validate route points on an edge using fixed-stage layout coordinates.
+     * fixedLayout maps nodeId -> [cx, cy, w, h] from computeFixedStageLayout().
      */
     private List<String> validateEdgeRoutePoints(DiagramConfigDTO.FlowEdgeDTO ed,
-                                                  Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap) {
+                                                  Map<String, double[]> fixedLayout) {
         List<String> errors = new ArrayList<>();
         String rp = ed.getRoutePoints();
         if (rp == null || rp.isBlank()) return errors;
@@ -1023,19 +1102,17 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
             coords.add(new double[]{x, y});
         }
 
-        // Check orthogonality: build full path with approximate source/target endpoints
-        DiagramConfigDTO.FlowNodeDTO srcNode = nodeMap.get(ed.getSourceNodeId());
-        DiagramConfigDTO.FlowNodeDTO tgtNode = nodeMap.get(ed.getTargetNodeId());
-        if (srcNode != null && tgtNode != null) {
-            double sx = (srcNode.getPositionX() != null ? srcNode.getPositionX() : 0)
-                    + (srcNode.getWidth() != null ? srcNode.getWidth() : 100);
-            double sy = (srcNode.getPositionY() != null ? srcNode.getPositionY() : 0)
-                    + (srcNode.getHeight() != null ? srcNode.getHeight() : 50) / 2.0;
-            double tx = tgtNode.getPositionX() != null ? tgtNode.getPositionX() : 0;
-            double ty = (tgtNode.getPositionY() != null ? tgtNode.getPositionY() : 0)
-                    + (tgtNode.getHeight() != null ? tgtNode.getHeight() : 50) / 2.0;
+        // Use fixed-stage layout positions for source/target endpoints
+        double[] srcFixed = fixedLayout.get(ed.getSourceNodeId());
+        double[] tgtFixed = fixedLayout.get(ed.getTargetNodeId());
+        if (srcFixed != null && tgtFixed != null) {
+            // srcFixed = [cx, cy, w, h]; exit = cx + w/2, cy
+            double sx = srcFixed[0] + srcFixed[2] / 2;
+            double sy = srcFixed[1];
+            double tx = tgtFixed[0] - tgtFixed[2] / 2;
+            double ty = tgtFixed[1];
 
-            // Build full path: [source, ...routePoints, target]
+            // Build full path: [source exit, ...routePoints, target entry]
             List<double[]> full = new ArrayList<>();
             full.add(new double[]{sx, sy});
             full.addAll(coords);
@@ -1050,48 +1127,44 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
 
-            // Check node crossing: route points inside other nodes
-            for (DiagramConfigDTO.FlowNodeDTO nd : nodeMap.values()) {
-                if (nd.getNodeId() == null) continue;
-                if (nd.getNodeId().equals(ed.getSourceNodeId()) || nd.getNodeId().equals(ed.getTargetNodeId())) continue;
-                double nx = nd.getPositionX() != null ? nd.getPositionX() : 0;
-                double ny = nd.getPositionY() != null ? nd.getPositionY() : 0;
-                double nw = nd.getWidth() != null ? nd.getWidth() : 100;
-                double nh = nd.getHeight() != null ? nd.getHeight() : 50;
+            // Check node crossing against fixed-stage positions
+            for (Map.Entry<String, double[]> fEntry : fixedLayout.entrySet()) {
+                String nid = fEntry.getKey();
+                if (nid.equals(ed.getSourceNodeId()) || nid.equals(ed.getTargetNodeId())) continue;
+                double[] fsn = fEntry.getValue();
+                double nx = fsn[0] - fsn[2] / 2;
+                double ny = fsn[1] - fsn[3] / 2;
+                double nw = fsn[2];
+                double nh = fsn[3];
                 for (int i = 0; i < coords.size(); i++) {
                     double[] c = coords.get(i);
                     if (c[0] > nx && c[0] < nx + nw && c[1] > ny && c[1] < ny + nh) {
                         errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints["
-                                + i + "]穿过节点[" + nd.getNodeId() + "]");
+                                + i + "]穿过节点[" + nid + "]");
                         break;
                     }
                 }
             }
 
-            // Check backflow top-channel bypass: if source is right of target, points must go above both
+            // Check backflow top-channel bypass using fixed-stage positions
             if (sx > tx) {
-                double minNodeY = Math.min(sy, ty);
+                double topBound = Math.min(srcFixed[1] - srcFixed[3] / 2, tgtFixed[1] - tgtFixed[3] / 2);
                 boolean hasTopPoint = false;
                 for (double[] c : coords) {
-                    if (c[1] < minNodeY) { hasTopPoint = true; break; }
+                    if (c[1] < topBound) { hasTopPoint = true; break; }
                 }
                 if (!hasTopPoint) {
                     errors.add("回流连线 [" + ed.getEdgeId() + "] 的routePoints未经过顶部回流通道");
                 }
             }
 
-            // Check forward trunk compatibility: for forward edges (source left of target),
-            // route point X hints must be within ±30px of the source exit X to be accepted
-            // as valid trunk hints by the canonical router.
+            // Check forward trunk compatibility against fixed-stage positions
             if (sx < tx) {
-                double srcExitX = sx;
                 for (int i = 0; i < coords.size(); i++) {
                     double px = coords.get(i)[0];
-                    // Route point X values far from source-exit or target-entry range are
-                    // trunk-incompatible and will be ignored by the canonical router
-                    if (px < srcExitX - 5 || px > tx + 5) {
+                    if (px < sx - 5 || px > tx + 5) {
                         errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
-                                + "]的X坐标(" + px + ")超出有效路由范围，"
+                                + "]的X坐标(" + px + ")超出固定布局有效路由范围，"
                                 + "将被最终渲染器忽略");
                     }
                 }

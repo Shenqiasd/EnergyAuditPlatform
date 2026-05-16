@@ -54,6 +54,9 @@ const showRecordDialog = ref(false)
 const creatingEdge = ref(false)
 const edgeSourceNodeId = ref<string | null>(null)
 
+// Final-effect preview toggle
+const showFinalPreview = ref(false)
+
 // Mode B pending edge (source/target node IDs waiting for dialog confirm)
 const pendingEdgeSrcNodeId = ref<string | null>(null)
 const pendingEdgeTgtNodeId = ref<string | null>(null)
@@ -130,14 +133,21 @@ const NODE_COLORS: Record<string, string> = {
   product_output: '#27AE60',
   custom: '#95A5A6',
 }
-const EDGE_COLORS = ['#E74C3C', '#3498DB', '#27AE60', '#F39C12', '#9B59B6', '#1ABC9C', '#E67E22']
+const EDGE_COLORS = ['#E74C3C', '#3498DB', '#27AE60', '#F39C12', '#9B59B6', '#1ABC9C', '#E67E22', '#000']
 
 function nodeColor(n: FlowNodeConfig): string {
   return n.color || NODE_COLORS[n.nodeType] || '#666'
 }
 
 function edgeColor(e: FlowEdgeConfig, idx: number): string {
+  if (isEditorProductEdge(e)) return '#000'
   return e.color || EDGE_COLORS[idx % EDGE_COLORS.length]
+}
+
+function isEditorProductEdge(e: FlowEdgeConfig): boolean {
+  const rec = resolveEdgeRecord(e)
+  if (rec) return rec.itemType === 'product'
+  return e.itemType === 'product'
 }
 
 // ============================================================
@@ -1074,6 +1084,103 @@ function edgePath(edge: FlowEdgeConfig): string {
   return `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`
 }
 
+// ============================================================
+// Product output lines (editor renders same as final-effect renderer:
+// black horizontal line from source unit exit to right boundary)
+// ============================================================
+interface EditorProductLine { y: number; x1: number; topText: string; bottomText: string; edgeId: string }
+const editorProductLines = computed<EditorProductLine[]>(() => {
+  const results: EditorProductLine[] = []
+  for (const e of edges.value) {
+    if ((e.visible ?? 1) === 0) continue
+    if (!isEditorProductEdge(e)) continue
+    const srcNode = nodes.value.find(n => n.nodeId === e.sourceNodeId)
+    if (!srcNode) continue
+    const srcW = srcNode.width || 100
+    const srcH = srcNode.height || 50
+    const rec = resolveEdgeRecord(e)
+    const itemId = rec?.itemId ?? e.itemId
+    const pr = itemId ? products.value.find(p => p.id === itemId) : undefined
+    const topText = pr?.name ?? ''
+    const pq = rec?.physicalQuantity ?? e.physicalQuantity
+    const unit = pr?.measurementUnit ?? ''
+    const bottomText = pq != null ? `${pq} ${unit}` : ''
+    results.push({
+      y: srcNode.positionY + srcH / 2,
+      x1: srcNode.positionX + srcW,
+      topText,
+      bottomText,
+      edgeId: e.edgeId,
+    })
+  }
+  return results
+})
+
+// ============================================================
+// Fixed-stage layout computation (same algorithm as EnergyFlowConfigView)
+// Used for route-point validation to match final-effect renderer positions
+// ============================================================
+function editorNodeStage(n: FlowNodeConfig): number {
+  if (n.nodeType === 'energy_input') return 0
+  if (n.nodeType === 'product_output') return 3
+  if (n.nodeType === 'unit' && n.refId) {
+    const u = units.value.find(uu => uu.id === n.refId)
+    if (u) {
+      if (u.unitType === 1) return 1
+      if (u.unitType === 2) return 2
+      if (u.unitType === 3) return 3
+    }
+  }
+  return 2
+}
+
+interface FixedStageNode { nodeId: string; stage: number; cx: number; cy: number; w: number; h: number }
+const fixedStageLayout = computed<Map<string, FixedStageNode>>(() => {
+  const STAGE_MARGIN = 80
+  const BASE_HEADER_Y = 55
+  const BF_LANE_SP = 12
+  const ROW_H = 90
+
+  const visible = nodes.value.filter(n => (n.visible ?? 1) !== 0 && n.nodeType !== 'product_output')
+
+  // Count backflow lanes for top channel height
+  const bfGroups = new Set<string>()
+  for (const e of edges.value.filter(ee => (ee.visible ?? 1) !== 0)) {
+    const src = visible.find(n => n.nodeId === e.sourceNodeId)
+    const tgt = visible.find(n => n.nodeId === e.targetNodeId)
+    if (!src || !tgt) continue
+    if (editorNodeStage(src) <= editorNodeStage(tgt)) continue
+    const rec = resolveEdgeRecord(e)
+    const iId = rec?.itemId ?? e.itemId
+    bfGroups.add(iId ? `bf-${iId}-${e.sourceNodeId}-${e.targetNodeId}` : `bf-${e.edgeId}`)
+  }
+  const topChannelH = bfGroups.size > 0 ? bfGroups.size * BF_LANE_SP + 10 : 0
+  const BODY_TOP = BASE_HEADER_Y + topChannelH + 20
+
+  const sw = (canvasWidth.value - STAGE_MARGIN * 2) / 4
+  const stageXArr = [0, 1, 2, 3].map(i => STAGE_MARGIN + i * sw)
+
+  const buckets = new Map<number, FlowNodeConfig[]>()
+  for (const n of visible) {
+    const s = editorNodeStage(n)
+    if (!buckets.has(s)) buckets.set(s, [])
+    buckets.get(s)!.push(n)
+  }
+
+  const m = new Map<string, FixedStageNode>()
+  for (const [stage, stageNodes] of buckets) {
+    stageNodes.forEach((n, rowIdx) => {
+      const isCircle = n.nodeType === 'energy_input'
+      const w = isCircle ? 60 : 100
+      const h = isCircle ? 60 : 50
+      const cx = stageXArr[stage] + sw / 2
+      const cy = BODY_TOP + rowIdx * ROW_H + ROW_H / 2
+      m.set(n.nodeId, { nodeId: n.nodeId, stage, cx, cy, w, h })
+    })
+  }
+  return m
+})
+
 function edgeLabelPos(edge: FlowEdgeConfig): { x: number; y: number } {
   const src = nodes.value.find(n => n.nodeId === edge.sourceNodeId)
   const dst = nodes.value.find(n => n.nodeId === edge.targetNodeId)
@@ -1231,21 +1338,18 @@ function computeLocalExportErrors(): string[] {
         }
       }
     }
-    // Validate route points: orthogonal, in-canvas, and canonical-routing compliance
+    // Validate route points against fixed-stage layout positions (same as final-effect renderer)
     if (e.routePoints && e.sourceNodeId && e.targetNodeId) {
-      const srcNode = nodeByIdMap.get(e.sourceNodeId)
-      const dstNode = nodeByIdMap.get(e.targetNodeId)
-      if (srcNode && dstNode) {
+      const srcFixed = fixedStageLayout.value.get(e.sourceNodeId)
+      const dstFixed = fixedStageLayout.value.get(e.targetNodeId)
+      if (srcFixed && dstFixed) {
         try {
           const rpts = JSON.parse(e.routePoints) as { x: number; y: number }[]
           if (Array.isArray(rpts) && rpts.length > 0) {
-            const srcW = srcNode.width || 100
-            const srcHH = (srcNode.height || 50) / 2
-            const dstHH = (dstNode.height || 50) / 2
-            const sx = srcNode.positionX + srcW
-            const sy = srcNode.positionY + srcHH
-            const tx = dstNode.positionX
-            const ty = dstNode.positionY + dstHH
+            const sx = srcFixed.cx + srcFixed.w / 2
+            const sy = srcFixed.cy
+            const tx = dstFixed.cx - dstFixed.w / 2
+            const ty = dstFixed.cy
             const full = [{ x: sx, y: sy }, ...rpts, { x: tx, y: ty }]
             for (let i = 0; i < full.length - 1; i++) {
               const a = full[i], b = full[i + 1]
@@ -1260,27 +1364,33 @@ function computeLocalExportErrors(): string[] {
                 break
               }
             }
-            // Check node-crossing: route segments should not pass through other nodes
-            for (const [, nd] of nodeByIdMap) {
-              if (nd.nodeId === e.sourceNodeId || nd.nodeId === e.targetNodeId) continue
-              const nx = nd.positionX, ny = nd.positionY
-              const nw = nd.width || 100, nh = nd.height || 50
+            // Check node-crossing against fixed-stage positions
+            for (const [nid, fsn] of fixedStageLayout.value) {
+              if (nid === e.sourceNodeId || nid === e.targetNodeId) continue
+              const nx = fsn.cx - fsn.w / 2, ny = fsn.cy - fsn.h / 2
+              const nw = fsn.w, nh = fsn.h
               for (const p of rpts) {
                 if (p.x > nx && p.x < nx + nw && p.y > ny && p.y < ny + nh) {
-                  errors.push(`连线 [${e.edgeId}] 的路由点穿过节点 [${nd.nodeId}]，请调整路由点避免节点交叉`)
+                  errors.push(`连线 [${e.edgeId}] 的路由点穿过节点 [${nid}]，请调整路由点避免节点交叉`)
                   break
                 }
               }
             }
-            // Backflow edges: route points must pass through top channel region
-            const isBack = srcNode.positionX > dstNode.positionX
-            if (isBack) {
+            // Backflow edges: use fixed-stage positions for top channel check
+            if (sx > tx) {
               const minY = Math.min(...rpts.map(p => p.y))
-              const srcTopY = srcNode.positionY
-              const dstTopY = dstNode.positionY
-              const topBound = Math.min(srcTopY, dstTopY)
+              const topBound = Math.min(srcFixed.cy - srcFixed.h / 2, dstFixed.cy - dstFixed.h / 2)
               if (minY >= topBound) {
                 errors.push(`回流连线 [${e.edgeId}] 的路由点未经过顶部通道，请编辑路由点使其经过顶部回流通道`)
+              }
+            }
+            // Forward trunk compatibility check against fixed-stage positions
+            if (sx < tx) {
+              for (let i = 0; i < rpts.length; i++) {
+                const px = rpts[i].x
+                if (px < sx - 5 || px > tx + 5) {
+                  errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})超出固定布局有效路由范围，将被最终渲染器忽略`)
+                }
               }
             }
           }
@@ -1484,11 +1594,11 @@ function formatNum(n: number | null | undefined): string {
             </marker>
           </defs>
 
-          <!-- Edges -->
+          <!-- Edges (skip product edges — rendered as product output lines below) -->
           <g class="edges-layer">
             <template v-for="(e, ei) in edges" :key="e.edgeId">
               <path
-                v-if="(e.visible ?? 1) !== 0"
+                v-if="(e.visible ?? 1) !== 0 && !isEditorProductEdge(e)"
                 :d="edgePath(e)"
                 :stroke="edgeColor(e, ei)"
                 :stroke-width="e.lineWidth || 2"
@@ -1499,7 +1609,7 @@ function formatNum(n: number | null | undefined): string {
                 @click.stop="handleEdgeClick(e.edgeId, $event)"
               />
               <text
-                v-if="(e.visible ?? 1) !== 0 && e.labelText"
+                v-if="(e.visible ?? 1) !== 0 && !isEditorProductEdge(e) && e.labelText"
                 :x="edgeLabelPos(e).x"
                 :y="edgeLabelPos(e).y"
                 text-anchor="middle"
@@ -1510,11 +1620,27 @@ function formatNum(n: number | null | undefined): string {
             </template>
           </g>
 
+          <!-- Product output lines: black horizontal to right boundary (matches final-effect renderer) -->
+          <g class="product-lines-layer">
+            <template v-for="pl in editorProductLines" :key="pl.edgeId">
+              <line :x1="pl.x1" :y1="pl.y" :x2="canvasWidth - 20" :y2="pl.y" stroke="#000" stroke-width="2" />
+              <text
+                :x="(pl.x1 + canvasWidth - 20) / 2" :y="pl.y - 6"
+                text-anchor="middle" font-size="10" fill="#000"
+              >{{ pl.topText }}</text>
+              <text
+                v-if="pl.bottomText"
+                :x="(pl.x1 + canvasWidth - 20) / 2" :y="pl.y + 14"
+                text-anchor="middle" font-size="10" fill="#666"
+              >{{ pl.bottomText }}</text>
+            </template>
+          </g>
+
           <!-- Nodes -->
           <g class="nodes-layer">
             <template v-for="n in nodes" :key="n.nodeId">
               <g
-                v-if="(n.visible ?? 1) !== 0"
+                v-if="(n.visible ?? 1) !== 0 && n.nodeType !== 'product_output'"
                 :class="{ 'node-selected': selectedNodeId === n.nodeId, 'node-locked': n.locked }"
                 style="cursor: move"
                 @mousedown.stop="handleNodeMouseDown(n.nodeId, $event)"
@@ -1533,20 +1659,6 @@ function formatNum(n: number | null | undefined): string {
                     :x="n.positionX + (n.width || 60) / 2"
                     :y="n.positionY + (n.height || 60) / 2 + 4"
                     text-anchor="middle" font-size="11" :fill="nodeColor(n)"
-                  >{{ n.label }}</text>
-                </template>
-
-                <!-- Product output: rounded rect -->
-                <template v-else-if="n.nodeType === 'product_output'">
-                  <rect
-                    :x="n.positionX" :y="n.positionY"
-                    :width="n.width || 100" :height="n.height || 50"
-                    :stroke="nodeColor(n)" stroke-width="2" fill="#f0fff0" rx="8"
-                  />
-                  <text
-                    :x="n.positionX + (n.width || 100) / 2"
-                    :y="n.positionY + (n.height || 50) / 2 + 4"
-                    text-anchor="middle" font-size="11" fill="#222"
                   >{{ n.label }}</text>
                 </template>
 
@@ -1574,8 +1686,8 @@ function formatNum(n: number | null | undefined): string {
             <text x="32" y="19" font-size="10" fill="#333">能源输入</text>
             <rect x="90" y="9" width="12" height="12" fill="#fff" stroke="#3498DB" rx="2" />
             <text x="108" y="19" font-size="10" fill="#333">用能单元</text>
-            <rect x="8" y="29" width="12" height="12" fill="#f0fff0" stroke="#27AE60" rx="4" />
-            <text x="26" y="39" font-size="10" fill="#333">产品产出</text>
+            <line x1="8" y1="35" x2="28" y2="35" stroke="#000" stroke-width="2" />
+            <text x="34" y="39" font-size="10" fill="#333">产品产出</text>
             <line x1="90" y1="35" x2="120" y2="35" stroke="#F39C12" stroke-width="2" />
             <text x="126" y="39" font-size="10" fill="#333">能源流向</text>
           </g>
