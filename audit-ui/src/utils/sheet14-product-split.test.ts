@@ -7,6 +7,7 @@ import {
   computeRowDelta,
   generateOps,
   findAnchorRow,
+  isSpreadCalcErrorValue,
   SHEET12_TAG_MAX_ROWS,
   SHEET14_PRODUCT_AREA_START,
   type ProductRecord,
@@ -160,6 +161,27 @@ describe('resolveProductNameFromIndicator', () => {
   it('keeps the entered product prefix before common indicator suffixes', () => {
     expect(resolveProductNameFromIndicator('EA052RT-产品B单位产量综合能耗', 2)).toBe('EA052RT-产品B')
     expect(resolveProductNameFromIndicator('钢单产综合能耗', 1)).toBe('钢')
+  })
+})
+
+describe('isSpreadCalcErrorValue', () => {
+  it('detects live SpreadJS calc errors serialized with _error', () => {
+    const liveError = {
+      _error: '#DIV/0!',
+      _code: 7,
+      toString: () => '#DIV/0!',
+    }
+
+    expect(isSpreadCalcErrorValue(liveError)).toBe(true)
+  })
+
+  it('detects JSON SpreadJS calc errors serialized with _calcError', () => {
+    expect(isSpreadCalcErrorValue({ _calcError: '#DIV/0!', _code: 7 })).toBe(true)
+  })
+
+  it('does not treat ordinary objects or strings as calc errors', () => {
+    expect(isSpreadCalcErrorValue({ value: '#DIV/0!' })).toBe(false)
+    expect(isSpreadCalcErrorValue('#DIV/0!')).toBe(false)
   })
 })
 
