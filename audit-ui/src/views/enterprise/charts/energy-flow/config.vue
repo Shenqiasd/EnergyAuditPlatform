@@ -364,8 +364,14 @@ function handleNodeMouseDown(nodeId: string, event: MouseEvent) {
   selectedNodeId.value = nodeId
   selectedEdgeId.value = null
 
-  if (creatingEdge.value && edgeSourceNodeId.value) {
-    // Complete edge creation
+  if (creatingEdge.value) {
+    if (!edgeSourceNodeId.value) {
+      // First click: record the source node
+      edgeSourceNodeId.value = nodeId
+      ElMessage.info('已选中源节点，请点击目标节点')
+      return
+    }
+    // Second click: complete edge creation
     const srcId = edgeSourceNodeId.value
     creatingEdge.value = false
     edgeSourceNodeId.value = null
