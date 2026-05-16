@@ -3,12 +3,18 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import EnergyFlowConfigView from '@/components/EnergyFlowConfigView/index.vue'
 import { getEnergyFlowConfig } from '@/api/energyFlowConfig'
-import type { FlowNodeConfig, FlowEdgeConfig } from '@/api/energyFlowConfig'
+import type {
+  FlowNodeConfig, FlowEdgeConfig, EnergyInfo, UnitInfo, ProductInfo, EnergyConsumptionInfo,
+} from '@/api/energyFlowConfig'
 
 const currentYear = new Date().getFullYear()
 const auditYear = ref(currentYear)
 const nodes = ref<FlowNodeConfig[]>([])
 const edges = ref<FlowEdgeConfig[]>([])
+const energies = ref<EnergyInfo[]>([])
+const units = ref<UnitInfo[]>([])
+const products = ref<ProductInfo[]>([])
+const energyConsumption = ref<EnergyConsumptionInfo[]>([])
 const enterpriseName = ref('')
 const canvasWidth = ref(1200)
 const canvasHeight = ref(800)
@@ -20,6 +26,10 @@ async function loadData() {
   try {
     const config = await getEnergyFlowConfig(auditYear.value)
     enterpriseName.value = config.enterpriseInfo?.name || ''
+    energies.value = config.energies || []
+    units.value = config.units || []
+    products.value = config.products || []
+    energyConsumption.value = config.energyConsumption || []
     if (config.diagram) {
       nodes.value = config.diagram.nodes || []
       edges.value = config.diagram.edges || []
@@ -75,6 +85,10 @@ onMounted(() => {
         ref="viewRef"
         :nodes="nodes"
         :edges="edges"
+        :energies="energies"
+        :units="units"
+        :products="products"
+        :energy-consumption="energyConsumption"
         :enterprise-name="enterpriseName"
         :audit-year="auditYear"
         :canvas-width="canvasWidth"

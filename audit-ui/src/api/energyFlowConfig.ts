@@ -24,6 +24,22 @@ export interface EnergyInfo {
   category?: string
   measurementUnit?: string
   equivalentValue?: number
+  equalValue?: number
+  color?: string
+}
+
+export interface EnergyConsumptionInfo {
+  id: number
+  energyId?: number
+  energyName: string
+  measurementUnit?: string
+  openingStock?: number
+  purchaseTotal?: number
+  closingStock?: number
+  externalSupply?: number
+  equivFactor?: number
+  equalFactor?: number
+  standardCoal?: number
 }
 
 export interface ProductInfo {
@@ -121,6 +137,7 @@ export interface EnergyFlowConfig {
   units: UnitInfo[]
   energies: EnergyInfo[]
   products: ProductInfo[]
+  energyConsumption: EnergyConsumptionInfo[]
   flowRecords: FlowRecord[]
   diagram: DiagramConfig | null
   validation: ValidationResult

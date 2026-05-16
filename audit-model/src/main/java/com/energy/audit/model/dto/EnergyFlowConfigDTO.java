@@ -16,6 +16,7 @@ public class EnergyFlowConfigDTO implements Serializable {
     private List<UnitInfoDTO> units;
     private List<EnergyInfoDTO> energies;
     private List<ProductInfoDTO> products;
+    private List<EnergyConsumptionDTO> energyConsumption;
     private List<DeEnergyFlow> flowRecords;
     private DiagramConfigDTO diagram;
     private ValidationResultDTO validation;
@@ -43,6 +44,8 @@ public class EnergyFlowConfigDTO implements Serializable {
         private String category;
         private String measurementUnit;
         private java.math.BigDecimal equivalentValue;
+        private java.math.BigDecimal equalValue;
+        private String color;
     }
 
     @Data
@@ -51,6 +54,21 @@ public class EnergyFlowConfigDTO implements Serializable {
         private String name;
         private String measurementUnit;
         private java.math.BigDecimal unitPrice;
+    }
+
+    @Data
+    public static class EnergyConsumptionDTO implements Serializable {
+        private Long id;
+        private Long energyId;
+        private String energyName;
+        private String measurementUnit;
+        private java.math.BigDecimal openingStock;
+        private java.math.BigDecimal purchaseTotal;
+        private java.math.BigDecimal closingStock;
+        private java.math.BigDecimal externalSupply;
+        private java.math.BigDecimal equivFactor;
+        private java.math.BigDecimal equalFactor;
+        private java.math.BigDecimal standardCoal;
     }
 
     @Data

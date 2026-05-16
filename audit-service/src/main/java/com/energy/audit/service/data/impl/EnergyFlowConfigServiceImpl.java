@@ -1,6 +1,7 @@
 package com.energy.audit.service.data.impl;
 
 import com.energy.audit.common.util.SecurityUtils;
+import com.energy.audit.dao.mapper.data.DeEnergyConsumptionMapper;
 import com.energy.audit.dao.mapper.data.DeEnergyFlowDiagramMapper;
 import com.energy.audit.dao.mapper.data.DeEnergyFlowEdgeMapper;
 import com.energy.audit.dao.mapper.data.DeEnergyFlowMapper;
@@ -15,6 +16,7 @@ import com.energy.audit.model.dto.EnergyFlowConfigDTO;
 import com.energy.audit.model.dto.SaveEnergyFlowConfigDTO;
 import com.energy.audit.model.entity.enterprise.EntEnterprise;
 import com.energy.audit.model.entity.enterprise.EntEnterpriseSetting;
+import com.energy.audit.model.entity.extraction.DeEnergyConsumption;
 import com.energy.audit.model.entity.extraction.DeEnergyFlow;
 import com.energy.audit.model.entity.extraction.DeEnergyFlowDiagram;
 import com.energy.audit.model.entity.extraction.DeEnergyFlowEdge;
@@ -47,6 +49,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
     private final DeEnergyFlowDiagramMapper diagramMapper;
     private final DeEnergyFlowNodeMapper nodeMapper;
     private final DeEnergyFlowEdgeMapper edgeMapper;
+    private final DeEnergyConsumptionMapper consumptionMapper;
     private final EntEnterpriseMapper enterpriseMapper;
     private final EntEnterpriseSettingMapper enterpriseSettingMapper;
     private final BsUnitMapper unitMapper;
@@ -57,6 +60,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                                         DeEnergyFlowDiagramMapper diagramMapper,
                                         DeEnergyFlowNodeMapper nodeMapper,
                                         DeEnergyFlowEdgeMapper edgeMapper,
+                                        DeEnergyConsumptionMapper consumptionMapper,
                                         EntEnterpriseMapper enterpriseMapper,
                                         EntEnterpriseSettingMapper enterpriseSettingMapper,
                                         BsUnitMapper unitMapper,
@@ -66,6 +70,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         this.diagramMapper = diagramMapper;
         this.nodeMapper = nodeMapper;
         this.edgeMapper = edgeMapper;
+        this.consumptionMapper = consumptionMapper;
         this.enterpriseMapper = enterpriseMapper;
         this.enterpriseSettingMapper = enterpriseSettingMapper;
         this.unitMapper = unitMapper;
@@ -113,6 +118,8 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
             dto.setCategory(e.getCategory());
             dto.setMeasurementUnit(e.getMeasurementUnit());
             dto.setEquivalentValue(e.getEquivalentValue());
+            dto.setEqualValue(e.getEqualValue());
+            dto.setColor(e.getColor());
             energyDtos.add(dto);
         }
         result.setEnergies(energyDtos);
@@ -131,6 +138,31 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
             productDtos.add(dto);
         }
         result.setProducts(productDtos);
+
+        // Energy consumption data (for inventory 4-line indicators)
+        List<DeEnergyConsumption> consumptions = consumptionMapper.selectByEnterpriseAndYear(enterpriseId, auditYear);
+        Map<String, BsEnergy> energyByName = energyList.stream()
+                .collect(Collectors.toMap(BsEnergy::getName, e -> e, (a, b) -> a));
+        List<EnergyFlowConfigDTO.EnergyConsumptionDTO> consumptionDtos = new ArrayList<>();
+        for (DeEnergyConsumption c : consumptions) {
+            EnergyFlowConfigDTO.EnergyConsumptionDTO cdto = new EnergyFlowConfigDTO.EnergyConsumptionDTO();
+            cdto.setId(c.getId());
+            cdto.setEnergyName(c.getEnergyName());
+            cdto.setMeasurementUnit(c.getMeasurementUnit());
+            cdto.setOpeningStock(c.getOpeningStock());
+            cdto.setPurchaseTotal(c.getPurchaseTotal());
+            cdto.setClosingStock(c.getClosingStock());
+            cdto.setExternalSupply(c.getExternalSupply());
+            cdto.setEquivFactor(c.getEquivFactor());
+            cdto.setEqualFactor(c.getEqualFactor());
+            cdto.setStandardCoal(c.getStandardCoal());
+            BsEnergy matchedEnergy = energyByName.get(c.getEnergyName());
+            if (matchedEnergy != null) {
+                cdto.setEnergyId(matchedEnergy.getId());
+            }
+            consumptionDtos.add(cdto);
+        }
+        result.setEnergyConsumption(consumptionDtos);
 
         // Flow records
         List<DeEnergyFlow> flows = flowMapper.selectByEnterpriseAndYear(enterpriseId, auditYear);
@@ -653,11 +685,17 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 if ("external_energy".equals(st) && !"energy_input".equals(srcNode.getNodeType())) {
                     errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点类型(" + srcNode.getNodeType() + ")与填报记录来源类型(external_energy→energy_input)不一致（待确认）");
                 } else if ("external_energy".equals(st) && "energy".equals(record.getItemType())
+                        && record.getItemId() != null && srcNode.getRefId() == null) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点未绑定具体能源(refId=null)，但填报记录指定了能源品种(itemId=" + record.getItemId() + ")（待确认）");
+                } else if ("external_energy".equals(st) && "energy".equals(record.getItemType())
                         && record.getItemId() != null && srcNode.getRefId() != null
                         && !record.getItemId().equals(srcNode.getRefId())) {
                     errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点引用能源(refId=" + srcNode.getRefId() + ")与填报记录能源品种(itemId=" + record.getItemId() + ")不一致（待确认）");
                 } else if ("unit".equals(st) && !"unit".equals(srcNode.getNodeType())) {
                     errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点类型(" + srcNode.getNodeType() + ")与填报记录来源类型(unit)不一致（待确认）");
+                } else if ("unit".equals(st) && record.getSourceRefId() != null
+                        && srcNode.getRefId() == null) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点未绑定具体单元(refId=null)，但填报记录指定了来源单元(sourceRefId=" + record.getSourceRefId() + ")（待确认）");
                 } else if ("unit".equals(st) && record.getSourceRefId() != null
                         && srcNode.getRefId() != null && !record.getSourceRefId().equals(srcNode.getRefId())) {
                     errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点引用单元(refId=" + srcNode.getRefId() + ")与填报记录来源单元(sourceRefId=" + record.getSourceRefId() + ")不一致（待确认）");
@@ -672,10 +710,16 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 if ("unit".equals(tt) && !"unit".equals(tgtNode.getNodeType())) {
                     errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点类型(" + tgtNode.getNodeType() + ")与填报记录目的类型(unit)不一致（待确认）");
                 } else if ("unit".equals(tt) && record.getTargetRefId() != null
+                        && tgtNode.getRefId() == null) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点未绑定具体单元(refId=null)，但填报记录指定了目的单元(targetRefId=" + record.getTargetRefId() + ")（待确认）");
+                } else if ("unit".equals(tt) && record.getTargetRefId() != null
                         && tgtNode.getRefId() != null && !record.getTargetRefId().equals(tgtNode.getRefId())) {
                     errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点引用单元(refId=" + tgtNode.getRefId() + ")与填报记录目的单元(targetRefId=" + record.getTargetRefId() + ")不一致（待确认）");
                 } else if ("product_output".equals(tt) && !"product_output".equals(tgtNode.getNodeType())) {
                     errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点类型(" + tgtNode.getNodeType() + ")与填报记录目的类型(product_output)不一致（待确认）");
+                } else if ("product_output".equals(tt) && "product".equals(record.getItemType())
+                        && record.getItemId() != null && tgtNode.getRefId() == null) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点未绑定具体产品(refId=null)，但填报记录指定了产品(itemId=" + record.getItemId() + ")（待确认）");
                 } else if ("product_output".equals(tt) && "product".equals(record.getItemType())
                         && record.getItemId() != null && tgtNode.getRefId() != null
                         && !record.getItemId().equals(tgtNode.getRefId())) {
@@ -700,6 +744,12 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                         edge.getEdgeId(), srcNode.getNodeType()));
             }
             if ("energy".equals(record.getItemType()) && record.getItemId() != null
+                    && srcNode.getRefId() == null) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的起点节点未绑定具体能源(refId=null)，但填报记录指定了能源品种(itemId=%d)。",
+                        edge.getEdgeId(), record.getItemId()));
+            }
+            if ("energy".equals(record.getItemType()) && record.getItemId() != null
                     && srcNode.getRefId() != null && !record.getItemId().equals(srcNode.getRefId())) {
                 throw new IllegalArgumentException(String.format(
                         "连线 [%s] 的起点节点引用能源(refId=%d)与填报记录能源品种(itemId=%d)不一致。",
@@ -710,6 +760,11 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 throw new IllegalArgumentException(String.format(
                         "连线 [%s] 的起点节点类型(%s)与填报记录来源类型(unit)不一致。",
                         edge.getEdgeId(), srcNode.getNodeType()));
+            }
+            if (record.getSourceRefId() != null && srcNode.getRefId() == null) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的起点节点未绑定具体单元(refId=null)，但填报记录指定了来源单元(sourceRefId=%d)。",
+                        edge.getEdgeId(), record.getSourceRefId()));
             }
             if (record.getSourceRefId() != null && srcNode.getRefId() != null
                     && !record.getSourceRefId().equals(srcNode.getRefId())) {
@@ -733,6 +788,11 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                         "连线 [%s] 的终点节点类型(%s)与填报记录目的类型(unit)不一致。",
                         edge.getEdgeId(), tgtNode.getNodeType()));
             }
+            if (record.getTargetRefId() != null && tgtNode.getRefId() == null) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的终点节点未绑定具体单元(refId=null)，但填报记录指定了目的单元(targetRefId=%d)。",
+                        edge.getEdgeId(), record.getTargetRefId()));
+            }
             if (record.getTargetRefId() != null && tgtNode.getRefId() != null
                     && !record.getTargetRefId().equals(tgtNode.getRefId())) {
                 throw new IllegalArgumentException(String.format(
@@ -744,6 +804,12 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 throw new IllegalArgumentException(String.format(
                         "连线 [%s] 的终点节点类型(%s)与填报记录目的类型(product_output)不一致。",
                         edge.getEdgeId(), tgtNode.getNodeType()));
+            }
+            if ("product".equals(record.getItemType()) && record.getItemId() != null
+                    && tgtNode.getRefId() == null) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的终点节点未绑定具体产品(refId=null)，但填报记录指定了产品(itemId=%d)。",
+                        edge.getEdgeId(), record.getItemId()));
             }
             if ("product".equals(record.getItemType()) && record.getItemId() != null
                     && tgtNode.getRefId() != null && !record.getItemId().equals(tgtNode.getRefId())) {

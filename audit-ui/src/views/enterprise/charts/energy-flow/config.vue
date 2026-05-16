@@ -270,9 +270,11 @@ function autoLayout() {
   const newEdges: FlowEdgeConfig[] = []
   const nodeSet = new Set<string>()
 
-  const PAD_X = 60
+  // 4-stage layout: match EnergyFlowConfigView renderer constants
+  const STAGE_MARGIN = 80
+  const stageW = (canvasWidth.value - STAGE_MARGIN * 2) / 4
+  const stageXArr = [0, 1, 2, 3].map(i => STAGE_MARGIN + i * stageW)
   const PAD_Y = 80
-  const COL_W = 250
   const ROW_H = 80
   const layerNodes: Map<string, { nodeType: string; refType: string; refId?: number | null; layer: number; label?: string }> = new Map()
 
@@ -328,7 +330,7 @@ function autoLayout() {
         refId = r.targetRefId ?? r.targetUnitId ?? null
       }
       const unit = units.value.find(u => u.name === tgtName)
-      const layer = tgtKey.startsWith('产出-product-') || tgtName === '产出' || nodeType === 'product_output' ? 4 : unit ? unit.unitType : 2
+      const layer = tgtKey.startsWith('产出-product-') || tgtName === '产出' || nodeType === 'product_output' ? 3 : unit ? unit.unitType : 2
       const tgtLabel = nodeType === 'product_output' && r.itemType === 'product' && r.itemId
         ? (products.value.find(p => p.id === r.itemId)?.name ?? tgtName)
         : tgtName
@@ -347,22 +349,23 @@ function autoLayout() {
     layerBuckets.set(info.layer, arr)
   }
 
-  const sortedLayers = Array.from(layerBuckets.keys()).sort((a, b) => a - b)
-  let colIdx = 0
-  for (const layer of sortedLayers) {
-    const names = layerBuckets.get(layer)!
+  // Position nodes using fixed 4-stage X coordinates (0-3)
+  for (const stage of [0, 1, 2, 3]) {
+    const names = layerBuckets.get(stage) ?? []
     names.forEach((name, rowIdx) => {
       const info = layerNodes.get(name)!
+      const nodeW = info.nodeType === 'energy_input' ? 60 : 100
+      const nodeH = info.nodeType === 'energy_input' ? 60 : 50
       const node: FlowNodeConfig = {
         nodeId: `node-${name}`,
         nodeType: info.nodeType,
         refType: info.refType,
         refId: info.refId,
         label: info.label || name,
-        positionX: PAD_X + colIdx * COL_W,
+        positionX: stageXArr[stage] + (stageW - nodeW) / 2,
         positionY: PAD_Y + rowIdx * ROW_H,
-        width: info.nodeType === 'energy_input' ? 60 : 100,
-        height: info.nodeType === 'energy_input' ? 60 : 50,
+        width: nodeW,
+        height: nodeH,
         color: NODE_COLORS[info.nodeType] || '#666',
         visible: 1,
         locked: 0,
@@ -370,7 +373,6 @@ function autoLayout() {
       newNodes.push(node)
       nodeSet.add(name)
     })
-    colIdx++
   }
 
   // Create edges from records
@@ -411,8 +413,9 @@ function autoLayout() {
 
   nodes.value = newNodes
   edges.value = newEdges
-  canvasWidth.value = Math.max(1200, (colIdx + 1) * COL_W + PAD_X * 2)
-  canvasHeight.value = Math.max(800, Math.max(...Array.from(layerBuckets.values()).map(v => v.length)) * ROW_H + PAD_Y * 2)
+  canvasWidth.value = Math.max(1200, STAGE_MARGIN * 2 + 4 * stageW)
+  const maxRows = Math.max(1, ...Array.from(layerBuckets.values()).map(v => v.length))
+  canvasHeight.value = Math.max(800, maxRows * ROW_H + PAD_Y * 2)
   pushUndo()
   ElMessage.success('自动布局完成')
 }
