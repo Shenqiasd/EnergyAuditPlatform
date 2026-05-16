@@ -1273,6 +1273,7 @@ CREATE TABLE IF NOT EXISTS de_equipment_benchmark (
     audit_year                  INT           NOT NULL,
     submission_id               BIGINT        DEFAULT NULL,
     equipment_type              VARCHAR(32)   DEFAULT NULL,
+    equipment_name              VARCHAR(256)  DEFAULT NULL,
     seq_no                      INT           DEFAULT NULL,
     device_purpose              VARCHAR(256)  DEFAULT NULL,
     unit_count                  INT           DEFAULT NULL,
