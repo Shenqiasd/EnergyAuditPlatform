@@ -277,27 +277,35 @@ function autoLayout() {
   const layerNodes: Map<string, { nodeType: string; refType: string; refId?: number | null; layer: number; label?: string }> = new Map()
 
   for (const r of flowRecords.value) {
-    // Source node
-    const srcName = r.sourceUnit || '外购'
-    if (!layerNodes.has(srcName)) {
+    // Source node — key by sourceType+itemType/itemId for external energy, not display string
+    const srcKey = r.sourceType === 'external_energy'
+      ? (r.itemType === 'energy' && r.itemId ? `外购-energy-${r.itemId}` : '外购')
+      : (r.sourceUnit || '外购')
+    if (!layerNodes.has(srcKey)) {
       let nodeType = 'custom'
       let refType = 'custom'
       let refId: number | null = null
+      let srcLabel: string | undefined
       if (r.sourceType === 'external_energy') {
         nodeType = 'energy_input'
         refType = 'energy'
         refId = r.itemId ?? null
+        if (r.itemType === 'energy' && r.itemId) {
+          srcLabel = energies.value.find(e => e.id === r.itemId)?.name ?? r.energyProduct ?? '外购能源'
+        } else {
+          srcLabel = r.energyProduct ?? '外购'
+        }
       } else if (r.sourceType === 'unit' || r.sourceUnitId) {
         nodeType = 'unit'
         refType = 'unit'
         refId = r.sourceRefId ?? r.sourceUnitId ?? null
-      } else if (srcName === '外购') {
+      } else if (srcKey === '外购') {
         nodeType = 'energy_input'
         refType = 'energy'
       }
-      const unit = units.value.find(u => u.name === srcName)
-      const layer = srcName === '外购' || nodeType === 'energy_input' ? 0 : unit ? unit.unitType : 1
-      layerNodes.set(srcName, { nodeType, refType, refId, layer })
+      const unit = units.value.find(u => u.name === (r.sourceUnit || ''))
+      const layer = srcKey === '外购' || srcKey.startsWith('外购-energy-') || nodeType === 'energy_input' ? 0 : unit ? unit.unitType : 1
+      layerNodes.set(srcKey, { nodeType, refType, refId, layer, label: srcLabel })
     }
 
     // Target node
@@ -328,19 +336,8 @@ function autoLayout() {
     }
   }
 
-  // Also add energy input nodes for each energy that appears in purchase flows
-  for (const r of flowRecords.value) {
-    if ((r.sourceUnit === '外购' || r.sourceType === 'external_energy') && r.energyProduct) {
-      if (!layerNodes.has(r.energyProduct)) {
-        layerNodes.set(r.energyProduct, {
-          nodeType: 'energy_input',
-          refType: 'energy',
-          refId: r.itemId ?? null,
-          layer: 0,
-        })
-      }
-    }
-  }
+  // Energy input nodes are now keyed by sourceType+itemType/itemId above,
+  // so no separate energyProduct pass is needed.
 
   // Layout by layer
   const layerBuckets: Map<number, string[]> = new Map()
@@ -385,8 +382,10 @@ function autoLayout() {
       : (r.targetUnit || '产出')
     const tgtNodeId = `node-${tgtKey}`
 
-    if (r.sourceUnit === '外购' && r.energyProduct && nodeSet.has(r.energyProduct)) {
-      srcNodeId = `node-${r.energyProduct}`
+    // Use typed key for external-energy source nodes (matches node keying above)
+    if (r.sourceType === 'external_energy') {
+      const srcKey = r.itemType === 'energy' && r.itemId ? `外购-energy-${r.itemId}` : '外购'
+      srcNodeId = `node-${srcKey}`
     } else {
       srcNodeId = `node-${r.sourceUnit || '外购'}`
     }
@@ -985,18 +984,21 @@ function computeLocalExportErrors(): string[] {
       errors.push(`填报记录 [${r.energyProduct}] 为旧数据（待确认），请编辑确认品目类型和品目`)
     }
   }
-  // Check visible edges for valid record bindings and endpoint nodes
+  // Check visible edges for valid record bindings, endpoint nodes, and endpoint semantics
   const nodeIdSet = new Set(nodes.value.map(n => n.nodeId))
+  const nodeByIdMap = new Map(nodes.value.map(n => [n.nodeId, n]))
   for (const e of edges.value) {
     if (e.visible === 0) continue
+    // Find the bound record
+    let boundRec: FlowRecord | undefined
     if (!e._flowRecordClientKey && !e.flowRecordId) {
       errors.push(`连线 [${e.edgeId}] 未绑定到有效的填报记录`)
     } else if (e._flowRecordClientKey) {
-      const rec = flowRecords.value.find(r => r._clientKey === e._flowRecordClientKey)
-      if (!rec) errors.push(`连线 [${e.edgeId}] 绑定的填报记录已被删除`)
+      boundRec = flowRecords.value.find(r => r._clientKey === e._flowRecordClientKey)
+      if (!boundRec) errors.push(`连线 [${e.edgeId}] 绑定的填报记录已被删除`)
     } else if (e.flowRecordId) {
-      const rec = flowRecords.value.find(r => r.id === e.flowRecordId)
-      if (!rec) errors.push(`连线 [${e.edgeId}] 绑定的填报记录(id=${e.flowRecordId})不存在`)
+      boundRec = flowRecords.value.find(r => r.id === e.flowRecordId)
+      if (!boundRec) errors.push(`连线 [${e.edgeId}] 绑定的填报记录(id=${e.flowRecordId})不存在`)
     }
     // Validate endpoint nodes: must be non-blank and exist
     if (!e.sourceNodeId) {
@@ -1008,6 +1010,39 @@ function computeLocalExportErrors(): string[] {
       errors.push(`连线 [${e.edgeId}] 的终点节点为空`)
     } else if (!nodeIdSet.has(e.targetNodeId)) {
       errors.push(`连线 [${e.edgeId}] 的终点节点(${e.targetNodeId})不存在`)
+    }
+    // Validate endpoint semantics against bound record
+    if (boundRec && e.sourceNodeId && nodeIdSet.has(e.sourceNodeId)) {
+      const srcNode = nodeByIdMap.get(e.sourceNodeId)
+      if (srcNode && boundRec.sourceType) {
+        if (boundRec.sourceType === 'external_energy' && srcNode.nodeType !== 'energy_input') {
+          errors.push(`连线 [${e.edgeId}] 的起点节点类型(${srcNode.nodeType})与填报记录来源类型(external_energy→energy_input)不一致`)
+        } else if (boundRec.sourceType === 'external_energy' && boundRec.itemType === 'energy'
+            && boundRec.itemId && srcNode.refId && boundRec.itemId !== srcNode.refId) {
+          errors.push(`连线 [${e.edgeId}] 的起点节点引用能源(refId=${srcNode.refId})与填报记录能源品种(itemId=${boundRec.itemId})不一致`)
+        } else if (boundRec.sourceType === 'unit' && srcNode.nodeType !== 'unit') {
+          errors.push(`连线 [${e.edgeId}] 的起点节点类型(${srcNode.nodeType})与填报记录来源类型(unit)不一致`)
+        } else if (boundRec.sourceType === 'unit' && boundRec.sourceRefId
+            && srcNode.refId && boundRec.sourceRefId !== srcNode.refId) {
+          errors.push(`连线 [${e.edgeId}] 的起点节点引用单元(refId=${srcNode.refId})与填报记录来源单元(sourceRefId=${boundRec.sourceRefId})不一致`)
+        }
+      }
+    }
+    if (boundRec && e.targetNodeId && nodeIdSet.has(e.targetNodeId)) {
+      const tgtNode = nodeByIdMap.get(e.targetNodeId)
+      if (tgtNode && boundRec.targetType) {
+        if (boundRec.targetType === 'unit' && tgtNode.nodeType !== 'unit') {
+          errors.push(`连线 [${e.edgeId}] 的终点节点类型(${tgtNode.nodeType})与填报记录目的类型(unit)不一致`)
+        } else if (boundRec.targetType === 'unit' && boundRec.targetRefId
+            && tgtNode.refId && boundRec.targetRefId !== tgtNode.refId) {
+          errors.push(`连线 [${e.edgeId}] 的终点节点引用单元(refId=${tgtNode.refId})与填报记录目的单元(targetRefId=${boundRec.targetRefId})不一致`)
+        } else if (boundRec.targetType === 'product_output' && tgtNode.nodeType !== 'product_output') {
+          errors.push(`连线 [${e.edgeId}] 的终点节点类型(${tgtNode.nodeType})与填报记录目的类型(product_output)不一致`)
+        } else if (boundRec.targetType === 'product_output' && boundRec.itemType === 'product'
+            && boundRec.itemId && tgtNode.refId && boundRec.itemId !== tgtNode.refId) {
+          errors.push(`连线 [${e.edgeId}] 的终点节点引用产品(refId=${tgtNode.refId})与填报记录产品(itemId=${boundRec.itemId})不一致`)
+        }
+      }
     }
   }
   return [...new Set(errors)]

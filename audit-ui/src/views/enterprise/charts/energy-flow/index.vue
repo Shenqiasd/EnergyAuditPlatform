@@ -2,46 +2,48 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import EnergyFlowDiagram4Stage from '@/components/EnergyFlowDiagram4Stage/index.vue'
-import { getEnergyFlowList } from '@/api/energyFlow'
-import type { EnergyFlowItem } from '@/api/energyFlow'
-import { getUnitList, getEnergyList } from '@/api/setting'
-import type { BsUnit, BsEnergy } from '@/api/setting'
+import EnergyFlowConfigView from '@/components/EnergyFlowConfigView/index.vue'
+import { getEnergyFlowConfig } from '@/api/energyFlowConfig'
+import type { FlowNodeConfig, FlowEdgeConfig } from '@/api/energyFlowConfig'
 
 const router = useRouter()
 const currentYear = new Date().getFullYear()
 const auditYear = ref(currentYear)
 const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i)
-const flowData = ref<EnergyFlowItem[]>([])
-const units = ref<BsUnit[]>([])
-const energies = ref<BsEnergy[]>([])
+const nodes = ref<FlowNodeConfig[]>([])
+const edges = ref<FlowEdgeConfig[]>([])
+const enterpriseName = ref('')
+const canvasWidth = ref(1200)
+const canvasHeight = ref(800)
 const loading = ref(false)
-const diagramRef = ref<InstanceType<typeof EnergyFlowDiagram4Stage>>()
+const viewRef = ref<InstanceType<typeof EnergyFlowConfigView>>()
 
 async function loadData() {
   loading.value = true
   try {
-    const [flows, unitRes, energyRes] = await Promise.all([
-      getEnergyFlowList(auditYear.value).catch(() => [] as EnergyFlowItem[]),
-      getUnitList({ pageSize: 500 }).catch(() => ({ rows: [] as BsUnit[], total: 0 })),
-      getEnergyList({ pageSize: 500 }).catch(() => ({ rows: [] as BsEnergy[], total: 0 })),
-    ])
-    flowData.value = flows
-    units.value = unitRes.rows || []
-    energies.value = energyRes.rows || []
+    const config = await getEnergyFlowConfig(auditYear.value)
+    enterpriseName.value = config.enterpriseInfo?.name || ''
+    if (config.diagram) {
+      nodes.value = config.diagram.nodes || []
+      edges.value = config.diagram.edges || []
+      canvasWidth.value = config.diagram.canvasWidth || 1200
+      canvasHeight.value = config.diagram.canvasHeight || 800
+    } else {
+      nodes.value = []
+      edges.value = []
+    }
   } catch {
-    flowData.value = []
-    units.value = []
-    energies.value = []
+    nodes.value = []
+    edges.value = []
   } finally {
     loading.value = false
   }
 }
 
 async function handleExportPng() {
-  if (!diagramRef.value) return
+  if (!viewRef.value) return
   try {
-    const dataUri = await diagramRef.value.exportPng()
+    const dataUri = await viewRef.value.exportPng()
     if (!dataUri) {
       ElMessage.warning('导出失败，图表为空')
       return
@@ -57,7 +59,7 @@ async function handleExportPng() {
 }
 
 function handleFitView() {
-  diagramRef.value?.fitView()
+  viewRef.value?.fitView()
 }
 
 onMounted(() => {
@@ -80,11 +82,14 @@ onMounted(() => {
       </div>
     </div>
     <div class="flow-wrapper" v-loading="loading">
-      <EnergyFlowDiagram4Stage
-        ref="diagramRef"
-        :flows="flowData"
-        :units="units"
-        :energies="energies"
+      <EnergyFlowConfigView
+        ref="viewRef"
+        :nodes="nodes"
+        :edges="edges"
+        :enterprise-name="enterpriseName"
+        :audit-year="auditYear"
+        :canvas-width="canvasWidth"
+        :canvas-height="canvasHeight"
       />
     </div>
   </div>

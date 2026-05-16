@@ -30,8 +30,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -245,15 +247,22 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 exportErrors.add(msg);
             }
         }
-        // Validate visible edges: record binding + endpoint node existence
+        // Validate visible edges: record binding + endpoint node existence + endpoint semantics
         Set<Long> activeFlowIds = flows.stream()
                 .filter(f -> f.getId() != null)
                 .map(DeEnergyFlow::getId)
                 .collect(Collectors.toSet());
+        Map<Long, DeEnergyFlow> flowById = flows.stream()
+                .filter(f -> f.getId() != null)
+                .collect(Collectors.toMap(DeEnergyFlow::getId, f -> f, (a, b) -> a));
         Set<String> getNodeIds = new HashSet<>();
+        Map<String, DiagramConfigDTO.FlowNodeDTO> getNodeMap = new HashMap<>();
         if (result.getDiagram() != null && result.getDiagram().getNodes() != null) {
             for (DiagramConfigDTO.FlowNodeDTO nd : result.getDiagram().getNodes()) {
-                if (nd.getNodeId() != null) getNodeIds.add(nd.getNodeId());
+                if (nd.getNodeId() != null) {
+                    getNodeIds.add(nd.getNodeId());
+                    getNodeMap.put(nd.getNodeId(), nd);
+                }
             }
         }
         if (result.getDiagram() != null && result.getDiagram().getEdges() != null) {
@@ -286,6 +295,17 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     String msg = "连线 [" + ed.getEdgeId() + "] 的终点节点(" + ed.getTargetNodeId() + ")不存在（待确认）";
                     warnings.add(msg);
                     exportErrors.add(msg);
+                }
+                // Validate edge endpoint semantics against the bound fill record
+                if (ed.getFlowRecordId() != null && activeFlowIds.contains(ed.getFlowRecordId())) {
+                    DeEnergyFlow rec = flowById.get(ed.getFlowRecordId());
+                    if (rec != null) {
+                        List<String> semErrs = checkEdgeEndpointSemantics(ed, rec, getNodeMap);
+                        for (String semErr : semErrs) {
+                            warnings.add(semErr);
+                            exportErrors.add(semErr);
+                        }
+                    }
                 }
             }
         }
@@ -404,11 +424,15 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
 
-            // Build active node ID set for endpoint validation
+            // Build active node ID set and node map for endpoint validation
             Set<String> activeNodeIds = new HashSet<>();
+            Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap = new HashMap<>();
             if (dc.getNodes() != null) {
                 for (DiagramConfigDTO.FlowNodeDTO nd : dc.getNodes()) {
-                    if (nd.getNodeId() != null) activeNodeIds.add(nd.getNodeId());
+                    if (nd.getNodeId() != null) {
+                        activeNodeIds.add(nd.getNodeId());
+                        nodeMap.put(nd.getNodeId(), nd);
+                    }
                 }
             }
 
@@ -460,22 +484,44 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                                     String.format("连线 [%s] 的终点节点(%s)不存在于当前节点集合中，无法保存。",
                                             ed.getEdgeId(), ed.getTargetNodeId()));
                         }
+                        // Validate edge endpoint semantics match the bound fill record
+                        if (resolvedRecordId != null) {
+                            final Long rid = resolvedRecordId;
+                            DeEnergyFlow rec = savedRecords.stream()
+                                    .filter(r -> r.getId().equals(rid)).findFirst().orElse(null);
+                            if (rec != null) {
+                                validateEdgeSourceSemantics(ed, rec, nodeMap);
+                                validateEdgeTargetSemantics(ed, rec, nodeMap);
+                            }
+                        }
                     }
                     resolvedEdgeRecordIds.add(resolvedRecordId);
                 }
             }
 
-            // Now safe to replace edges (all validated)
+            // Now safe to replace edges (all validated) — auto-sync item fields from bound record
             edgeMapper.deleteByDiagramId(diagramId, operator);
             if (dc.getEdges() != null) {
                 for (int i = 0; i < dc.getEdges().size(); i++) {
                     DiagramConfigDTO.FlowEdgeDTO ed = dc.getEdges().get(i);
+                    Long rid = resolvedEdgeRecordIds.get(i);
+                    // Auto-sync edge item fields from bound record to prevent drift
+                    if (rid != null) {
+                        DeEnergyFlow rec = savedRecords.stream()
+                                .filter(r -> r.getId().equals(rid)).findFirst().orElse(null);
+                        if (rec != null) {
+                            ed.setItemType(rec.getItemType());
+                            ed.setItemId(rec.getItemId());
+                            ed.setPhysicalQuantity(rec.getPhysicalQuantity());
+                            ed.setCalculatedValue(rec.getCalculatedValue());
+                        }
+                    }
                     DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
                     edge.setDiagramId(diagramId);
                     edge.setEdgeId(ed.getEdgeId());
                     edge.setSourceNodeId(ed.getSourceNodeId());
                     edge.setTargetNodeId(ed.getTargetNodeId());
-                    edge.setFlowRecordId(resolvedEdgeRecordIds.get(i));
+                    edge.setFlowRecordId(rid);
                     edge.setItemType(ed.getItemType());
                     edge.setItemId(ed.getItemId());
                     edge.setPhysicalQuantity(ed.getPhysicalQuantity());
@@ -589,6 +635,123 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
 
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
+    }
+
+    /**
+     * Non-throwing semantic check for GET/export: returns list of warning strings
+     * when an edge's source/target node does not match the bound record's fields.
+     */
+    private List<String> checkEdgeEndpointSemantics(DiagramConfigDTO.FlowEdgeDTO edge,
+                                                     DeEnergyFlow record,
+                                                     Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap) {
+        List<String> errors = new ArrayList<>();
+        // Source semantics
+        if (!isBlank(record.getSourceType()) && !isBlank(edge.getSourceNodeId())) {
+            DiagramConfigDTO.FlowNodeDTO srcNode = nodeMap.get(edge.getSourceNodeId());
+            if (srcNode != null) {
+                String st = record.getSourceType();
+                if ("external_energy".equals(st) && !"energy_input".equals(srcNode.getNodeType())) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点类型(" + srcNode.getNodeType() + ")与填报记录来源类型(external_energy→energy_input)不一致（待确认）");
+                } else if ("external_energy".equals(st) && "energy".equals(record.getItemType())
+                        && record.getItemId() != null && srcNode.getRefId() != null
+                        && !record.getItemId().equals(srcNode.getRefId())) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点引用能源(refId=" + srcNode.getRefId() + ")与填报记录能源品种(itemId=" + record.getItemId() + ")不一致（待确认）");
+                } else if ("unit".equals(st) && !"unit".equals(srcNode.getNodeType())) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点类型(" + srcNode.getNodeType() + ")与填报记录来源类型(unit)不一致（待确认）");
+                } else if ("unit".equals(st) && record.getSourceRefId() != null
+                        && srcNode.getRefId() != null && !record.getSourceRefId().equals(srcNode.getRefId())) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的起点节点引用单元(refId=" + srcNode.getRefId() + ")与填报记录来源单元(sourceRefId=" + record.getSourceRefId() + ")不一致（待确认）");
+                }
+            }
+        }
+        // Target semantics
+        if (!isBlank(record.getTargetType()) && !isBlank(edge.getTargetNodeId())) {
+            DiagramConfigDTO.FlowNodeDTO tgtNode = nodeMap.get(edge.getTargetNodeId());
+            if (tgtNode != null) {
+                String tt = record.getTargetType();
+                if ("unit".equals(tt) && !"unit".equals(tgtNode.getNodeType())) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点类型(" + tgtNode.getNodeType() + ")与填报记录目的类型(unit)不一致（待确认）");
+                } else if ("unit".equals(tt) && record.getTargetRefId() != null
+                        && tgtNode.getRefId() != null && !record.getTargetRefId().equals(tgtNode.getRefId())) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点引用单元(refId=" + tgtNode.getRefId() + ")与填报记录目的单元(targetRefId=" + record.getTargetRefId() + ")不一致（待确认）");
+                } else if ("product_output".equals(tt) && !"product_output".equals(tgtNode.getNodeType())) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点类型(" + tgtNode.getNodeType() + ")与填报记录目的类型(product_output)不一致（待确认）");
+                } else if ("product_output".equals(tt) && "product".equals(record.getItemType())
+                        && record.getItemId() != null && tgtNode.getRefId() != null
+                        && !record.getItemId().equals(tgtNode.getRefId())) {
+                    errors.add("连线 [" + edge.getEdgeId() + "] 的终点节点引用产品(refId=" + tgtNode.getRefId() + ")与填报记录产品(itemId=" + record.getItemId() + ")不一致（待确认）");
+                }
+            }
+        }
+        return errors;
+    }
+
+    private void validateEdgeSourceSemantics(DiagramConfigDTO.FlowEdgeDTO edge,
+                                              DeEnergyFlow record,
+                                              Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap) {
+        if (isBlank(record.getSourceType()) || isBlank(edge.getSourceNodeId())) return;
+        DiagramConfigDTO.FlowNodeDTO srcNode = nodeMap.get(edge.getSourceNodeId());
+        if (srcNode == null) return;
+        String st = record.getSourceType();
+        if ("external_energy".equals(st)) {
+            if (!"energy_input".equals(srcNode.getNodeType())) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的起点节点类型(%s)与填报记录来源类型(external_energy→energy_input)不一致。",
+                        edge.getEdgeId(), srcNode.getNodeType()));
+            }
+            if ("energy".equals(record.getItemType()) && record.getItemId() != null
+                    && srcNode.getRefId() != null && !record.getItemId().equals(srcNode.getRefId())) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的起点节点引用能源(refId=%d)与填报记录能源品种(itemId=%d)不一致。",
+                        edge.getEdgeId(), srcNode.getRefId(), record.getItemId()));
+            }
+        } else if ("unit".equals(st)) {
+            if (!"unit".equals(srcNode.getNodeType())) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的起点节点类型(%s)与填报记录来源类型(unit)不一致。",
+                        edge.getEdgeId(), srcNode.getNodeType()));
+            }
+            if (record.getSourceRefId() != null && srcNode.getRefId() != null
+                    && !record.getSourceRefId().equals(srcNode.getRefId())) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的起点节点引用单元(refId=%d)与填报记录来源单元(sourceRefId=%d)不一致。",
+                        edge.getEdgeId(), srcNode.getRefId(), record.getSourceRefId()));
+            }
+        }
+    }
+
+    private void validateEdgeTargetSemantics(DiagramConfigDTO.FlowEdgeDTO edge,
+                                              DeEnergyFlow record,
+                                              Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap) {
+        if (isBlank(record.getTargetType()) || isBlank(edge.getTargetNodeId())) return;
+        DiagramConfigDTO.FlowNodeDTO tgtNode = nodeMap.get(edge.getTargetNodeId());
+        if (tgtNode == null) return;
+        String tt = record.getTargetType();
+        if ("unit".equals(tt)) {
+            if (!"unit".equals(tgtNode.getNodeType())) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的终点节点类型(%s)与填报记录目的类型(unit)不一致。",
+                        edge.getEdgeId(), tgtNode.getNodeType()));
+            }
+            if (record.getTargetRefId() != null && tgtNode.getRefId() != null
+                    && !record.getTargetRefId().equals(tgtNode.getRefId())) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的终点节点引用单元(refId=%d)与填报记录目的单元(targetRefId=%d)不一致。",
+                        edge.getEdgeId(), tgtNode.getRefId(), record.getTargetRefId()));
+            }
+        } else if ("product_output".equals(tt)) {
+            if (!"product_output".equals(tgtNode.getNodeType())) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的终点节点类型(%s)与填报记录目的类型(product_output)不一致。",
+                        edge.getEdgeId(), tgtNode.getNodeType()));
+            }
+            if ("product".equals(record.getItemType()) && record.getItemId() != null
+                    && tgtNode.getRefId() != null && !record.getItemId().equals(tgtNode.getRefId())) {
+                throw new IllegalArgumentException(String.format(
+                        "连线 [%s] 的终点节点引用产品(refId=%d)与填报记录产品(itemId=%d)不一致。",
+                        edge.getEdgeId(), tgtNode.getRefId(), record.getItemId()));
+            }
+        }
     }
 
     /**
