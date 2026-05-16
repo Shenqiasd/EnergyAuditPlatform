@@ -1020,20 +1020,26 @@ function computeLocalExportErrors(): string[] {
     } else if (!nodeIdSet.has(e.targetNodeId)) {
       errors.push(`连线 [${e.edgeId}] 的终点节点(${e.targetNodeId})不存在`)
     }
-    // Validate endpoint semantics against bound record
+    // Validate endpoint semantics against bound record (including null-ref detection)
     if (boundRec && e.sourceNodeId && nodeIdSet.has(e.sourceNodeId)) {
       const srcNode = nodeByIdMap.get(e.sourceNodeId)
       if (srcNode && boundRec.sourceType) {
         if (boundRec.sourceType === 'external_energy' && srcNode.nodeType !== 'energy_input') {
           errors.push(`连线 [${e.edgeId}] 的起点节点类型(${srcNode.nodeType})与填报记录来源类型(external_energy→energy_input)不一致`)
-        } else if (boundRec.sourceType === 'external_energy' && boundRec.itemType === 'energy'
-            && boundRec.itemId && srcNode.refId && boundRec.itemId !== srcNode.refId) {
-          errors.push(`连线 [${e.edgeId}] 的起点节点引用能源(refId=${srcNode.refId})与填报记录能源品种(itemId=${boundRec.itemId})不一致`)
+        } else if (boundRec.sourceType === 'external_energy' && boundRec.itemType === 'energy' && boundRec.itemId) {
+          if (!srcNode.refId) {
+            errors.push(`连线 [${e.edgeId}] 的起点节点未关联能源(refId为空)，但填报记录要求能源品种(itemId=${boundRec.itemId})`)
+          } else if (boundRec.itemId !== srcNode.refId) {
+            errors.push(`连线 [${e.edgeId}] 的起点节点引用能源(refId=${srcNode.refId})与填报记录能源品种(itemId=${boundRec.itemId})不一致`)
+          }
         } else if (boundRec.sourceType === 'unit' && srcNode.nodeType !== 'unit') {
           errors.push(`连线 [${e.edgeId}] 的起点节点类型(${srcNode.nodeType})与填报记录来源类型(unit)不一致`)
-        } else if (boundRec.sourceType === 'unit' && boundRec.sourceRefId
-            && srcNode.refId && boundRec.sourceRefId !== srcNode.refId) {
-          errors.push(`连线 [${e.edgeId}] 的起点节点引用单元(refId=${srcNode.refId})与填报记录来源单元(sourceRefId=${boundRec.sourceRefId})不一致`)
+        } else if (boundRec.sourceType === 'unit' && boundRec.sourceRefId) {
+          if (!srcNode.refId) {
+            errors.push(`连线 [${e.edgeId}] 的起点节点未关联单元(refId为空)，但填报记录要求来源单元(sourceRefId=${boundRec.sourceRefId})`)
+          } else if (boundRec.sourceRefId !== srcNode.refId) {
+            errors.push(`连线 [${e.edgeId}] 的起点节点引用单元(refId=${srcNode.refId})与填报记录来源单元(sourceRefId=${boundRec.sourceRefId})不一致`)
+          }
         }
       }
     }
@@ -1042,14 +1048,20 @@ function computeLocalExportErrors(): string[] {
       if (tgtNode && boundRec.targetType) {
         if (boundRec.targetType === 'unit' && tgtNode.nodeType !== 'unit') {
           errors.push(`连线 [${e.edgeId}] 的终点节点类型(${tgtNode.nodeType})与填报记录目的类型(unit)不一致`)
-        } else if (boundRec.targetType === 'unit' && boundRec.targetRefId
-            && tgtNode.refId && boundRec.targetRefId !== tgtNode.refId) {
-          errors.push(`连线 [${e.edgeId}] 的终点节点引用单元(refId=${tgtNode.refId})与填报记录目的单元(targetRefId=${boundRec.targetRefId})不一致`)
+        } else if (boundRec.targetType === 'unit' && boundRec.targetRefId) {
+          if (!tgtNode.refId) {
+            errors.push(`连线 [${e.edgeId}] 的终点节点未关联单元(refId为空)，但填报记录要求目的单元(targetRefId=${boundRec.targetRefId})`)
+          } else if (boundRec.targetRefId !== tgtNode.refId) {
+            errors.push(`连线 [${e.edgeId}] 的终点节点引用单元(refId=${tgtNode.refId})与填报记录目的单元(targetRefId=${boundRec.targetRefId})不一致`)
+          }
         } else if (boundRec.targetType === 'product_output' && tgtNode.nodeType !== 'product_output') {
           errors.push(`连线 [${e.edgeId}] 的终点节点类型(${tgtNode.nodeType})与填报记录目的类型(product_output)不一致`)
-        } else if (boundRec.targetType === 'product_output' && boundRec.itemType === 'product'
-            && boundRec.itemId && tgtNode.refId && boundRec.itemId !== tgtNode.refId) {
-          errors.push(`连线 [${e.edgeId}] 的终点节点引用产品(refId=${tgtNode.refId})与填报记录产品(itemId=${boundRec.itemId})不一致`)
+        } else if (boundRec.targetType === 'product_output' && boundRec.itemType === 'product' && boundRec.itemId) {
+          if (!tgtNode.refId) {
+            errors.push(`连线 [${e.edgeId}] 的终点节点未关联产品(refId为空)，但填报记录要求产品(itemId=${boundRec.itemId})`)
+          } else if (boundRec.itemId !== tgtNode.refId) {
+            errors.push(`连线 [${e.edgeId}] 的终点节点引用产品(refId=${tgtNode.refId})与填报记录产品(itemId=${boundRec.itemId})不一致`)
+          }
         }
       }
     }

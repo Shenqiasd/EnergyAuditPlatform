@@ -112,7 +112,7 @@ interface LayoutNode {
 }
 
 const layoutNodes = computed<LayoutNode[]>(() => {
-  const visible = props.nodes.filter(n => (n.visible ?? 1) !== 0)
+  const visible = props.nodes.filter(n => (n.visible ?? 1) !== 0 && n.nodeType !== 'product_output')
   const buckets = new Map<number, FlowNodeConfig[]>()
   for (const n of visible) {
     const s = nodeStage(n)
@@ -142,7 +142,7 @@ const layoutNodeMap = computed(() => {
   return m
 })
 
-const shapeNodes = computed(() => layoutNodes.value.filter(ln => ln.node.nodeType !== 'product_output'))
+const shapeNodes = computed(() => layoutNodes.value)
 
 const visibleEdges = computed(() => props.edges.filter(e => (e.visible ?? 1) !== 0))
 
@@ -188,11 +188,15 @@ function inventoryLines(n: FlowNodeConfig): InventorySlot[] {
     const s = fmtNum(v)
     return s ? s + ' ' + unit : ''
   }
+  const cs = fmt(cons?.closingStock)
+  const es = fmt(cons?.externalSupply)
+  const os = fmt(cons?.openingStock)
+  const pt = fmt(cons?.purchaseTotal)
   return [
-    { label: '期末库存', value: fmt(cons?.closingStock), arrow: '←' },
-    { label: '外供', value: fmt(cons?.externalSupply), arrow: '←' },
-    { label: '期初库存', value: fmt(cons?.openingStock), arrow: '→' },
-    { label: '购入', value: fmt(cons?.purchaseTotal), arrow: '→' },
+    { label: '期末库存', value: cs, arrow: cs ? '←' : '' },
+    { label: '外供', value: es, arrow: es ? '←' : '' },
+    { label: '期初库存', value: os, arrow: os ? '→' : '' },
+    { label: '购入', value: pt, arrow: pt ? '→' : '' },
   ]
 }
 
@@ -222,14 +226,18 @@ const equivLines = computed<EquivLine[]>(() => {
   const energyNodes = layoutNodes.value.filter(ln => ln.node.nodeType === 'energy_input' && ln.node.refId)
   if (!energyNodes.length) return []
   let totalEquiv = 0, totalEqual = 0
-  const items: { cy: number; equiv: number; equal: number }[] = []
+  const items: { cy: number; equiv: number | null; equal: number | null }[] = []
   for (const ln of energyNodes) {
     const cons = consumptionByEnergyId.value.get(ln.node.refId!)
     const en = energyMap.value.get(ln.node.refId!)
-    const usage = cons
-      ? (cons.purchaseTotal ?? 0) + (cons.openingStock ?? 0)
-        - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
-      : 0
+    // Distinguish absent data from real zero: require at least one non-null consumption field
+    if (!cons || (cons.purchaseTotal == null && cons.openingStock == null
+        && cons.closingStock == null && cons.externalSupply == null)) {
+      items.push({ cy: ln.cy, equiv: null, equal: null })
+      continue
+    }
+    const usage = (cons.purchaseTotal ?? 0) + (cons.openingStock ?? 0)
+      - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
     const equivF = en?.equivalentValue ?? cons?.equivFactor ?? 0
     const equalF = en?.equalValue ?? cons?.equalFactor ?? 0
     const equiv = usage * equivF
@@ -239,10 +247,10 @@ const equivLines = computed<EquivLine[]>(() => {
   }
   return items.map(it => ({
     y: it.cy,
-    equivVal: fmtNum(it.equiv),
-    equalVal: fmtNum(it.equal),
-    equivPct: totalEquiv > 0 ? fmtPct(it.equiv / totalEquiv) : '',
-    equalPct: totalEqual > 0 ? fmtPct(it.equal / totalEqual) : '',
+    equivVal: it.equiv != null ? fmtNum(it.equiv) : '',
+    equalVal: it.equal != null ? fmtNum(it.equal) : '',
+    equivPct: it.equiv != null && totalEquiv > 0 ? fmtPct(it.equiv / totalEquiv) : '',
+    equalPct: it.equal != null && totalEqual > 0 ? fmtPct(it.equal / totalEqual) : '',
   }))
 })
 const equivLineX = computed(() => stageDividers.value[0] ?? stageX.value[1] ?? cw.value * 0.3)
@@ -288,6 +296,29 @@ function tgtEntryPt(ln: LayoutNode): { x: number; y: number } {
 // Bus expansion: edges sharing the same source energy use the same trunk X.
 // Return-flow edges route along the top channel.
 // Half-circle line jumps at crossing points.
+
+// Allocate deterministic top-channel lanes for return-flow edges
+// Same-energy backflow edges share a trunk; different energies get separate lanes
+const backflowLaneMap = computed(() => {
+  const m = new Map<string, number>()
+  const backflowEdges = visibleEdges.value.filter(e => isBackflow(e))
+  const groups = new Map<string, FlowEdgeConfig[]>()
+  for (const e of backflowEdges) {
+    const rec = resolveRecord(e)
+    const iId = rec?.itemId ?? e.itemId
+    const key = iId ? `bf-energy-${iId}` : `bf-${e.edgeId}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(e)
+  }
+  let laneIdx = 0
+  for (const [, edges] of groups) {
+    for (const e of edges) {
+      m.set(e.edgeId, laneIdx)
+    }
+    laneIdx++
+  }
+  return m
+})
 
 // Build trunk X map: group edges by energy itemId sharing same source stage
 const trunkXMap = computed(() => {
@@ -336,8 +367,9 @@ function buildOrthoPath(edge: FlowEdgeConfig): { x: number; y: number }[] {
   const t = tgtEntryPt(tln)
 
   if (isBackflow(edge)) {
-    // Return-flow: route along top channel
-    const topY = HEADER_Y - 10
+    // Return-flow: route along dedicated top channel lane
+    const lane = backflowLaneMap.value.get(edge.edgeId) ?? 0
+    const topY = HEADER_Y - 10 - lane * 12
     return [s, { x: s.x, y: topY }, { x: t.x, y: topY }, t]
   }
 
@@ -515,8 +547,9 @@ function edgeDualLabel(edge: FlowEdgeConfig): DualLabel {
     const en = iId ? energyMap.value.get(iId) : undefined
     const name = en?.name ?? ''
     const energyUnit = en?.measurementUnit ?? ''
-    // Top: energy name + equivalent/actual value (from record calculatedValue)
-    topTxt = cv != null ? `${name} ${fmtNum(cv)} tce` : name
+    // Top: energy name + equivalent/actual value from bound record (no hard-coded unit)
+    const cvStr = fmtNum(cv)
+    topTxt = cvStr ? `${name} ${cvStr}` : name
     // Bottom: physical quantity + energy unit
     bottomTxt = fmtNum(pq) ? `${fmtNum(pq)} ${energyUnit}` : ''
   } else {
@@ -695,18 +728,18 @@ function fitView() { svgRef.value?.scrollIntoView({ behavior: 'smooth', block: '
                   stroke="#999" stroke-width="1"
                   :stroke-dasharray="slot.value ? undefined : '2,2'"
                 />
-                <!-- Arrow direction indicator -->
-                <text
+                <!-- Arrow direction indicator (hidden when no data) -->
+                <text v-if="slot.arrow"
                   :x="slot.arrow === '→' ? (ln.cx - ln.w / 2 - 6) : (ln.cx - ln.w / 2 - 52)"
                   :y="ln.cy - ln.h / 2 + 14 + si * 15"
                   font-size="9" fill="#999"
                 >{{ slot.arrow }}</text>
-                <!-- Label + value -->
-                <text
+                <!-- Label + value (hidden when no data) -->
+                <text v-if="slot.value"
                   :x="ln.cx - ln.w / 2 - 55"
                   :y="ln.cy - ln.h / 2 + 14 + si * 15"
                   text-anchor="end" font-size="8" fill="#555"
-                >{{ slot.label }}{{ slot.value ? ': ' + slot.value : '' }}</text>
+                >{{ slot.label }}: {{ slot.value }}</text>
               </template>
             </g>
           </g>
