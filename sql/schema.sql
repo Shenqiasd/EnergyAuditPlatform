@@ -1071,21 +1071,24 @@ CREATE TABLE `de_saving_potential` (
 -- ----------------------------
 DROP TABLE IF EXISTS `de_management_policy`;
 CREATE TABLE `de_management_policy` (
-    `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-    `enterprise_id` BIGINT       NOT NULL                COMMENT '企业ID -> ent_enterprise.id',
-    `audit_year`    INT          NOT NULL                COMMENT '审计年度',
-    `policy_name`   VARCHAR(256) DEFAULT NULL            COMMENT '制度名称',
-    `department`    VARCHAR(128) DEFAULT NULL            COMMENT '主管部门',
-    `publish_date`  DATE         DEFAULT NULL            COMMENT '颁布日期',
-    `valid_period`  VARCHAR(64)  DEFAULT NULL            COMMENT '有效期',
-    `main_content`  TEXT         DEFAULT NULL            COMMENT '主要内容',
-    `remark`        VARCHAR(512) DEFAULT NULL            COMMENT '备注',
-    `create_by`     VARCHAR(64)  DEFAULT NULL            COMMENT '创建人',
-    `create_time`   DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_by`     VARCHAR(64)  DEFAULT NULL            COMMENT '更新人',
-    `update_time`   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    `deleted`       TINYINT      DEFAULT 0               COMMENT '逻辑删除(0未删除 1已删除)',
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `submission_id`  BIGINT       NOT NULL DEFAULT 0     COMMENT '关联提交ID',
+    `enterprise_id`  BIGINT       NOT NULL                COMMENT '企业ID -> ent_enterprise.id',
+    `audit_year`     INT          NOT NULL                COMMENT '审计年度',
+    `seq_no`         INT          DEFAULT NULL            COMMENT '序号',
+    `policy_name`    VARCHAR(256) DEFAULT NULL            COMMENT '制度名称',
+    `main_content`   TEXT         DEFAULT NULL            COMMENT '主要内容',
+    `supervise_dept` VARCHAR(128) DEFAULT NULL            COMMENT '主管部门',
+    `publish_date`   VARCHAR(32)  DEFAULT NULL            COMMENT '颁布日期',
+    `valid_period`   VARCHAR(64)  DEFAULT NULL            COMMENT '有效期',
+    `remark`         VARCHAR(512) DEFAULT NULL            COMMENT '备注',
+    `create_by`      VARCHAR(64)  DEFAULT NULL            COMMENT '创建人',
+    `create_time`    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)  DEFAULT NULL            COMMENT '更新人',
+    `update_time`    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted`        TINYINT      DEFAULT 0               COMMENT '逻辑删除(0未删除 1已删除)',
     PRIMARY KEY (`id`),
+    INDEX `idx_submission` (`submission_id`),
     INDEX `idx_enterprise_year` (`enterprise_id`, `audit_year`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='能源管理制度';
 
