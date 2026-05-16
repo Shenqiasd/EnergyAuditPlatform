@@ -418,18 +418,6 @@ const trunkInfoMap = computed(() => {
   return m
 })
 
-// Legacy trunkXMap for backward compatibility with buildOrthoPath
-const trunkXMap = computed(() => {
-  const m = new Map<string, number>()
-  for (const [edgeId, info] of trunkInfoMap.value) {
-    m.set(edgeId, info.trunkX)
-  }
-  return m
-})
-
-function trunkKey(e: FlowEdgeConfig): string {
-  return e.edgeId
-}
 
 // Collect all horizontal segment Y positions for crossing detection
 interface HSegment { y: number; x1: number; x2: number; edgeId: string }
