@@ -37,6 +37,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -340,7 +341,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 .filter(f -> f.getId() != null)
                 .collect(Collectors.toMap(DeEnergyFlow::getId, f -> f, (a, b) -> a));
         Set<String> getNodeIds = new HashSet<>();
-        Map<String, DiagramConfigDTO.FlowNodeDTO> getNodeMap = new HashMap<>();
+        Map<String, DiagramConfigDTO.FlowNodeDTO> getNodeMap = new LinkedHashMap<>();
         if (result.getDiagram() != null && result.getDiagram().getNodes() != null) {
             for (DiagramConfigDTO.FlowNodeDTO nd : result.getDiagram().getNodes()) {
                 if (nd.getNodeId() != null) {
@@ -1051,8 +1052,8 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         double[] stageXArr = new double[4];
         for (int i = 0; i < 4; i++) stageXArr[i] = STAGE_MARGIN + i * sw;
 
-        // Bucket by stage
-        Map<Integer, List<DiagramConfigDTO.FlowNodeDTO>> buckets = new HashMap<>();
+        // Bucket by stage (LinkedHashMap preserves insertion order for deterministic row assignment)
+        Map<Integer, List<DiagramConfigDTO.FlowNodeDTO>> buckets = new LinkedHashMap<>();
         for (DiagramConfigDTO.FlowNodeDTO nd : visibleNodes) {
             int s = nodeStageMap.getOrDefault(nd.getNodeId(), 2);
             buckets.computeIfAbsent(s, k -> new ArrayList<>()).add(nd);

@@ -922,10 +922,11 @@ function removeRoutePoint(index: number) {
 const BACKFLOW_LANE_SPACING = 12
 
 function isEdgeBackflow(edge: FlowEdgeConfig): boolean {
-  const src = nodes.value.find(n => n.nodeId === edge.sourceNodeId)
-  const dst = nodes.value.find(n => n.nodeId === edge.targetNodeId)
-  if (!src || !dst) return false
-  return (src.positionX + (src.width || 100)) > (dst.positionX + (dst.width || 100))
+  // Use fixed-stage layout stage comparison (same as final-effect renderer)
+  const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
+  const dstFixed = fixedStageLayout.value.get(edge.targetNodeId)
+  if (!srcFixed || !dstFixed) return false
+  return srcFixed.stage > dstFixed.stage
 }
 
 function resolveEdgeRecord(edge: FlowEdgeConfig): FlowRecord | undefined {
@@ -975,10 +976,9 @@ const editorTrunkInfoMap = computed(() => {
   }
   let slotIdx = 0
   for (const [, grp] of trunkGroups) {
-    const src = nodes.value.find(n => n.nodeId === grp[0].sourceNodeId)
-    if (!src) continue
-    const srcW = src.width || 100
-    const trunkX = src.positionX + srcW + 20 + slotIdx * 16
+    const srcFixed = fixedStageLayout.value.get(grp[0].sourceNodeId)
+    if (!srcFixed) continue
+    const trunkX = srcFixed.cx + srcFixed.w / 2 + 20 + slotIdx * 16
     const targetSet = new Set(grp.map(e => e.targetNodeId))
     const targets = Array.from(targetSet)
     for (const e of grp) {
@@ -1082,7 +1082,7 @@ function edgePath(edge: FlowEdgeConfig): string {
 // Product output lines (editor renders same as final-effect renderer:
 // black horizontal line from source unit exit to right boundary)
 // ============================================================
-interface EditorProductLine { y: number; x1: number; topText: string; bottomText: string; edgeId: string }
+interface EditorProductLine { y: number; x1: number; topText: string; bottomText: string; edgeId: string; invalid?: boolean }
 const editorProductLines = computed<EditorProductLine[]>(() => {
   const results: EditorProductLine[] = []
   for (const e of edges.value) {
@@ -1098,12 +1098,15 @@ const editorProductLines = computed<EditorProductLine[]>(() => {
     const pq = rec?.physicalQuantity ?? e.physicalQuantity
     const unit = pr?.measurementUnit ?? ''
     const bottomText = pq != null ? `${pq} ${unit}` : ''
+    // Non-stage-3 sources are invalid (same check as final-effect renderer)
+    const invalid = srcFixed.stage !== 3
     results.push({
       y: srcFixed.cy,
       x1: srcFixed.cx + srcFixed.w / 2,
       topText,
       bottomText,
       edgeId: e.edgeId,
+      invalid,
     })
   }
   return results
@@ -1615,18 +1618,24 @@ function formatNum(n: number | null | undefined): string {
             </template>
           </g>
 
-          <!-- Product output lines: black horizontal to right boundary (matches final-effect renderer) -->
+          <!-- Product output lines: black horizontal to right boundary with arrow (matches final-effect renderer) -->
           <g class="product-lines-layer">
             <template v-for="pl in editorProductLines" :key="pl.edgeId">
-              <line :x1="pl.x1" :y1="pl.y" :x2="canvasWidth - 20" :y2="pl.y" stroke="#000" stroke-width="2" />
+              <line :x1="pl.x1" :y1="pl.y" :x2="canvasWidth - 30" :y2="pl.y"
+                :stroke="pl.invalid ? '#E74C3C' : '#000'" stroke-width="2"
+                :stroke-dasharray="pl.invalid ? '6,3' : undefined"
+                :marker-end="`url(#arrow-cfg-${pl.invalid ? 'E74C3C' : '000'})`" />
               <text
-                :x="(pl.x1 + canvasWidth - 20) / 2" :y="pl.y - 6"
-                text-anchor="middle" font-size="10" fill="#000"
-              >{{ pl.topText }}</text>
+                v-if="pl.topText || pl.invalid"
+                :x="(pl.x1 + canvasWidth - 30) / 2" :y="pl.y - 8"
+                text-anchor="middle" font-size="10" :fill="pl.invalid ? '#E74C3C' : '#333'"
+                stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"
+              >{{ pl.invalid ? '⚠ ' + (pl.topText || '非终端使用来源') : pl.topText }}</text>
               <text
                 v-if="pl.bottomText"
-                :x="(pl.x1 + canvasWidth - 20) / 2" :y="pl.y + 14"
-                text-anchor="middle" font-size="10" fill="#666"
+                :x="(pl.x1 + canvasWidth - 30) / 2" :y="pl.y + 14"
+                text-anchor="middle" font-size="9" :fill="pl.invalid ? '#E74C3C' : '#666'"
+                stroke="#fff" stroke-width="2" stroke-linejoin="round" paint-order="stroke"
               >{{ pl.bottomText }}</text>
             </template>
           </g>

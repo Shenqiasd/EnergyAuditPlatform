@@ -3281,4 +3281,125 @@ class EnergyFlowConfigServiceImplTest {
         assertThat(result.getValidation().getExportErrors())
                 .anyMatch(e -> e.contains("edge-fwd") && e.contains("正交"));
     }
+
+    @Test
+    void computeFixedStageLayoutPreservesNodeOrderForSameStageRowAssignment() {
+        // Multiple nodes in the same stage must get row Y in the same order
+        // as they appear in the nodes array (LinkedHashMap preserves insertion order).
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(
+                unit(1L, "锅炉A", 1),
+                unit(2L, "锅炉B", 1),
+                unit(3L, "锅炉C", 1)
+        ));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of());
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("test");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        // Three nodes all in stage 1 (unitType=1), inserted in order A, B, C
+        DeEnergyFlowNode nodeA = new DeEnergyFlowNode();
+        nodeA.setNodeId("node-a");
+        nodeA.setNodeType("unit");
+        nodeA.setRefType("unit");
+        nodeA.setRefId(1L);
+        nodeA.setPositionX(100.0);
+        nodeA.setPositionY(100.0);
+        nodeA.setWidth(100.0);
+        nodeA.setHeight(50.0);
+        nodeA.setVisible(1);
+
+        DeEnergyFlowNode nodeB = new DeEnergyFlowNode();
+        nodeB.setNodeId("node-b");
+        nodeB.setNodeType("unit");
+        nodeB.setRefType("unit");
+        nodeB.setRefId(2L);
+        nodeB.setPositionX(100.0);
+        nodeB.setPositionY(200.0);
+        nodeB.setWidth(100.0);
+        nodeB.setHeight(50.0);
+        nodeB.setVisible(1);
+
+        DeEnergyFlowNode nodeC = new DeEnergyFlowNode();
+        nodeC.setNodeId("node-c");
+        nodeC.setNodeType("unit");
+        nodeC.setRefType("unit");
+        nodeC.setRefId(3L);
+        nodeC.setPositionX(100.0);
+        nodeC.setPositionY(300.0);
+        nodeC.setWidth(100.0);
+        nodeC.setHeight(50.0);
+        nodeC.setVisible(1);
+
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(nodeA, nodeB, nodeC));
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        // All 3 nodes should be in stage 1 with deterministic row assignment:
+        // node-a row 0, node-b row 1, node-c row 2
+        // BODY_TOP = 55 + 0 + 20 = 75; ROW_H = 90
+        // node-a cy = 75 + 0*90 + 45 = 120
+        // node-b cy = 75 + 1*90 + 45 = 210
+        // node-c cy = 75 + 2*90 + 45 = 300
+        List<DiagramConfigDTO.FlowNodeDTO> nodes = result.getDiagram().getNodes();
+        assertThat(nodes).hasSize(3);
+        // Verify the nodes are in original insertion order (deterministic)
+        assertThat(nodes.get(0).getNodeId()).isEqualTo("node-a");
+        assertThat(nodes.get(1).getNodeId()).isEqualTo("node-b");
+        assertThat(nodes.get(2).getNodeId()).isEqualTo("node-c");
+    }
+
+    @Test
+    void getConfigProductOutputValidationBlocksNonStage3Source() {
+        // Product output records with non-stage-3 source must produce export errors
+        // This tests the product-output consistency: both editor and final renderer
+        // must mark non-stage-3 sources as invalid.
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(
+                unit(1L, "锅炉房", 1),  // unitType=1 → stage 1 (NOT stage 3)
+                unit(2L, "终端A", 3)     // unitType=3 → stage 3 (valid)
+        ));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        // Product output record from stage 1 source (invalid) and stage 3 source (valid)
+        DeEnergyFlow invalidProductFlow = new DeEnergyFlow();
+        invalidProductFlow.setId(100L);
+        invalidProductFlow.setSourceType("unit");
+        invalidProductFlow.setSourceRefId(1L);  // unitType=1, NOT stage 3
+        invalidProductFlow.setTargetType("product_output");
+        invalidProductFlow.setTargetRefId(null);
+        invalidProductFlow.setItemType("product");
+        invalidProductFlow.setItemId(1L);
+        invalidProductFlow.setPhysicalQuantity(new BigDecimal("50"));
+
+        DeEnergyFlow validProductFlow = new DeEnergyFlow();
+        validProductFlow.setId(101L);
+        validProductFlow.setSourceType("unit");
+        validProductFlow.setSourceRefId(2L);  // unitType=3, stage 3 (valid)
+        validProductFlow.setTargetType("product_output");
+        validProductFlow.setTargetRefId(null);
+        validProductFlow.setItemType("product");
+        validProductFlow.setItemId(1L);
+        validProductFlow.setPhysicalQuantity(new BigDecimal("100"));
+
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(invalidProductFlow, validProductFlow));
+        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+        when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "终端A", 3));
+        when(productMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(product(1L, "产品A", new BigDecimal("1000")));
+
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        // Should have export error for the non-stage-3 source
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("终端使用环节") && e.contains("unitType=3"));
+    }
 }
