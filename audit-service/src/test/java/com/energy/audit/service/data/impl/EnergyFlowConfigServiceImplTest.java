@@ -256,6 +256,9 @@ class EnergyFlowConfigServiceImplTest {
                     when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(elec);
 
                     DeEnergyFlow flow = new DeEnergyFlow();
+                    flow.setSourceType("external_energy");
+                    flow.setTargetType("unit");
+                    flow.setTargetRefId(1L);
                     flow.setItemType("energy");
                     flow.setItemId(1L);
                     flow.setPhysicalQuantity(new BigDecimal("10000"));
@@ -281,6 +284,9 @@ class EnergyFlowConfigServiceImplTest {
             when(productMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(prod);
 
             DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setSourceType("unit");
+            flow.setSourceRefId(1L);
+            flow.setTargetType("product_output");
             flow.setItemType("product");
             flow.setItemId(1L);
             flow.setPhysicalQuantity(new BigDecimal("2000"));
@@ -358,6 +364,9 @@ class EnergyFlowConfigServiceImplTest {
 
             // Create a record so the edge can bind to it
             DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit");
+            rec.setTargetRefId(1L);
             rec.setItemType("energy");
             rec.setItemId(1L);
             rec.setPhysicalQuantity(new BigDecimal("100"));
@@ -439,6 +448,9 @@ class EnergyFlowConfigServiceImplTest {
 
             // Create a record so the edge can bind to it
             DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit");
+            rec.setTargetRefId(1L);
             rec.setItemType("energy");
             rec.setItemId(5L);
             rec.setPhysicalQuantity(new BigDecimal("100"));
@@ -505,11 +517,17 @@ class EnergyFlowConfigServiceImplTest {
             // Incoming: keep record 10, drop record 20, add new record
             DeEnergyFlow keep = new DeEnergyFlow();
             keep.setId(10L);
+            keep.setSourceType("external_energy");
+            keep.setTargetType("unit");
+            keep.setTargetRefId(1L);
             keep.setItemType("energy");
             keep.setItemId(1L);
             keep.setPhysicalQuantity(new BigDecimal("100"));
 
             DeEnergyFlow newRec = new DeEnergyFlow();
+            newRec.setSourceType("unit");
+            newRec.setSourceRefId(1L);
+            newRec.setTargetType("product_output");
             newRec.setItemType("product");
             newRec.setItemId(2L);
             newRec.setPhysicalQuantity(new BigDecimal("200"));
@@ -548,6 +566,9 @@ class EnergyFlowConfigServiceImplTest {
 
             // One new record, insert simulates auto-increment ID = 42
             DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit");
+            rec.setTargetRefId(1L);
             rec.setItemType("energy");
             rec.setItemId(1L);
             rec.setPhysicalQuantity(new BigDecimal("500"));
@@ -768,6 +789,9 @@ class EnergyFlowConfigServiceImplTest {
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
 
             DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit");
+            rec.setTargetRefId(1L);
             rec.setItemType("energy");
             rec.setItemId(1L);
             rec.setPhysicalQuantity(new BigDecimal("100"));
@@ -847,6 +871,9 @@ class EnergyFlowConfigServiceImplTest {
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
 
             DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit");
+            rec.setTargetRefId(1L);
             rec.setItemType("energy");
             rec.setItemId(1L);
             rec.setPhysicalQuantity(new BigDecimal("100"));
