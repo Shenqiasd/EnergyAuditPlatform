@@ -977,8 +977,13 @@ function computeLocalExportErrors(): string[] {
       const energy = energies.value.find(e => e.id === r.itemId)
       if (!energy) {
         errors.push(`填报记录的能源品种(itemId=${r.itemId})在本企业中不存在或已删除（待确认）`)
-      } else if (energy.equivalentValue == null) {
-        errors.push(`能源 [${energy.name}] 缺少折标系数`)
+      } else {
+        if (energy.equivalentValue == null) {
+          errors.push(`能源 [${energy.name}] 缺少当量值系数(equivalentValue)`)
+        }
+        if (energy.equalValue == null) {
+          errors.push(`能源 [${energy.name}] 缺少等价值系数(equalValue)`)
+        }
       }
     } else if (r.itemType === 'product' && r.itemId) {
       const product = products.value.find(p => p.id === r.itemId)
@@ -993,21 +998,33 @@ function computeLocalExportErrors(): string[] {
       errors.push(`填报记录 [${r.energyProduct}] 为旧数据（待确认），请编辑确认品目类型和品目`)
     }
   }
-  // Terminal-use semantics: product-output records must originate from proven terminal-use sources.
-  // Only unit sources with unitType=3 qualify. System/custom are rejected outright.
+  // Terminal-use semantics: product-output records require:
+  //   itemType=product + active product itemId + sourceType=unit + active sourceRefId with unitType=3
+  // Block external_energy/system/custom/missing refs/missing unitType/non-terminal units/energy-to-product
   for (const r of flowRecords.value) {
     if (r.targetType !== 'product_output') continue
-    if (r.sourceType === 'unit' && r.sourceRefId) {
+    // Must be itemType=product with valid product itemId
+    if (r.itemType !== 'product') {
+      errors.push(`产品输出记录必须设置itemType=product，当前itemType=${r.itemType ?? '空'}`)
+    } else if (!r.itemId) {
+      errors.push('产品输出记录必须关联有效的产品(itemId不能为空)')
+    } else if (!products.value.find(p => p.id === r.itemId)) {
+      errors.push(`产品输出记录关联的产品(itemId=${r.itemId})不存在`)
+    }
+    // Must be sourceType=unit with active terminal-use source
+    if (r.sourceType !== 'unit') {
+      errors.push(`产品输出记录的来源类型必须为unit(终端使用环节用能单元)，当前sourceType=${r.sourceType ?? '空'}`)
+    } else if (!r.sourceRefId) {
+      errors.push('产品输出记录必须关联来源单元(sourceRefId不能为空)')
+    } else {
       const srcUnit = units.value.find(u => u.id === r.sourceRefId)
-      if (srcUnit && srcUnit.unitType == null) {
+      if (!srcUnit) {
+        errors.push(`产品输出记录的来源单元(sourceRefId=${r.sourceRefId})不存在`)
+      } else if (srcUnit.unitType == null) {
         errors.push(`产品输出记录的来源单元 [${srcUnit.name}] 缺少unitType，无法确认为终端使用环节`)
-      } else if (srcUnit && srcUnit.unitType !== 3) {
-        errors.push(`产品输出记录的来源单元 [${srcUnit.name}] 不是终端使用环节(unitType=${srcUnit.unitType})，产品输出必须从终端使用环节产出`)
+      } else if (srcUnit.unitType !== 3) {
+        errors.push(`产品输出记录的来源单元 [${srcUnit.name}] 不是终端使用环节(unitType=${srcUnit.unitType})`)
       }
-    } else if (r.sourceType === 'system') {
-      errors.push('产品输出记录不允许来源类型为system，必须绑定终端使用环节的用能单元(sourceType=unit, unitType=3)')
-    } else if (r.sourceType === 'custom') {
-      errors.push('产品输出记录不允许来源类型为custom，必须绑定终端使用环节的用能单元(sourceType=unit, unitType=3)')
     }
   }
   // Check visible edges for valid record bindings, endpoint nodes, and endpoint semantics
@@ -1080,6 +1097,39 @@ function computeLocalExportErrors(): string[] {
             errors.push(`连线 [${e.edgeId}] 的终点节点引用产品(refId=${tgtNode.refId})与填报记录产品(itemId=${boundRec.itemId})不一致`)
           }
         }
+      }
+    }
+    // Validate route points: must form valid 90° orthogonal segments
+    if (e.routePoints && e.sourceNodeId && e.targetNodeId) {
+      const srcNode = nodeByIdMap.get(e.sourceNodeId)
+      const dstNode = nodeByIdMap.get(e.targetNodeId)
+      if (srcNode && dstNode) {
+        try {
+          const rpts = JSON.parse(e.routePoints) as { x: number; y: number }[]
+          if (Array.isArray(rpts) && rpts.length > 0) {
+            const srcW = srcNode.width || 100
+            const srcHH = (srcNode.height || 50) / 2
+            const dstHH = (dstNode.height || 50) / 2
+            const sx = srcNode.positionX + srcW
+            const sy = srcNode.positionY + srcHH
+            const tx = dstNode.positionX
+            const ty = dstNode.positionY + dstHH
+            const full = [{ x: sx, y: sy }, ...rpts, { x: tx, y: ty }]
+            for (let i = 0; i < full.length - 1; i++) {
+              const a = full[i], b = full[i + 1]
+              if (Math.abs(a.x - b.x) > 1 && Math.abs(a.y - b.y) > 1) {
+                errors.push(`连线 [${e.edgeId}] 的路由点不符合90°正交规则（第${i + 1}段为斜线），请重新编辑路由点`)
+                break
+              }
+            }
+            for (const p of rpts) {
+              if (p.x < 0 || p.y < 0 || p.x > 5000 || p.y > 5000) {
+                errors.push(`连线 [${e.edgeId}] 的路由点超出画布范围`)
+                break
+              }
+            }
+          }
+        } catch { /* invalid JSON ignored — not a blocking error here */ }
       }
     }
   }

@@ -265,10 +265,17 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     String msg = "填报记录的能源品种(itemId=" + f.getItemId() + ")在本企业中不存在或已删除（待确认）";
                     warnings.add(msg);
                     exportErrors.add(msg);
-                } else if (energy.getEquivalentValue() == null) {
-                    String msg = "能源 [" + energy.getName() + "] 缺少折标系数";
-                    warnings.add(msg);
-                    exportErrors.add(msg);
+                } else {
+                    if (energy.getEquivalentValue() == null) {
+                        String msg = "能源 [" + energy.getName() + "] 缺少当量值系数(equivalentValue)";
+                        warnings.add(msg);
+                        exportErrors.add(msg);
+                    }
+                    if (energy.getEqualValue() == null) {
+                        String msg = "能源 [" + energy.getName() + "] 缺少等价值系数(equalValue)";
+                        warnings.add(msg);
+                        exportErrors.add(msg);
+                    }
                 }
             } else if ("product".equals(f.getItemType()) && f.getItemId() != null) {
                 BsProduct product = productMapper.selectByIdAndEnterprise(f.getItemId(), enterpriseId);
@@ -891,26 +898,39 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         if (flow.getPhysicalQuantity() == null) {
             errors.add("实物量(physicalQuantity)不能为空");
         }
-        // Terminal-use semantics: product output must originate from a proven terminal-use source.
-        // Only unit sources with unitType=3 qualify. System/custom sources cannot be proven terminal-use.
+        // Terminal-use semantics: product output requires:
+        //   sourceType=unit, active sourceRefId with unitType=3,
+        //   itemType=product, active product itemId.
+        // Block external_energy/system/custom/missing refs/missing unitType/non-terminal units.
         if ("product_output".equals(flow.getTargetType())) {
-            if ("unit".equals(flow.getSourceType())) {
-                if (flow.getSourceRefId() != null) {
-                    BsUnit srcUnit = unitMapper.selectByIdAndEnterprise(flow.getSourceRefId(), enterpriseId);
-                    if (srcUnit == null) {
-                        errors.add("产品输出记录的来源单元(sourceRefId=" + flow.getSourceRefId() + ")不存在");
-                    } else if (srcUnit.getUnitType() == null) {
-                        errors.add("产品输出记录的来源单元 [" + srcUnit.getName()
-                                + "] 缺少unitType，无法确认为终端使用环节");
-                    } else if (srcUnit.getUnitType() != 3) {
-                        errors.add("产品输出记录的来源单元必须是终端使用环节(unitType=3)，当前来源单元类型为"
-                                + srcUnit.getUnitType());
-                    }
+            // Must be itemType=product with active product itemId
+            if (!"product".equals(flow.getItemType())) {
+                errors.add("产品输出记录必须设置itemType=product，当前itemType=" + flow.getItemType());
+            } else if (flow.getItemId() == null) {
+                errors.add("产品输出记录必须关联有效的产品(itemId不能为空)");
+            } else {
+                BsProduct prod = productMapper.selectByIdAndEnterprise(flow.getItemId(), enterpriseId);
+                if (prod == null) {
+                    errors.add("产品输出记录关联的产品(itemId=" + flow.getItemId() + ")不存在");
                 }
-            } else if ("system".equals(flow.getSourceType())) {
-                errors.add("产品输出记录不允许来源类型为system，必须绑定终端使用环节的用能单元(sourceType=unit, unitType=3)");
-            } else if ("custom".equals(flow.getSourceType())) {
-                errors.add("产品输出记录不允许来源类型为custom，必须绑定终端使用环节的用能单元(sourceType=unit, unitType=3)");
+            }
+            // Must be sourceType=unit with active terminal-use source
+            if (!"unit".equals(flow.getSourceType())) {
+                errors.add("产品输出记录的来源类型必须为unit(终端使用环节用能单元)，当前sourceType="
+                        + flow.getSourceType());
+            } else if (flow.getSourceRefId() == null) {
+                errors.add("产品输出记录必须关联来源单元(sourceRefId不能为空)");
+            } else {
+                BsUnit srcUnit = unitMapper.selectByIdAndEnterprise(flow.getSourceRefId(), enterpriseId);
+                if (srcUnit == null) {
+                    errors.add("产品输出记录的来源单元(sourceRefId=" + flow.getSourceRefId() + ")不存在");
+                } else if (srcUnit.getUnitType() == null) {
+                    errors.add("产品输出记录的来源单元 [" + srcUnit.getName()
+                            + "] 缺少unitType，无法确认为终端使用环节");
+                } else if (srcUnit.getUnitType() != 3) {
+                    errors.add("产品输出记录的来源单元必须是终端使用环节(unitType=3)，当前来源单元类型为"
+                            + srcUnit.getUnitType());
+                }
             }
         }
         if (!errors.isEmpty()) {

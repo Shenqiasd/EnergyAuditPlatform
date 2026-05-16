@@ -268,28 +268,30 @@ function unitEfficiency(n: FlowNodeConfig): string {
 
 // ── Equivalence / equivalent double lines (stage 0→1) ─────
 // Always-present double solid line region (mandatory layout element)
-// Spec: equiv = consumeAmount × equivalentCoefficient, equal = consumeAmount × calorificCoefficient
-// Percentages: 消费值 ÷ 能源总量, where 能源总量 = openingStock + purchaseAmount - externalSupply - closingStock (per-node)
-// Blank when consumeAmount is null, coefficient is null, or any energyTotal term is missing
+// Schema mapping: equivalent_value = 当量值 coefficient; equal_value = 等价值 coefficient
+// Left column 等价值 = consumeAmount × equalValue (等价值系数)
+// Right column 当量值 = consumeAmount × equivalentValue (当量值系数)
+// Percentages: 消费值 ÷ 能源总量 (per-node), blank when any required term missing
 interface EquivLine { y: number; equivVal: string; equalVal: string; equivPct: string; equalPct: string }
 const equivLines = computed<EquivLine[]>(() => {
   const energyNodes = layoutNodes.value.filter(ln => ln.node.nodeType === 'energy_input' && ln.node.refId)
   if (!energyNodes.length) return []
-  const items: { cy: number; equiv: number | null; equal: number | null; pct: number | null }[] = []
+  const items: { cy: number; dengJia: number | null; dangLiang: number | null; pct: number | null }[] = []
   for (const ln of energyNodes) {
     const cons = consumptionByEnergyId.value.get(ln.node.refId!)
     const en = energyMap.value.get(ln.node.refId!)
     // consumeAmount must be present
     if (!cons || cons.consumeAmount == null) {
-      items.push({ cy: ln.cy, equiv: null, equal: null, pct: null })
+      items.push({ cy: ln.cy, dengJia: null, dangLiang: null, pct: null })
       continue
     }
     const ca = cons.consumeAmount
+    // Schema: equalValue = 等价值 coefficient (left), equivalentValue = 当量值 coefficient (right)
     // Coefficients must be present (not coerced from null to 0)
-    const equivF = en?.equivalentValue ?? cons?.equivFactor
-    const equalF = en?.equalValue ?? cons?.equalFactor
-    const equiv = equivF != null ? ca * equivF : null
-    const equal = equalF != null ? ca * equalF : null
+    const dengJiaF = en?.equalValue ?? cons?.equalFactor
+    const dangLiangF = en?.equivalentValue ?? cons?.equivFactor
+    const dengJia = dengJiaF != null ? ca * dengJiaF : null
+    const dangLiang = dangLiangF != null ? ca * dangLiangF : null
     // Percentage: consumeAmount / energyTotal where energyTotal = openingStock + purchaseAmount - externalSupply - closingStock
     // All four energyTotal terms must be present; otherwise blank
     let pct: number | null = null
@@ -298,12 +300,14 @@ const equivLines = computed<EquivLine[]>(() => {
       const energyTotal = cons.openingStock + cons.purchaseAmount - cons.externalSupply - cons.closingStock
       pct = energyTotal > 0 ? ca / energyTotal : null
     }
-    items.push({ cy: ln.cy, equiv, equal, pct })
+    items.push({ cy: ln.cy, dengJia, dangLiang, pct })
   }
   return items.map(it => ({
     y: it.cy,
-    equivVal: it.equiv != null ? fmtNum(it.equiv) : '',
-    equalVal: it.equal != null ? fmtNum(it.equal) : '',
+    // equivVal = left column = 等价值 = consumeAmount × equalValue
+    equivVal: it.dengJia != null ? fmtNum(it.dengJia) : '',
+    // equalVal = right column = 当量值 = consumeAmount × equivalentValue
+    equalVal: it.dangLiang != null ? fmtNum(it.dangLiang) : '',
     equivPct: it.pct != null ? fmtPct(it.pct) : '',
     equalPct: it.pct != null ? fmtPct(it.pct) : '',
   }))
@@ -347,10 +351,38 @@ function tgtEntryPt(ln: LayoutNode): { x: number; y: number } {
 
 // ── Canonical 90° orthogonal routing ─────────────────────────
 // Every rendered/exported path must be strictly 90° orthogonal.
-// Editor routePoints are treated as hints (Y-levels) not raw SVG paths.
+// Editor routePoints are integrated as constrained Y-level waypoint hints.
+// They must produce valid 90° orthogonal segments; non-orthogonal points are rejected.
 // Bus expansion: edges sharing the same source energy use the same trunk X.
 // Return-flow edges route along the top channel.
 // Half-circle line jumps at crossing points.
+
+/** Parse edge.routePoints JSON string into coordinate array; empty on invalid/missing */
+function parseRoutePoints(edge: FlowEdgeConfig): { x: number; y: number }[] {
+  if (!edge.routePoints) return []
+  try {
+    const pts = JSON.parse(edge.routePoints) as { x: number; y: number }[]
+    if (!Array.isArray(pts)) return []
+    return pts.filter(p => typeof p.x === 'number' && typeof p.y === 'number' && isFinite(p.x) && isFinite(p.y))
+  } catch { return [] }
+}
+
+/** Check if route points are valid 90° constrained hints (no non-orthogonal jumps) */
+function validateRoutePoints(rpts: { x: number; y: number }[], s: { x: number; y: number }, t: { x: number; y: number }): boolean {
+  if (!rpts.length) return true
+  // Route points must all be within reasonable canvas bounds
+  for (const p of rpts) {
+    if (p.x < 0 || p.y < 0 || p.x > 5000 || p.y > 5000) return false
+  }
+  // Build full path and check all segments are orthogonal (H or V)
+  const full = [s, ...rpts, t]
+  for (let i = 0; i < full.length - 1; i++) {
+    const a = full[i], b = full[i + 1]
+    // Each segment must be horizontal or vertical (tolerance 1px)
+    if (Math.abs(a.x - b.x) > 1 && Math.abs(a.y - b.y) > 1) return false
+  }
+  return true
+}
 
 // Allocate deterministic top-channel lanes for return-flow edges
 // Group by itemId + source/target path; separate lanes for different paths
@@ -431,6 +463,12 @@ function buildOrthoPath(edge: FlowEdgeConfig): { x: number; y: number }[] {
 
   const s = srcExitPt(sln)
   const t = tgtEntryPt(tln)
+
+  // Try editor route points first — use as constrained waypoints if they form valid 90° paths
+  const rpts = parseRoutePoints(edge)
+  if (rpts.length > 0 && validateRoutePoints(rpts, s, t)) {
+    return [s, ...rpts, t]
+  }
 
   if (isBackflow(edge)) {
     // Return-flow: route along dedicated top channel lane (within canvas bounds)

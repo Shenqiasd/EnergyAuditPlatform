@@ -150,9 +150,43 @@ class EnergyFlowConfigServiceImplTest {
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
 
         assertThat(result.getValidation().getWarnings())
-                .anyMatch(w -> w.contains("天然气") && w.contains("折标系数"));
+                .anyMatch(w -> w.contains("天然气") && w.contains("当量值系数"));
+        assertThat(result.getValidation().getWarnings())
+                .anyMatch(w -> w.contains("天然气") && w.contains("等价值系数"));
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(w -> w.contains("天然气") && w.contains("折标系数"));
+                .anyMatch(w -> w.contains("天然气") && w.contains("当量值系数"));
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(w -> w.contains("天然气") && w.contains("等价值系数"));
+        assertThat(result.getValidation().isExportReady()).isFalse();
+    }
+
+    @Test
+    void getConfigWarnsMissingEqualValueOnly() {
+        // Regression: equivalentValue present but equalValue missing → only 等价值系数 warning
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "天然气", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setItemType("energy");
+        flow.setItemId(1L);
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+
+        BsEnergy e = new BsEnergy();
+        e.setId(1L);
+        e.setName("天然气");
+        e.setEquivalentValue(new BigDecimal("1.33"));
+        e.setEqualValue(null); // only equalValue missing
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(e);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        // Should warn about missing equalValue (等价值系数) but NOT equivalentValue (当量值系数)
+        assertThat(result.getValidation().getWarnings())
+                .anyMatch(w -> w.contains("天然气") && w.contains("等价值系数"));
+        assertThat(result.getValidation().getWarnings())
+                .noneMatch(w -> w.contains("天然气") && w.contains("当量值系数"));
         assertThat(result.getValidation().isExportReady()).isFalse();
     }
 
@@ -767,6 +801,7 @@ class EnergyFlowConfigServiceImplTest {
         e.setId(id);
         e.setName(name);
         e.setEquivalentValue(equivalentValue);
+        e.setEqualValue(equivalentValue); // default both coefficients to same value
         return e;
     }
 
