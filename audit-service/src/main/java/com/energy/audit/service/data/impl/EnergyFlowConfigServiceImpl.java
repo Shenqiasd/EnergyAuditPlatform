@@ -235,10 +235,34 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     warnings.add(msg);
                     exportErrors.add(msg);
                 }
+            } else if (!isBlank(f.getItemType()) && f.getItemId() == null) {
+                String msg = "填报记录品目类型为 [" + f.getItemType() + "] 但未选择品目(itemId为空)（待确认）";
+                warnings.add(msg);
+                exportErrors.add(msg);
             } else if (isBlank(f.getItemType()) && !isBlank(f.getEnergyProduct())) {
                 String msg = "填报记录 [" + f.getEnergyProduct() + "] 为旧数据（待确认），请编辑确认品目类型和品目";
                 warnings.add(msg);
                 exportErrors.add(msg);
+            }
+        }
+        // Validate visible edges: each must bind to an active flow record
+        Set<Long> activeFlowIds = flows.stream()
+                .filter(f -> f.getId() != null)
+                .map(DeEnergyFlow::getId)
+                .collect(Collectors.toSet());
+        if (result.getDiagram() != null && result.getDiagram().getEdges() != null) {
+            for (DiagramConfigDTO.FlowEdgeDTO ed : result.getDiagram().getEdges()) {
+                Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
+                if (vis == 0) continue;
+                if (ed.getFlowRecordId() == null) {
+                    String msg = "连线 [" + ed.getEdgeId() + "] 未绑定到有效的填报记录（待确认）";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
+                } else if (!activeFlowIds.contains(ed.getFlowRecordId())) {
+                    String msg = "连线 [" + ed.getEdgeId() + "] 绑定的填报记录(id=" + ed.getFlowRecordId() + ")不存在或已删除（待确认）";
+                    warnings.add(msg);
+                    exportErrors.add(msg);
+                }
             }
         }
         validation.setWarnings(warnings);
@@ -516,6 +540,10 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
      * Server-side validation for fill records.
      * Legacy rows without itemType/itemId are allowed but flagged.
      */
+    private static final Set<String> VALID_SOURCE_TYPES = Set.of("external_energy", "unit", "system");
+    private static final Set<String> VALID_TARGET_TYPES = Set.of("unit", "product_output", "production_system");
+    private static final Set<String> VALID_ITEM_TYPES = Set.of("energy", "product");
+
     private void validateFlowRecord(DeEnergyFlow flow, int index, Long enterpriseId) {
         // Legacy rows: if no sourceType and has energyProduct, treat as legacy — allow but flag
         if (isBlank(flow.getSourceType()) && !isBlank(flow.getEnergyProduct())) {
@@ -524,9 +552,11 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         List<String> errors = new ArrayList<>();
         if (isBlank(flow.getSourceType())) {
             errors.add("来源类型(sourceType)不能为空");
+        } else if (!VALID_SOURCE_TYPES.contains(flow.getSourceType())) {
+            errors.add("来源类型(sourceType=" + flow.getSourceType() + ")不合法，允许值: " + VALID_SOURCE_TYPES);
         } else if ("unit".equals(flow.getSourceType())) {
             if (flow.getSourceRefId() == null) {
-                if (isBlank(flow.getSourceUnit())) errors.add("来源单元未指定");
+                errors.add("来源类型为unit时，sourceRefId不能为空");
             } else if (unitMapper.selectByIdAndEnterprise(flow.getSourceRefId(), enterpriseId) == null) {
                 errors.add("来源单元(sourceRefId=" + flow.getSourceRefId() + ")在本企业中不存在");
             }
@@ -535,9 +565,11 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         }
         if (isBlank(flow.getTargetType())) {
             errors.add("目的类型(targetType)不能为空");
+        } else if (!VALID_TARGET_TYPES.contains(flow.getTargetType())) {
+            errors.add("目的类型(targetType=" + flow.getTargetType() + ")不合法，允许值: " + VALID_TARGET_TYPES);
         } else if ("unit".equals(flow.getTargetType())) {
             if (flow.getTargetRefId() == null) {
-                if (isBlank(flow.getTargetUnit())) errors.add("目的单元未指定");
+                errors.add("目的类型为unit时，targetRefId不能为空");
             } else if (unitMapper.selectByIdAndEnterprise(flow.getTargetRefId(), enterpriseId) == null) {
                 errors.add("目的单元(targetRefId=" + flow.getTargetRefId() + ")在本企业中不存在");
             }
@@ -546,6 +578,8 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         }
         if (isBlank(flow.getItemType())) {
             errors.add("品目类型(itemType)不能为空");
+        } else if (!VALID_ITEM_TYPES.contains(flow.getItemType())) {
+            errors.add("品目类型(itemType=" + flow.getItemType() + ")不合法，只允许energy或product");
         }
         if (flow.getItemId() == null && !isBlank(flow.getItemType())) {
             errors.add("品目(itemId)不能为空");

@@ -452,6 +452,66 @@ function findNodeForRecordTarget(r: FlowRecord): FlowNodeConfig | undefined {
   return undefined
 }
 
+function ensureNodeForRecordSource(r: FlowRecord): FlowNodeConfig | undefined {
+  const existing = findNodeForRecordSource(r)
+  if (existing) return existing
+  if (r.sourceType === 'unit' && r.sourceRefId) {
+    const u = units.value.find(u => u.id === r.sourceRefId)
+    if (!u) return undefined
+    return createAutoNode('unit', 'unit', r.sourceRefId, u.name)
+  }
+  if (r.sourceType === 'external_energy') {
+    const label = r.itemType === 'energy' && r.itemId
+      ? (energies.value.find(e => e.id === r.itemId)?.name ?? '外购能源')
+      : '外购能源'
+    return createAutoNode('energy_input', 'energy', r.itemId ?? null, label)
+  }
+  if (r.sourceType === 'system' && r.sourceUnit) {
+    return createAutoNode('custom', 'custom', null, r.sourceUnit)
+  }
+  return undefined
+}
+
+function ensureNodeForRecordTarget(r: FlowRecord): FlowNodeConfig | undefined {
+  const existing = findNodeForRecordTarget(r)
+  if (existing) return existing
+  if (r.targetType === 'unit' && r.targetRefId) {
+    const u = units.value.find(u => u.id === r.targetRefId)
+    if (!u) return undefined
+    return createAutoNode('unit', 'unit', r.targetRefId, u.name)
+  }
+  if (r.targetType === 'product_output') {
+    const label = r.itemType === 'product' && r.itemId
+      ? (products.value.find(p => p.id === r.itemId)?.name ?? '产品产出')
+      : '产品产出'
+    return createAutoNode('product_output', 'product', r.itemId ?? null, label)
+  }
+  if (r.targetType === 'production_system' && r.targetUnit) {
+    return createAutoNode('custom', 'custom', null, r.targetUnit)
+  }
+  return undefined
+}
+
+function createAutoNode(nodeType: string, refType: string, refId: number | null, label: string): FlowNodeConfig {
+  const maxY = nodes.value.reduce((m, n) => Math.max(m, n.positionY + (n.height || 50)), 100)
+  const node: FlowNodeConfig = {
+    nodeId: `node-auto-${Date.now()}-${++clientKeySeq}`,
+    nodeType,
+    refType,
+    refId,
+    label,
+    positionX: nodeType === 'energy_input' ? 50 : nodeType === 'product_output' ? 800 : 400,
+    positionY: maxY + 20,
+    width: nodeType === 'energy_input' ? 60 : 100,
+    height: 50,
+    color: NODE_COLORS[nodeType] || '#666',
+    visible: 1,
+    locked: 0,
+  }
+  nodes.value.push(node)
+  return node
+}
+
 // ============================================================
 // Node interactions
 // ============================================================
@@ -644,11 +704,11 @@ async function saveRecord() {
         e.physicalQuantity = r.physicalQuantity
         e.calculatedValue = r.calculatedValue
         e.labelText = buildEdgeLabel(r)
-        // Rebind source node when record source changes
-        const newSrcNode = findNodeForRecordSource(r)
+        // Rebind source node when record source changes (create node if needed)
+        const newSrcNode = ensureNodeForRecordSource(r)
         if (newSrcNode) e.sourceNodeId = newSrcNode.nodeId
-        // Rebind target node when record target changes
-        const newTgtNode = findNodeForRecordTarget(r)
+        // Rebind target node when record target changes (create node if needed)
+        const newTgtNode = ensureNodeForRecordTarget(r)
         if (newTgtNode) e.targetNodeId = newTgtNode.nodeId
       }
     }
@@ -897,8 +957,23 @@ function computeLocalExportErrors(): string[] {
       } else if (product.unitPrice == null) {
         errors.push(`产品 [${product.name}] 缺少单价`)
       }
+    } else if (r.itemType && !r.itemId) {
+      errors.push(`填报记录品目类型为 [${r.itemType}] 但未选择品目(itemId为空)（待确认）`)
     } else if (!r.itemType && r.energyProduct) {
       errors.push(`填报记录 [${r.energyProduct}] 为旧数据（待确认），请编辑确认品目类型和品目`)
+    }
+  }
+  // Check visible edges for valid record bindings
+  for (const e of edges.value) {
+    if (e.visible === 0) continue
+    if (!e._flowRecordClientKey && !e.flowRecordId) {
+      errors.push(`连线 [${e.edgeId}] 未绑定到有效的填报记录`)
+    } else if (e._flowRecordClientKey) {
+      const rec = flowRecords.value.find(r => r._clientKey === e._flowRecordClientKey)
+      if (!rec) errors.push(`连线 [${e.edgeId}] 绑定的填报记录已被删除`)
+    } else if (e.flowRecordId) {
+      const rec = flowRecords.value.find(r => r.id === e.flowRecordId)
+      if (!rec) errors.push(`连线 [${e.edgeId}] 绑定的填报记录(id=${e.flowRecordId})不存在`)
     }
   }
   return [...new Set(errors)]

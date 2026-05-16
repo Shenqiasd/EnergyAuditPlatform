@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import EnergyFlowDiagram4Stage from '@/components/EnergyFlowDiagram4Stage/index.vue'
 import { getEnergyFlowList } from '@/api/energyFlow'
@@ -7,6 +8,7 @@ import type { EnergyFlowItem } from '@/api/energyFlow'
 import { getUnitList, getEnergyList } from '@/api/setting'
 import type { BsUnit, BsEnergy } from '@/api/setting'
 
+const router = useRouter()
 const currentYear = new Date().getFullYear()
 const auditYear = ref(currentYear)
 const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i)
@@ -74,6 +76,7 @@ onMounted(() => {
         <el-button @click="loadData" :loading="loading">刷新数据</el-button>
         <el-button @click="handleFitView">适应画布</el-button>
         <el-button @click="handleExportPng">导出 PNG</el-button>
+        <el-button type="primary" @click="router.push('/enterprise/charts/energy-flow/config')">能流图配置</el-button>
       </div>
     </div>
     <div class="flow-wrapper" v-loading="loading">
