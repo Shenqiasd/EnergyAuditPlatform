@@ -54,6 +54,9 @@ const showRecordDialog = ref(false)
 const creatingEdge = ref(false)
 const edgeSourceNodeId = ref<string | null>(null)
 
+// Final-effect preview toggle
+const showFinalPreview = ref(false)
+
 // Mode B pending edge (source/target node IDs waiting for dialog confirm)
 const pendingEdgeSrcNodeId = ref<string | null>(null)
 const pendingEdgeTgtNodeId = ref<string | null>(null)
@@ -94,6 +97,8 @@ const svgRef = ref<SVGSVGElement | null>(null)
 
 // Off-screen final-effect renderer for PNG export
 const exportViewRef = ref<InstanceType<typeof EnergyFlowConfigView>>()
+// Inline final-effect preview (visible when toggled)
+const previewViewRef = ref<InstanceType<typeof EnergyFlowConfigView>>()
 
 // ============================================================
 // Computed
@@ -567,11 +572,53 @@ function handleNodeMouseDown(nodeId: string, event: MouseEvent) {
   const node = nodes.value.find(n => n.nodeId === nodeId)
   if (!node || node.locked) return
 
-  // Drag updates raw positions only (for persistence), but visual rendering
-  // uses fixed-stage positions so dragging has no visible effect.
-  // Drag is intentionally disabled: positions are determined by fixed-stage layout.
-  // Node click-to-select still works via selectedNodeId above.
+  // Drag is disabled: positions are determined by fixed-stage layout.
+  // Use row reorder controls (上移/下移) in the properties panel instead.
 }
+
+// Row reorder: move a node up or down within its fixed-stage bucket
+function moveNodeInStage(nodeId: string, direction: 'up' | 'down') {
+  const node = nodes.value.find(n => n.nodeId === nodeId)
+  if (!node) return
+  const fsn = fixedStageLayout.value.get(nodeId)
+  if (!fsn) return
+  const stage = fsn.stage
+  // Find all visible non-product nodes in same stage, in array order
+  const sameStage = nodes.value.filter(n => {
+    if ((n.visible ?? 1) === 0 || n.nodeType === 'product_output') return false
+    const f = fixedStageLayout.value.get(n.nodeId)
+    return f && f.stage === stage
+  })
+  const idx = sameStage.findIndex(n => n.nodeId === nodeId)
+  if (idx < 0) return
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (swapIdx < 0 || swapIdx >= sameStage.length) return
+  // Swap in the main nodes array
+  const aIdx = nodes.value.indexOf(sameStage[idx])
+  const bIdx = nodes.value.indexOf(sameStage[swapIdx])
+  if (aIdx < 0 || bIdx < 0) return
+  pushUndo()
+  const tmp = nodes.value[aIdx]
+  nodes.value[aIdx] = nodes.value[bIdx]
+  nodes.value[bIdx] = tmp
+  pushUndo()
+}
+
+// Computed: current node's row index and stage size for UI
+const selectedNodeStageInfo = computed(() => {
+  if (!selectedNodeId.value) return null
+  const fsn = fixedStageLayout.value.get(selectedNodeId.value)
+  if (!fsn) return null
+  const stage = fsn.stage
+  const sameStage = nodes.value.filter(n => {
+    if ((n.visible ?? 1) === 0 || n.nodeType === 'product_output') return false
+    const f = fixedStageLayout.value.get(n.nodeId)
+    return f && f.stage === stage
+  })
+  const idx = sameStage.findIndex(n => n.nodeId === selectedNodeId.value)
+  const STAGE_LABELS = ['购入', '转换', '输配', '终端使用']
+  return { stage, stageLabel: STAGE_LABELS[stage] ?? `阶段${stage}`, rowIdx: idx, stageSize: sameStage.length }
+})
 
 function handleCanvasMouseMove(event: MouseEvent) {
   if (!dragging.value || !dragNodeId.value) return
@@ -805,11 +852,6 @@ function handleCanvasDrop(event: DragEvent) {
   if (!data) return
 
   const { type, item } = JSON.parse(data)
-  const rect = (event.target as Element)?.closest('svg')?.getBoundingClientRect()
-  if (!rect) return
-
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
 
   pushUndo()
 
@@ -826,8 +868,8 @@ function handleCanvasDrop(event: DragEvent) {
     refType,
     refId: item.id,
     label: item.name,
-    positionX: x,
-    positionY: y,
+    positionX: 0,
+    positionY: 0,
     width: nodeType === 'energy_input' ? 60 : 100,
     height: nodeType === 'energy_input' ? 60 : 50,
     color: NODE_COLORS[nodeType] || '#666',
@@ -897,11 +939,22 @@ function setRoutePointsJson(pts: { x: number; y: number }[]) {
 
 function addRoutePoint() {
   if (!selectedEdge.value) return
-  const src = nodes.value.find(n => n.nodeId === selectedEdge.value!.sourceNodeId)
-  const dst = nodes.value.find(n => n.nodeId === selectedEdge.value!.targetNodeId)
-  const mx = ((src?.positionX ?? 0) + (dst?.positionX ?? 400)) / 2
-  const my = ((src?.positionY ?? 0) + (dst?.positionY ?? 200)) / 2
-  const pts = [...parsedRoutePoints.value, { x: Math.round(mx), y: Math.round(my) }]
+  // Seed route point from canonical fixed-stage positions (same as final-effect renderer)
+  const srcFixed = fixedStageLayout.value.get(selectedEdge.value.sourceNodeId)
+  const dstFixed = fixedStageLayout.value.get(selectedEdge.value.targetNodeId)
+  let mx: number, my: number
+  if (srcFixed && dstFixed) {
+    const sx = srcFixed.cx + srcFixed.w / 2
+    const sy = srcFixed.cy
+    const tx = dstFixed.cx - dstFixed.w / 2
+    const ty = dstFixed.cy
+    mx = Math.round((sx + tx) / 2)
+    my = Math.round((sy + ty) / 2)
+  } else {
+    mx = Math.round(canvasWidth.value / 2)
+    my = Math.round(canvasHeight.value / 2)
+  }
+  const pts = [...parsedRoutePoints.value, { x: mx, y: my }]
   setRoutePointsJson(pts)
 }
 
@@ -1495,6 +1548,7 @@ function formatNum(n: number | null | undefined): string {
         <el-button @click="autoLayout" size="small" type="info">自动布局</el-button>
         <el-button @click="startEdgeCreation" size="small">连线</el-button>
         <el-button @click="handleValidate" size="small">校验</el-button>
+        <el-button @click="showFinalPreview = !showFinalPreview" size="small" :type="showFinalPreview ? 'warning' : 'info'">{{ showFinalPreview ? '返回编辑' : '预览效果' }}</el-button>
         <el-button @click="handleExportPng" size="small" type="success">导出 PNG</el-button>
         <el-button @click="handleSave" :loading="saving" type="primary" size="small">保存</el-button>
       </div>
@@ -1559,7 +1613,26 @@ function formatNum(n: number | null | undefined): string {
 
       <!-- Center Canvas -->
       <div class="canvas-area" v-loading="loading">
+        <!-- Final-effect preview (visible when showFinalPreview is on) -->
+        <EnergyFlowConfigView
+          v-if="showFinalPreview"
+          ref="previewViewRef"
+          :nodes="nodes"
+          :edges="edges"
+          :flow-records="flowRecords"
+          :energies="energies"
+          :units="units"
+          :products="products"
+          :energy-consumption="energyConsumption"
+          :enterprise-name="enterpriseName"
+          :audit-year="auditYear"
+          :canvas-width="canvasWidth"
+          :canvas-height="canvasHeight"
+          :validation="validation"
+        />
+        <!-- Editor canvas (visible when showFinalPreview is off) -->
         <svg
+          v-if="!showFinalPreview"
           ref="svgRef"
           :width="canvasWidth"
           :height="canvasHeight"
@@ -1721,13 +1794,15 @@ function formatNum(n: number | null | undefined): string {
             <label>颜色</label>
             <el-color-picker :model-value="selectedNode.color || '#666'" size="small" @update:model-value="(v: string | null) => updateNodeProp('color', v)" />
           </div>
-          <div class="prop-row">
-            <label>宽度</label>
-            <el-input-number :model-value="selectedNode.width || 100" size="small" :min="30" @update:model-value="v => updateNodeProp('width', v)" />
+          <!-- Fixed-stage layout info and row reorder controls -->
+          <div v-if="selectedNodeStageInfo" class="prop-row">
+            <label>布局阶段</label>
+            <el-tag size="small" type="info">{{ selectedNodeStageInfo.stageLabel }}（第{{ selectedNodeStageInfo.rowIdx + 1 }}行，共{{ selectedNodeStageInfo.stageSize }}行）</el-tag>
           </div>
-          <div class="prop-row">
-            <label>高度</label>
-            <el-input-number :model-value="selectedNode.height || 50" size="small" :min="20" @update:model-value="v => updateNodeProp('height', v)" />
+          <div v-if="selectedNodeStageInfo" class="prop-row">
+            <label>行顺序</label>
+            <el-button size="small" :disabled="selectedNodeStageInfo.rowIdx <= 0" @click="moveNodeInStage(selectedNode.nodeId, 'up')">上移</el-button>
+            <el-button size="small" :disabled="selectedNodeStageInfo.rowIdx >= selectedNodeStageInfo.stageSize - 1" @click="moveNodeInStage(selectedNode.nodeId, 'down')">下移</el-button>
           </div>
           <div class="prop-row">
             <el-checkbox :model-value="selectedNode.visible === 1" @update:model-value="v => updateNodeProp('visible', v ? 1 : 0)">可见</el-checkbox>
