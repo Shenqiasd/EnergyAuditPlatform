@@ -56,14 +56,35 @@ const edgeSourceNodeId = ref<string | null>(null)
 const pendingEdgeSrcNodeId = ref<string | null>(null)
 const pendingEdgeTgtNodeId = ref<string | null>(null)
 
-// Record form ref and validation rules
+// Record form ref and conditional validation rules
 const recordFormRef = ref<FormInstance | null>(null)
-const recordFormRules: FormRules = {
-  sourceType: [{ required: true, message: '请选择来源类型', trigger: 'change' }],
-  targetType: [{ required: true, message: '请选择目的类型', trigger: 'change' }],
-  itemType: [{ required: true, message: '请选择品目类型', trigger: 'change' }],
-  itemId: [{ required: true, message: '请选择品目', trigger: 'change' }],
-  physicalQuantity: [{ required: true, message: '请输入实物量', trigger: 'blur' }],
+const recordFormRules = computed<FormRules>(() => {
+  const rules: FormRules = {
+    sourceType: [{ required: true, message: '请选择来源类型', trigger: 'change' }],
+    targetType: [{ required: true, message: '请选择目的类型', trigger: 'change' }],
+    itemType: [{ required: true, message: '请选择品目类型', trigger: 'change' }],
+    itemId: [{ required: true, message: '请选择品目', trigger: 'change' }],
+    physicalQuantity: [{ required: true, message: '请输入实物量', trigger: 'blur' }],
+  }
+  if (editingRecord.value?.sourceType === 'unit') {
+    rules.sourceRefId = [{ required: true, message: '请选择来源单元', trigger: 'change' }]
+  }
+  if (editingRecord.value?.sourceType === 'system') {
+    rules.sourceUnit = [{ required: true, message: '请输入系统名称', trigger: 'blur' }]
+  }
+  if (editingRecord.value?.targetType === 'unit') {
+    rules.targetRefId = [{ required: true, message: '请选择目的单元', trigger: 'change' }]
+  }
+  if (editingRecord.value?.targetType === 'production_system') {
+    rules.targetUnit = [{ required: true, message: '请输入生产系统名称', trigger: 'blur' }]
+  }
+  return rules
+})
+
+// Generate a unique client key for record tracking
+let clientKeySeq = 0
+function genClientKey(): string {
+  return `ck-${Date.now()}-${++clientKeySeq}`
 }
 
 // SVG ref for PNG export
@@ -122,6 +143,10 @@ async function loadData() {
     const res = await getEnergyFlowConfig(auditYear.value)
     config.value = res
     flowRecords.value = res.flowRecords ?? []
+    // Assign stable client keys to loaded records
+    for (const r of flowRecords.value) {
+      r._clientKey = r.id ? `db-${r.id}` : genClientKey()
+    }
 
     if (res.diagram) {
       nodes.value = res.diagram.nodes ?? []
@@ -131,6 +156,13 @@ async function loadData() {
     } else {
       nodes.value = []
       edges.value = []
+    }
+    // Link edges to records by flowRecordId → _clientKey
+    for (const e of edges.value) {
+      if (e.flowRecordId != null) {
+        const rec = flowRecords.value.find(r => r.id === e.flowRecordId)
+        if (rec) e._flowRecordClientKey = rec._clientKey
+      }
     }
     undoStack.value = []
     redoStack.value = []
@@ -148,12 +180,15 @@ async function loadData() {
 async function handleSave() {
   saving.value = true
   try {
-    // Set flowRecordIndex on each edge so backend can resolve flowRecordId after upsert
+    // Resolve edge → record binding via stable _clientKey, then set flowRecordIndex
     const edgesWithIndex = edges.value.map(e => {
-      const idx = flowRecords.value.findIndex(r =>
-        (r.id != null && r.id === e.flowRecordId) ||
-        (r.id == null && r.sourceUnit === findNodeLabel(e.sourceNodeId) && r.targetUnit === findNodeLabel(e.targetNodeId))
-      )
+      let idx = -1
+      if (e._flowRecordClientKey) {
+        idx = flowRecords.value.findIndex(r => r._clientKey === e._flowRecordClientKey)
+      }
+      if (idx < 0 && e.flowRecordId != null) {
+        idx = flowRecords.value.findIndex(r => r.id === e.flowRecordId)
+      }
       return { ...e, flowRecordIndex: idx >= 0 ? idx : null }
     })
     const diagram: DiagramConfig = {
@@ -177,11 +212,6 @@ async function handleSave() {
   } finally {
     saving.value = false
   }
-}
-
-function findNodeLabel(nodeId: string): string {
-  const node = nodes.value.find(n => n.nodeId === nodeId)
-  return node?.label ?? ''
 }
 
 // ============================================================
@@ -342,14 +372,13 @@ function autoLayout() {
   for (let i = 0; i < flowRecords.value.length; i++) {
     const r = flowRecords.value[i]
     let srcNodeId: string
-    let tgtNodeId: string
+    const tgtNodeId = `node-${r.targetUnit || '产出'}`
 
     if (r.sourceUnit === '外购' && r.energyProduct && nodeSet.has(r.energyProduct)) {
       srcNodeId = `node-${r.energyProduct}`
     } else {
       srcNodeId = `node-${r.sourceUnit || '外购'}`
     }
-    tgtNodeId = `node-${r.targetUnit || '产出'}`
 
     const edge: FlowEdgeConfig = {
       edgeId: `edge-${i}`,
@@ -357,6 +386,7 @@ function autoLayout() {
       targetNodeId: tgtNodeId,
       flowRecordId: r.id,
       flowRecordIndex: i,
+      _flowRecordClientKey: r._clientKey,
       itemType: r.itemType,
       itemId: r.itemId,
       physicalQuantity: r.physicalQuantity,
@@ -463,11 +493,11 @@ function showCreateEdgeDialog(srcNodeId: string, tgtNodeId: string) {
   const tgtNode = nodes.value.find(n => n.nodeId === tgtNodeId)
   if (!srcNode || !tgtNode) return
 
-  // Store pending edge info for Mode B (will create edge on dialog confirm)
   pendingEdgeSrcNodeId.value = srcNodeId
   pendingEdgeTgtNodeId.value = tgtNodeId
 
   const record: FlowRecord = {
+    _clientKey: genClientKey(),
     sourceUnit: srcNode.label,
     targetUnit: tgtNode.label,
     sourceType: srcNode.nodeType === 'energy_input' ? 'external_energy' : 'unit',
@@ -499,6 +529,7 @@ function addRecord() {
   pendingEdgeSrcNodeId.value = null
   pendingEdgeTgtNodeId.value = null
   editingRecord.value = {
+    _clientKey: genClientKey(),
     sourceType: 'external_energy',
     targetType: 'unit',
     itemType: 'energy',
@@ -557,14 +588,16 @@ async function saveRecord() {
     }
   }
 
-  const idx = flowRecords.value.findIndex(f => f.id === r.id && r.id)
+  // Find existing row by _clientKey (works for both saved and unsaved records)
+  const idx = flowRecords.value.findIndex(f => f._clientKey && f._clientKey === r._clientKey)
   if (idx >= 0) {
     flowRecords.value[idx] = r
   } else {
+    if (!r._clientKey) r._clientKey = genClientKey()
     flowRecords.value.push(r)
   }
 
-  // Fix #2: Mode B — also create the visual edge when dialog was opened from edge creation
+  // Mode B: create visual edge when dialog was opened from edge creation
   if (pendingEdgeSrcNodeId.value && pendingEdgeTgtNodeId.value) {
     const edgeId = `edge-${Date.now()}`
     const newEdge: FlowEdgeConfig = {
@@ -572,6 +605,7 @@ async function saveRecord() {
       sourceNodeId: pendingEdgeSrcNodeId.value,
       targetNodeId: pendingEdgeTgtNodeId.value,
       flowRecordId: r.id,
+      _flowRecordClientKey: r._clientKey,
       itemType: r.itemType,
       itemId: r.itemId,
       physicalQuantity: r.physicalQuantity,
@@ -593,6 +627,13 @@ async function saveRecord() {
 
 function deleteRecord(index: number) {
   pushUndo()
+  const record = flowRecords.value[index]
+  // Remove edges bound to the deleted record
+  if (record._clientKey) {
+    edges.value = edges.value.filter(e => e._flowRecordClientKey !== record._clientKey)
+  } else if (record.id != null) {
+    edges.value = edges.value.filter(e => e.flowRecordId !== record.id)
+  }
   flowRecords.value.splice(index, 1)
   pushUndo()
 }
@@ -619,7 +660,7 @@ function handleCanvasDrop(event: DragEvent) {
   pushUndo()
 
   let nodeType = 'custom'
-  let refType = type
+  const refType = type
   if (type === 'energy') nodeType = 'energy_input'
   else if (type === 'unit') nodeType = 'unit'
   else if (type === 'product') nodeType = 'product_output'
@@ -770,21 +811,44 @@ function edgeLabelPos(edge: FlowEdgeConfig): { x: number; y: number } {
 }
 
 // ============================================================
+// Local export validation (runs against current unsaved page state)
+// ============================================================
+function computeLocalExportErrors(): string[] {
+  const errors: string[] = []
+  if (!validation.value.enterpriseComplete) {
+    errors.push('企业信息不完整（请先完善企业概况页面）')
+  }
+  if (units.value.length === 0) errors.push('至少需要一个用能单元')
+  if (energies.value.length === 0) errors.push('至少需要一个能源品种')
+  if (products.value.length === 0) errors.push('至少需要一个产品')
+  for (const r of flowRecords.value) {
+    if (r.itemType === 'energy' && r.itemId) {
+      const energy = energies.value.find(e => e.id === r.itemId)
+      if (energy && energy.equivalentValue == null) {
+        errors.push(`能源 [${energy.name}] 缺少折标系数`)
+      }
+    } else if (r.itemType === 'product' && r.itemId) {
+      const product = products.value.find(p => p.id === r.itemId)
+      if (product && product.unitPrice == null) {
+        errors.push(`产品 [${product.name}] 缺少单价`)
+      }
+    }
+  }
+  return [...new Set(errors)]
+}
+
+// ============================================================
 // PNG Export
 // ============================================================
 async function handleExportPng() {
-  // Fix #3: check exportReady (blocking errors) instead of just valid
-  const v = validation.value
-  if (!v.exportReady && v.exportErrors && v.exportErrors.length > 0) {
+  // Run local validation against current page state (not just cached server response)
+  const localErrors = computeLocalExportErrors()
+  if (localErrors.length > 0) {
     ElMessageBox.alert(
-      v.exportErrors.join('\n'),
+      localErrors.join('\n'),
       '无法导出 PNG — 以下问题必须解决',
       { type: 'error' }
     )
-    return
-  }
-  if (!v.valid) {
-    ElMessage.warning('前置资料不完整，无法导出')
     return
   }
   if (nodes.value.length === 0) {
@@ -1178,10 +1242,13 @@ function formatNum(n: number | null | undefined): string {
             <el-option label="系统" value="system" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="editingRecord.sourceType === 'unit'" label="来源单元">
+        <el-form-item v-if="editingRecord.sourceType === 'unit'" label="来源单元" prop="sourceRefId">
           <el-select v-model="editingRecord.sourceRefId" style="width: 100%" filterable>
             <el-option v-for="u in units" :key="u.id" :label="u.name" :value="u.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingRecord.sourceType === 'system'" label="系统名称" prop="sourceUnit">
+          <el-input v-model="editingRecord.sourceUnit" placeholder="请输入系统名称" />
         </el-form-item>
         <el-form-item label="目的类型" prop="targetType">
           <el-select v-model="editingRecord.targetType" style="width: 100%">
@@ -1190,10 +1257,13 @@ function formatNum(n: number | null | undefined): string {
             <el-option label="产出节点" value="product_output" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="editingRecord.targetType === 'unit'" label="目的单元">
+        <el-form-item v-if="editingRecord.targetType === 'unit'" label="目的单元" prop="targetRefId">
           <el-select v-model="editingRecord.targetRefId" style="width: 100%" filterable>
             <el-option v-for="u in units" :key="u.id" :label="u.name" :value="u.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingRecord.targetType === 'production_system'" label="生产系统名称" prop="targetUnit">
+          <el-input v-model="editingRecord.targetUnit" placeholder="请输入生产系统名称" />
         </el-form-item>
         <el-form-item label="品目类型" prop="itemType">
           <el-select v-model="editingRecord.itemType" style="width: 100%">

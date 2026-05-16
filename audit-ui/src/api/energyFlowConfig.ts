@@ -54,6 +54,8 @@ export interface FlowRecord {
   itemType?: string
   itemId?: number | null
   calculatedValue?: number | null
+  /** Client-only stable key for linking records and edges before DB IDs exist */
+  _clientKey?: string
 }
 
 export interface FlowNodeConfig {
@@ -79,6 +81,8 @@ export interface FlowEdgeConfig {
   targetNodeId: string
   flowRecordId?: number | null
   flowRecordIndex?: number | null
+  /** Client-only key linking to FlowRecord._clientKey */
+  _flowRecordClientKey?: string
   itemType?: string
   itemId?: number | null
   physicalQuantity?: number | null

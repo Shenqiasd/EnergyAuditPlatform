@@ -6,6 +6,7 @@ import com.energy.audit.dao.mapper.data.DeEnergyFlowEdgeMapper;
 import com.energy.audit.dao.mapper.data.DeEnergyFlowMapper;
 import com.energy.audit.dao.mapper.data.DeEnergyFlowNodeMapper;
 import com.energy.audit.dao.mapper.enterprise.EntEnterpriseMapper;
+import com.energy.audit.dao.mapper.enterprise.EntEnterpriseSettingMapper;
 import com.energy.audit.dao.mapper.setting.BsEnergyMapper;
 import com.energy.audit.dao.mapper.setting.BsProductMapper;
 import com.energy.audit.dao.mapper.setting.BsUnitMapper;
@@ -13,6 +14,7 @@ import com.energy.audit.model.dto.DiagramConfigDTO;
 import com.energy.audit.model.dto.EnergyFlowConfigDTO;
 import com.energy.audit.model.dto.SaveEnergyFlowConfigDTO;
 import com.energy.audit.model.entity.enterprise.EntEnterprise;
+import com.energy.audit.model.entity.enterprise.EntEnterpriseSetting;
 import com.energy.audit.model.entity.extraction.DeEnergyFlow;
 import com.energy.audit.model.entity.extraction.DeEnergyFlowDiagram;
 import com.energy.audit.model.entity.extraction.DeEnergyFlowEdge;
@@ -44,6 +46,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
     private final DeEnergyFlowNodeMapper nodeMapper;
     private final DeEnergyFlowEdgeMapper edgeMapper;
     private final EntEnterpriseMapper enterpriseMapper;
+    private final EntEnterpriseSettingMapper enterpriseSettingMapper;
     private final BsUnitMapper unitMapper;
     private final BsEnergyMapper energyMapper;
     private final BsProductMapper productMapper;
@@ -53,6 +56,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                                         DeEnergyFlowNodeMapper nodeMapper,
                                         DeEnergyFlowEdgeMapper edgeMapper,
                                         EntEnterpriseMapper enterpriseMapper,
+                                        EntEnterpriseSettingMapper enterpriseSettingMapper,
                                         BsUnitMapper unitMapper,
                                         BsEnergyMapper energyMapper,
                                         BsProductMapper productMapper) {
@@ -61,6 +65,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         this.nodeMapper = nodeMapper;
         this.edgeMapper = edgeMapper;
         this.enterpriseMapper = enterpriseMapper;
+        this.enterpriseSettingMapper = enterpriseSettingMapper;
         this.unitMapper = unitMapper;
         this.energyMapper = energyMapper;
         this.productMapper = productMapper;
@@ -190,10 +195,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
 
         // Validation
         EnergyFlowConfigDTO.ValidationResultDTO validation = new EnergyFlowConfigDTO.ValidationResultDTO();
-        boolean entComplete = ent != null
-                && ent.getEnterpriseName() != null && !ent.getEnterpriseName().isBlank()
-                && ent.getCreditCode() != null && !ent.getCreditCode().isBlank()
-                && ent.getContactPerson() != null && !ent.getContactPerson().isBlank();
+        boolean entComplete = checkEnterpriseComplete(ent, enterpriseId);
         validation.setEnterpriseComplete(entComplete);
         validation.setHasUnits(!unitList.isEmpty());
         validation.setHasEnergies(!energyList.isEmpty());
@@ -203,7 +205,8 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         List<String> warnings = new ArrayList<>();
         List<String> exportErrors = new ArrayList<>();
         if (!entComplete) {
-            exportErrors.add("企业信息不完整（需填写企业名称、统一社会信用代码、联系人）");
+            List<String> missing = listMissingEnterpriseFields(ent, enterpriseId);
+            exportErrors.add("企业信息不完整：" + String.join("、", missing));
         }
         if (unitList.isEmpty()) exportErrors.add("至少需要一个用能单元");
         if (energyList.isEmpty()) exportErrors.add("至少需要一个能源品种");
@@ -352,6 +355,17 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                             && ed.getFlowRecordIndex() < savedRecords.size()) {
                         resolvedRecordId = savedRecords.get(ed.getFlowRecordIndex()).getId();
                     }
+                    // Validate: resolved flowRecordId must point to an active saved record
+                    if (resolvedRecordId != null) {
+                        final Long checkId = resolvedRecordId;
+                        boolean valid = savedRecords.stream()
+                                .anyMatch(r -> r.getId().equals(checkId));
+                        if (!valid) {
+                            log.warn("Edge {} has flowRecordId={} not in active records, clearing",
+                                    ed.getEdgeId(), resolvedRecordId);
+                            resolvedRecordId = null;
+                        }
+                    }
                     edge.setFlowRecordId(resolvedRecordId);
 
                     edge.setItemType(ed.getItemType());
@@ -371,6 +385,90 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         }
 
         log.info("Energy flow config saved: enterprise={}, year={}", enterpriseId, auditYear);
+    }
+
+    /**
+     * Check enterprise completeness using both ent_enterprise basic fields
+     * and ent_enterprise_setting detail fields (matching the company settings form).
+     */
+    private boolean checkEnterpriseComplete(EntEnterprise ent, Long enterpriseId) {
+        if (ent == null || isBlank(ent.getEnterpriseName()) || isBlank(ent.getCreditCode())) {
+            return false;
+        }
+        EntEnterpriseSetting setting = enterpriseSettingMapper.selectByEnterpriseId(enterpriseId);
+        if (setting == null) return false;
+        return !isBlank(setting.getRegion())
+                && !isBlank(setting.getIndustryField())
+                && !isBlank(setting.getUnitNature())
+                && !isBlank(setting.getEnergyUsageType())
+                && !isBlank(setting.getIndustryCode())
+                && setting.getRegisteredDate() != null
+                && setting.getRegisteredCapital() != null
+                && !isBlank(setting.getLegalRepresentative())
+                && !isBlank(setting.getLegalPhone())
+                && !isBlank(setting.getSuperiorDepartment())
+                && !isBlank(setting.getEnterpriseAddress())
+                && !isBlank(setting.getPostalCode())
+                && !isBlank(setting.getEnterpriseEmail())
+                && !isBlank(setting.getEnergyMgmtOrg())
+                && !isBlank(setting.getEnergyLeaderName())
+                && !isBlank(setting.getEnergyLeaderPhone())
+                && !isBlank(setting.getEnergyLeaderTitle())
+                && !isBlank(setting.getEnergyDeptName())
+                && !isBlank(setting.getEnergyManagerName())
+                && !isBlank(setting.getEnergyManagerMobile())
+                && !isBlank(setting.getEnergyAuditContactName())
+                && !isBlank(setting.getEnergyAuditContactPhone())
+                && !isBlank(setting.getCompilerContact())
+                && !isBlank(setting.getCompilerName())
+                && !isBlank(setting.getCompilerMobile())
+                && !isBlank(setting.getCompilerEmail())
+                && setting.getEnergyCert() != null
+                && setting.getHasEnergyCenter() != null;
+    }
+
+    private List<String> listMissingEnterpriseFields(EntEnterprise ent, Long enterpriseId) {
+        List<String> missing = new ArrayList<>();
+        if (ent == null || isBlank(ent.getEnterpriseName())) missing.add("企业名称");
+        if (ent == null || isBlank(ent.getCreditCode())) missing.add("统一社会信用代码");
+        EntEnterpriseSetting s = enterpriseSettingMapper.selectByEnterpriseId(enterpriseId);
+        if (s == null) {
+            missing.add("企业概况详细信息（未填写）");
+            return missing;
+        }
+        if (isBlank(s.getRegion())) missing.add("所属地区");
+        if (isBlank(s.getIndustryField())) missing.add("所属领域");
+        if (isBlank(s.getUnitNature())) missing.add("单位类型");
+        if (isBlank(s.getEnergyUsageType())) missing.add("用能企业类型");
+        if (isBlank(s.getIndustryCode())) missing.add("行业分类");
+        if (s.getRegisteredDate() == null) missing.add("单位注册日期");
+        if (s.getRegisteredCapital() == null) missing.add("注册资本");
+        if (isBlank(s.getLegalRepresentative())) missing.add("法定代表人");
+        if (isBlank(s.getLegalPhone())) missing.add("联系电话");
+        if (isBlank(s.getSuperiorDepartment())) missing.add("上级主管部门");
+        if (isBlank(s.getEnterpriseAddress())) missing.add("单位地址");
+        if (isBlank(s.getPostalCode())) missing.add("邮政编码");
+        if (isBlank(s.getEnterpriseEmail())) missing.add("电子邮箱");
+        if (isBlank(s.getEnergyMgmtOrg())) missing.add("能源管理机构");
+        if (isBlank(s.getEnergyLeaderName())) missing.add("节能领导姓名");
+        if (isBlank(s.getEnergyLeaderPhone())) missing.add("节能领导电话");
+        if (isBlank(s.getEnergyLeaderTitle())) missing.add("节能领导职务");
+        if (isBlank(s.getEnergyDeptName())) missing.add("节能主管部门");
+        if (isBlank(s.getEnergyManagerName())) missing.add("能源管理负责人");
+        if (isBlank(s.getEnergyManagerMobile())) missing.add("能源管理负责人电话");
+        if (isBlank(s.getEnergyAuditContactName())) missing.add("审计联系人");
+        if (isBlank(s.getEnergyAuditContactPhone())) missing.add("审计联系人电话");
+        if (isBlank(s.getCompilerContact())) missing.add("编制单位");
+        if (isBlank(s.getCompilerName())) missing.add("编制联系人");
+        if (isBlank(s.getCompilerMobile())) missing.add("编制联系人电话");
+        if (isBlank(s.getCompilerEmail())) missing.add("编制联系人邮箱");
+        if (s.getEnergyCert() == null) missing.add("能源认证");
+        if (s.getHasEnergyCenter() == null) missing.add("能源管理中心");
+        return missing;
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     private void calculateFlowValue(DeEnergyFlow flow, Long enterpriseId) {

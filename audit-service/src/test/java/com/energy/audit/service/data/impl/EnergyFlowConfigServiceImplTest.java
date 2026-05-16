@@ -5,6 +5,7 @@ import com.energy.audit.dao.mapper.data.DeEnergyFlowEdgeMapper;
 import com.energy.audit.dao.mapper.data.DeEnergyFlowMapper;
 import com.energy.audit.dao.mapper.data.DeEnergyFlowNodeMapper;
 import com.energy.audit.dao.mapper.enterprise.EntEnterpriseMapper;
+import com.energy.audit.dao.mapper.enterprise.EntEnterpriseSettingMapper;
 import com.energy.audit.dao.mapper.setting.BsEnergyMapper;
 import com.energy.audit.dao.mapper.setting.BsProductMapper;
 import com.energy.audit.dao.mapper.setting.BsUnitMapper;
@@ -12,6 +13,7 @@ import com.energy.audit.model.dto.DiagramConfigDTO;
 import com.energy.audit.model.dto.EnergyFlowConfigDTO;
 import com.energy.audit.model.dto.SaveEnergyFlowConfigDTO;
 import com.energy.audit.model.entity.enterprise.EntEnterprise;
+import com.energy.audit.model.entity.enterprise.EntEnterpriseSetting;
 import com.energy.audit.model.entity.extraction.DeEnergyFlow;
 import com.energy.audit.model.entity.extraction.DeEnergyFlowDiagram;
 import com.energy.audit.model.entity.extraction.DeEnergyFlowEdge;
@@ -48,6 +50,7 @@ class EnergyFlowConfigServiceImplTest {
     private DeEnergyFlowNodeMapper nodeMapper;
     private DeEnergyFlowEdgeMapper edgeMapper;
     private EntEnterpriseMapper enterpriseMapper;
+    private EntEnterpriseSettingMapper enterpriseSettingMapper;
     private BsUnitMapper unitMapper;
     private BsEnergyMapper energyMapper;
     private BsProductMapper productMapper;
@@ -64,13 +67,14 @@ class EnergyFlowConfigServiceImplTest {
         nodeMapper = mock(DeEnergyFlowNodeMapper.class);
         edgeMapper = mock(DeEnergyFlowEdgeMapper.class);
         enterpriseMapper = mock(EntEnterpriseMapper.class);
+        enterpriseSettingMapper = mock(EntEnterpriseSettingMapper.class);
         unitMapper = mock(BsUnitMapper.class);
         energyMapper = mock(BsEnergyMapper.class);
         productMapper = mock(BsProductMapper.class);
 
         service = new EnergyFlowConfigServiceImpl(
                 flowMapper, diagramMapper, nodeMapper, edgeMapper,
-                enterpriseMapper, unitMapper, energyMapper, productMapper);
+                enterpriseMapper, enterpriseSettingMapper, unitMapper, energyMapper, productMapper);
     }
 
     // ============================================================
@@ -591,6 +595,42 @@ class EnergyFlowConfigServiceImplTest {
         ent.setCreditCode("91000000MA0XXXXX");
         ent.setContactPerson("张三");
         when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+        // Stub a fully complete enterprise setting
+        when(enterpriseSettingMapper.selectByEnterpriseId(ENT_ID)).thenReturn(buildCompleteSetting());
+    }
+
+    private static EntEnterpriseSetting buildCompleteSetting() {
+        EntEnterpriseSetting s = new EntEnterpriseSetting();
+        s.setEnterpriseId(ENT_ID);
+        s.setRegion("浙江省");
+        s.setIndustryField("制造业");
+        s.setUnitNature("国有企业");
+        s.setEnergyUsageType("重点用能");
+        s.setIndustryCode("C26");
+        s.setRegisteredDate(java.time.LocalDate.of(2020, 1, 1));
+        s.setRegisteredCapital(new BigDecimal("5000"));
+        s.setLegalRepresentative("李四");
+        s.setLegalPhone("0571-88888888");
+        s.setSuperiorDepartment("市发改委");
+        s.setEnterpriseAddress("杭州市");
+        s.setPostalCode("310000");
+        s.setEnterpriseEmail("test@example.com");
+        s.setEnergyMgmtOrg("能源管理部");
+        s.setEnergyLeaderName("王五");
+        s.setEnergyLeaderPhone("13800000001");
+        s.setEnergyLeaderTitle("副总经理");
+        s.setEnergyDeptName("节能办");
+        s.setEnergyManagerName("赵六");
+        s.setEnergyManagerMobile("13800000002");
+        s.setEnergyAuditContactName("钱七");
+        s.setEnergyAuditContactPhone("13800000003");
+        s.setCompilerContact("审计公司");
+        s.setCompilerName("孙八");
+        s.setCompilerMobile("13800000004");
+        s.setCompilerEmail("compiler@example.com");
+        s.setEnergyCert(1);
+        s.setHasEnergyCenter(0);
+        return s;
     }
 
     private void stubEmpty() {
@@ -622,5 +662,116 @@ class EnergyFlowConfigServiceImplTest {
         p.setName(name);
         p.setUnitPrice(unitPrice);
         return p;
+    }
+
+    // ============================================================
+    // Fix #5 regression: enterprise completeness via ent_enterprise_setting
+    // ============================================================
+
+    @Test
+    void getConfigExportBlockedWhenSettingMissing() {
+        // Enterprise basic fields OK, but no ent_enterprise_setting row
+        EntEnterprise ent = new EntEnterprise();
+        ent.setId(ENT_ID);
+        ent.setEnterpriseName("测试企业");
+        ent.setCreditCode("91000000MA0XXXXX");
+        ent.setContactPerson("张三");
+        when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+        when(enterpriseSettingMapper.selectByEnterpriseId(ENT_ID)).thenReturn(null);
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isEnterpriseComplete()).isFalse();
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("企业信息不完整"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenSettingFieldsMissing() {
+        // Enterprise basic OK, setting exists but region is blank
+        EntEnterprise ent = new EntEnterprise();
+        ent.setId(ENT_ID);
+        ent.setEnterpriseName("测试企业");
+        ent.setCreditCode("91000000MA0XXXXX");
+        ent.setContactPerson("张三");
+        when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+        EntEnterpriseSetting partial = buildCompleteSetting();
+        partial.setRegion(null); // missing
+        partial.setEnergyLeaderName(""); // blank
+        when(enterpriseSettingMapper.selectByEnterpriseId(ENT_ID)).thenReturn(partial);
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isEnterpriseComplete()).isFalse();
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("所属地区"))
+                .anyMatch(e -> e.contains("节能领导姓名"));
+    }
+
+    // ============================================================
+    // Edge flowRecordId validation: edges with invalid flowRecordId are cleared
+    // ============================================================
+
+    @Test
+    void saveConfigClearsEdgeWithInvalidFlowRecordId() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+            // One new record
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setItemType("energy");
+            rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("100"));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0);
+                f.setId(50L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+
+            // Edge with flowRecordId pointing to non-existent record 999
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("invalid ref test");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+            dc.setNodes(Collections.emptyList());
+
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-bad");
+            edge.setSourceNodeId("n1");
+            edge.setTargetNodeId("n2");
+            edge.setFlowRecordId(999L); // does not exist in saved records
+            edge.setFlowRecordIndex(null);
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec));
+            dto.setDiagram(dc);
+
+            List<DeEnergyFlowEdge> capturedEdges = new ArrayList<>();
+            doAnswer(inv -> {
+                capturedEdges.add(inv.getArgument(0));
+                return 1;
+            }).when(edgeMapper).insert(any(DeEnergyFlowEdge.class));
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            // Edge should be saved but with flowRecordId cleared to null
+            assertThat(capturedEdges).hasSize(1);
+            assertThat(capturedEdges.get(0).getFlowRecordId()).isNull();
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
     }
 }
