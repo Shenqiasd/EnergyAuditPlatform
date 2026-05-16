@@ -1392,6 +1392,176 @@ class EnergyFlowConfigServiceImplTest {
     }
 
     // ============================================================
+    // Fix #1 (v17): getConfig product-output terminal-use validation for persisted records
+    // ============================================================
+
+    @Test
+    void getConfigExportBlockedWhenProductOutputHasExternalEnergySource() {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("external_energy"); // invalid: product_output requires sourceType=unit
+        flow.setTargetType("product_output");
+        flow.setItemType("product");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("产品输出") && e.contains("sourceType"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenProductOutputHasSystemSource() {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("system"); // invalid: product_output requires sourceType=unit
+        flow.setTargetType("product_output");
+        flow.setItemType("product");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("产品输出") && e.contains("sourceType"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenProductOutputSourceUnitMissing() {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("unit");
+        flow.setSourceRefId(null); // missing sourceRefId
+        flow.setTargetType("product_output");
+        flow.setItemType("product");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("产品输出") && e.contains("sourceRefId"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenProductOutputSourceUnitNonTerminal() {
+        stubEnterpriseComplete();
+        BsUnit nonTerminalUnit = unit(2L, "输配电", 1); // unitType=1 (not terminal use)
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3), nonTerminalUnit));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("unit");
+        flow.setSourceRefId(2L); // references non-terminal unit
+        flow.setTargetType("product_output");
+        flow.setItemType("product");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(nonTerminalUnit);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("产品输出") && e.contains("unitType=3"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenProductOutputSourceUnitNullUnitType() {
+        stubEnterpriseComplete();
+        BsUnit nullTypeUnit = unit(2L, "未分类单元", null); // unitType=null
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3), nullTypeUnit));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("unit");
+        flow.setSourceRefId(2L);
+        flow.setTargetType("product_output");
+        flow.setItemType("product");
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(nullTypeUnit);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("产品输出") && e.contains("unitType"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenProductOutputHasEnergyItemType() {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("unit");
+        flow.setSourceRefId(1L);
+        flow.setTargetType("product_output");
+        flow.setItemType("energy"); // invalid: product_output requires itemType=product
+        flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("产品输出") && e.contains("itemType=product"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenProductOutputProductDeleted() {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setSourceType("unit");
+        flow.setSourceRefId(1L);
+        flow.setTargetType("product_output");
+        flow.setItemType("product");
+        flow.setItemId(777L); // deleted product
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+        when(productMapper.selectByIdAndEnterprise(777L, ENT_ID)).thenReturn(null);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("产品输出") && e.contains("itemId=777") && e.contains("不存在"));
+    }
+
+    // ============================================================
     // Fix #2 (v5): reject unsupported enum values, require sourceRefId for unit
     // ============================================================
 

@@ -464,34 +464,44 @@ function buildOrthoPath(edge: FlowEdgeConfig): { x: number; y: number }[] {
   const s = srcExitPt(sln)
   const t = tgtEntryPt(tln)
 
-  // Try editor route points first — use as constrained waypoints if they form valid 90° paths
+  // Parse editor route points as constrained hints (never full override)
   const rpts = parseRoutePoints(edge)
-  if (rpts.length > 0 && validateRoutePoints(rpts, s, t)) {
-    return [s, ...rpts, t]
-  }
+  const rptsValid = rpts.length > 0 && validateRoutePoints(rpts, s, t)
 
   if (isBackflow(edge)) {
-    // Return-flow: route along dedicated top channel lane (within canvas bounds)
+    // Return-flow: MUST route through top channel lane regardless of saved route points
     const lane = backflowLaneMap.value.get(edge.edgeId) ?? 0
     const topY = HEADER_Y.value - 10 - lane * BACKFLOW_LANE_SPACING
-    return [s, { x: s.x, y: topY }, { x: t.x, y: topY }, t]
+    const canonicalPath = [s, { x: s.x, y: topY }, { x: t.x, y: topY }, t]
+    // Route points are only used if they pass through the required top channel Y band
+    if (rptsValid && rpts.some(p => Math.abs(p.y - topY) <= 2)) {
+      // Constrained hint: use route points but ensure they include the top channel
+      return [s, ...rpts, t]
+    }
+    return canonicalPath
   }
 
   // Forward edge: use compatible-route-segment trunk/branch routing
   const info = trunkInfoMap.value.get(edge.edgeId)
   if (info && Math.abs(info.trunkX - s.x) > 5) {
+    // Route points are only used if they pass through the required trunk X band
+    if (rptsValid && rpts.some(p => Math.abs(p.x - info.trunkX) <= 2)) {
+      return [s, ...rpts, t]
+    }
     if (info.trunkX === info.branchX) {
       // Single-target or same branch: straight trunk route
       return [s, { x: info.trunkX, y: s.y }, { x: info.trunkX, y: t.y }, t]
     }
     // Multi-target: shared trunk segment then branch to individual target
-    // Route: source → trunkX at source Y → trunkX at midY → branchX at midY → branchX at target Y → target
     const midY = (s.y + t.y) / 2
     return [s, { x: info.trunkX, y: s.y }, { x: info.trunkX, y: midY },
             { x: info.branchX, y: midY }, { x: info.branchX, y: t.y }, t]
   }
 
-  // Default orthogonal: midpoint routing
+  // Default orthogonal: use route points as hints if valid, else midpoint routing
+  if (rptsValid) {
+    return [s, ...rpts, t]
+  }
   const midX = (s.x + t.x) / 2
   return [s, { x: midX, y: s.y }, { x: midX, y: t.y }, t]
 }

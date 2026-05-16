@@ -1099,7 +1099,7 @@ function computeLocalExportErrors(): string[] {
         }
       }
     }
-    // Validate route points: must form valid 90° orthogonal segments
+    // Validate route points: orthogonal, in-canvas, and canonical-routing compliance
     if (e.routePoints && e.sourceNodeId && e.targetNodeId) {
       const srcNode = nodeByIdMap.get(e.sourceNodeId)
       const dstNode = nodeByIdMap.get(e.targetNodeId)
@@ -1126,6 +1126,29 @@ function computeLocalExportErrors(): string[] {
               if (p.x < 0 || p.y < 0 || p.x > 5000 || p.y > 5000) {
                 errors.push(`连线 [${e.edgeId}] 的路由点超出画布范围`)
                 break
+              }
+            }
+            // Check node-crossing: route segments should not pass through other nodes
+            for (const [, nd] of nodeByIdMap) {
+              if (nd.nodeId === e.sourceNodeId || nd.nodeId === e.targetNodeId) continue
+              const nx = nd.positionX, ny = nd.positionY
+              const nw = nd.width || 100, nh = nd.height || 50
+              for (const p of rpts) {
+                if (p.x > nx && p.x < nx + nw && p.y > ny && p.y < ny + nh) {
+                  errors.push(`连线 [${e.edgeId}] 的路由点穿过节点 [${nd.nodeId}]，请调整路由点避免节点交叉`)
+                  break
+                }
+              }
+            }
+            // Backflow edges: route points must pass through top channel region
+            const isBack = srcNode.positionX > dstNode.positionX
+            if (isBack) {
+              const minY = Math.min(...rpts.map(p => p.y))
+              const srcTopY = srcNode.positionY
+              const dstTopY = dstNode.positionY
+              const topBound = Math.min(srcTopY, dstTopY)
+              if (minY >= topBound) {
+                errors.push(`回流连线 [${e.edgeId}] 的路由点未经过顶部通道，请编辑路由点使其经过顶部回流通道`)
               }
             }
           }

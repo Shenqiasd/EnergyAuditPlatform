@@ -297,6 +297,36 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 warnings.add(msg);
                 exportErrors.add(msg);
             }
+            // Product-output terminal-use validation for persisted records (mirrors saveConfig validation)
+            if ("product_output".equals(f.getTargetType())) {
+                if (!"product".equals(f.getItemType())) {
+                    exportErrors.add("产品输出记录必须设置itemType=product，当前itemType=" + f.getItemType());
+                } else if (f.getItemId() == null) {
+                    exportErrors.add("产品输出记录必须关联有效的产品(itemId不能为空)");
+                } else {
+                    BsProduct prod = productMapper.selectByIdAndEnterprise(f.getItemId(), enterpriseId);
+                    if (prod == null) {
+                        exportErrors.add("产品输出记录关联的产品(itemId=" + f.getItemId() + ")不存在或已删除");
+                    }
+                }
+                if (!"unit".equals(f.getSourceType())) {
+                    exportErrors.add("产品输出记录的来源类型必须为unit(终端使用环节用能单元)，当前sourceType="
+                            + f.getSourceType());
+                } else if (f.getSourceRefId() == null) {
+                    exportErrors.add("产品输出记录必须关联来源单元(sourceRefId不能为空)");
+                } else {
+                    BsUnit srcUnit = unitMapper.selectByIdAndEnterprise(f.getSourceRefId(), enterpriseId);
+                    if (srcUnit == null) {
+                        exportErrors.add("产品输出记录的来源单元(sourceRefId=" + f.getSourceRefId() + ")不存在");
+                    } else if (srcUnit.getUnitType() == null) {
+                        exportErrors.add("产品输出记录的来源单元 [" + srcUnit.getName()
+                                + "] 缺少unitType，无法确认为终端使用环节");
+                    } else if (srcUnit.getUnitType() != 3) {
+                        exportErrors.add("产品输出记录的来源单元必须是终端使用环节(unitType=3)，当前来源单元类型为"
+                                + srcUnit.getUnitType());
+                    }
+                }
+            }
         }
         // Validate visible edges: record binding + endpoint node existence + endpoint semantics
         Set<Long> activeFlowIds = flows.stream()
