@@ -25,8 +25,8 @@ import {
 } from '@/api/report'
 import { getEnergyFlowConfig } from '@/api/energyFlowConfig'
 import type {
-  FlowNodeConfig, FlowEdgeConfig, EnergyFlowConfig,
-  EnergyInfo, UnitInfo, ProductInfo, EnergyConsumptionInfo,
+  FlowNodeConfig, FlowEdgeConfig, FlowRecord, EnergyFlowConfig,
+  EnergyInfo, UnitInfo, ProductInfo, EnergyConsumptionInfo, ValidationResult,
 } from '@/api/energyFlowConfig'
 import EnergyFlowConfigView from '@/components/EnergyFlowConfigView/index.vue'
 
@@ -50,6 +50,8 @@ const flowEnergies = ref<EnergyInfo[]>([])
 const flowUnits = ref<UnitInfo[]>([])
 const flowProducts = ref<ProductInfo[]>([])
 const flowEnergyConsumption = ref<EnergyConsumptionInfo[]>([])
+const flowRecords = ref<FlowRecord[]>([])
+const flowValidation = ref<ValidationResult>({ valid: false, exportReady: false, enterpriseComplete: false, hasUnits: false, hasEnergies: false, hasProducts: false, warnings: [], exportErrors: [] })
 const flowEnterpriseName = ref('')
 const flowCanvasWidth = ref(1200)
 const flowCanvasHeight = ref(800)
@@ -190,12 +192,23 @@ async function captureFlowChartImage(): Promise<File | undefined> {
     const config: EnergyFlowConfig = await getEnergyFlowConfig(selectedYear.value)
     if (!config.diagram?.nodes?.length) return undefined
 
+    // Gate: block on validation.exportReady
+    if (config.validation && !config.validation.exportReady) {
+      const reasons = config.validation.exportErrors?.length
+        ? config.validation.exportErrors.join('\n')
+        : '前置资料不完整'
+      ElMessage.warning('能流图数据验证未通过，报告中将不包含能流图：' + reasons)
+      return undefined
+    }
+
     flowNodes.value = config.diagram.nodes || []
     flowEdges.value = config.diagram.edges || []
     flowEnergies.value = config.energies || []
     flowUnits.value = config.units || []
     flowProducts.value = config.products || []
     flowEnergyConsumption.value = config.energyConsumption || []
+    flowRecords.value = config.flowRecords || []
+    if (config.validation) flowValidation.value = config.validation
     flowEnterpriseName.value = config.enterpriseInfo?.name || ''
     flowCanvasWidth.value = config.diagram.canvasWidth || 1200
     flowCanvasHeight.value = config.diagram.canvasHeight || 800
@@ -404,10 +417,12 @@ onMounted(loadData)
         ref="flowChartRef"
         :nodes="flowNodes"
         :edges="flowEdges"
+        :flow-records="flowRecords"
         :energies="flowEnergies"
         :units="flowUnits"
         :products="flowProducts"
         :energy-consumption="flowEnergyConsumption"
+        :validation="flowValidation"
         :enterprise-name="flowEnterpriseName"
         :audit-year="selectedYear"
         :canvas-width="flowCanvasWidth"

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type {
   FlowNodeConfig, FlowEdgeConfig, FlowRecord,
   EnergyInfo, UnitInfo, ProductInfo, EnergyConsumptionInfo,
+  ValidationResult,
 } from '@/api/energyFlowConfig'
 
 const props = defineProps<{
@@ -17,6 +18,7 @@ const props = defineProps<{
   auditYear?: number
   canvasWidth?: number
   canvasHeight?: number
+  validation?: ValidationResult
 }>()
 
 defineExpose({ exportPng, fitView })
@@ -25,17 +27,27 @@ const svgRef = ref<SVGSVGElement>()
 const cw = computed(() => props.canvasWidth || 1200)
 const ch = computed(() => props.canvasHeight || 800)
 
-// ── Number formatting ──────────────────────────────────────
+// ── Number formatting (canonical spec) ──────────────────────
+// Thousands separator, default 1 decimal, hide trailing .0,
+// 0 is visible, null/undefined/NaN → empty string,
+// one space between value and unit
 function fmtNum(v: number | null | undefined, decimals = 1): string {
-  if (v == null || isNaN(v)) return ''
+  if (v == null || (typeof v === 'number' && isNaN(v))) return ''
   const fixed = v.toFixed(decimals)
-  const parts = fixed.split('.')
+  const cleaned = fixed.replace(/\.0+$/, '')
+  const parts = cleaned.split('.')
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   return parts.join('.')
 }
+// Percentages: 2 decimals, format as (12.45%)
 function fmtPct(v: number | null | undefined): string {
-  if (v == null || isNaN(v)) return ''
-  return fmtNum(v * 100, 2) + '%'
+  if (v == null || (typeof v === 'number' && isNaN(v))) return ''
+  const pctVal = v * 100
+  const fixed = pctVal.toFixed(2)
+  const cleaned = fixed.replace(/\.?0+$/, '')
+  const parts = cleaned.split('.')
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return '(' + parts.join('.') + '%)'
 }
 
 // ── Lookup maps ────────────────────────────────────────────
@@ -59,23 +71,20 @@ const consumptionByEnergyId = computed(() => {
   props.energyConsumption?.forEach(c => { if (c.energyId) m.set(c.energyId, c) })
   return m
 })
-const nodeById = computed(() => {
-  const m = new Map<string, FlowNodeConfig>()
-  props.nodes.forEach(n => m.set(n.nodeId, n))
+const recordById = computed(() => {
+  const m = new Map<number, FlowRecord>()
+  props.flowRecords?.forEach(r => { if (r.id) m.set(r.id, r) })
   return m
 })
 
-// ── Visible elements ───────────────────────────────────────
-const visibleNodes = computed(() => props.nodes.filter(n => (n.visible ?? 1) !== 0))
-const visibleEdges = computed(() => props.edges.filter(e => (e.visible ?? 1) !== 0))
-
-// ── Stage classification ───────────────────────────────────
+// ── Stage layout constants ────────────────────────────────
 const STAGE_LABELS = ['购入贮存环节', '加工转换环节', '输送分配环节', '终端使用环节']
 const STAGE_MARGIN = 80
+const HEADER_Y = 55
+const BODY_TOP = HEADER_Y + 20
 const stageWidth = computed(() => (cw.value - STAGE_MARGIN * 2) / 4)
 const stageX = computed(() => STAGE_LABELS.map((_, i) => STAGE_MARGIN + i * stageWidth.value))
 const stageDividers = computed(() => [stageX.value[1], stageX.value[2], stageX.value[3]])
-const HEADER_Y = 55
 
 function nodeStage(n: FlowNodeConfig): number {
   if (n.nodeType === 'energy_input') return 0
@@ -88,9 +97,58 @@ function nodeStage(n: FlowNodeConfig): number {
       if (u.unitType === 3) return 3
     }
   }
-  const sx = stageX.value
-  for (let i = 3; i >= 0; i--) { if (n.positionX >= sx[i] - stageWidth.value * 0.1) return i }
-  return 0
+  return 2
+}
+
+// ── Enforce fixed stage band positions ────────────────────
+interface LayoutNode {
+  node: FlowNodeConfig
+  stage: number
+  cx: number
+  cy: number
+  w: number
+  h: number
+  isCircle: boolean
+}
+
+const layoutNodes = computed<LayoutNode[]>(() => {
+  const visible = props.nodes.filter(n => (n.visible ?? 1) !== 0)
+  const buckets = new Map<number, FlowNodeConfig[]>()
+  for (const n of visible) {
+    const s = nodeStage(n)
+    if (!buckets.has(s)) buckets.set(s, [])
+    buckets.get(s)!.push(n)
+  }
+  const ROW_H = 90
+  const result: LayoutNode[] = []
+  for (const [stage, nodes] of buckets) {
+    const sx = stageX.value[stage]
+    const sw = stageWidth.value
+    nodes.forEach((n, rowIdx) => {
+      const isCircle = n.nodeType === 'energy_input'
+      const w = isCircle ? 60 : 100
+      const h = isCircle ? 60 : 50
+      const cx = sx + sw / 2
+      const cy = BODY_TOP + rowIdx * ROW_H + ROW_H / 2
+      result.push({ node: n, stage, cx, cy, w, h, isCircle })
+    })
+  }
+  return result
+})
+
+const layoutNodeMap = computed(() => {
+  const m = new Map<string, LayoutNode>()
+  layoutNodes.value.forEach(ln => m.set(ln.node.nodeId, ln))
+  return m
+})
+
+const shapeNodes = computed(() => layoutNodes.value.filter(ln => ln.node.nodeType !== 'product_output'))
+
+const visibleEdges = computed(() => props.edges.filter(e => (e.visible ?? 1) !== 0))
+
+function resolveRecord(e: FlowEdgeConfig): FlowRecord | undefined {
+  if (e.flowRecordId) return recordById.value.get(e.flowRecordId)
+  return undefined
 }
 
 // ── Node rendering helpers ─────────────────────────────────
@@ -98,20 +156,24 @@ const NODE_COLORS: Record<string, string> = {
   energy_input: '#E74C3C', unit: '#3498DB', product_output: '#27AE60', custom: '#95A5A6',
 }
 function nodeColor(n: FlowNodeConfig): string { return n.color || NODE_COLORS[n.nodeType] || '#666' }
-function nodeCx(n: FlowNodeConfig): number { return n.positionX + (n.width || 60) / 2 }
-function nodeCy(n: FlowNodeConfig): number { return n.positionY + (n.height || 60) / 2 }
-function nodeR(n: FlowNodeConfig): number { return (n.width || 60) / 2 }
 
-// ── Inventory 4-line indicators (energy_input circles) ─────
-function inventoryLines(n: FlowNodeConfig): { label: string; value: string }[] | null {
-  if (n.nodeType !== 'energy_input' || !n.refId) return null
-  const cons = consumptionByEnergyId.value.get(n.refId)
-  if (!cons) return null
+// ── Inventory 4-line indicators (energy_input circles) ────
+// Order: 期末库存 / 外供 / 期初库存 / 购入 (canonical spec)
+// Always show fixed slots with unit; blank value when no data
+function inventoryLines(n: FlowNodeConfig): { label: string; value: string }[] {
+  if (n.nodeType !== 'energy_input') return []
+  const en = n.refId ? energyMap.value.get(n.refId) : undefined
+  const unit = en?.measurementUnit ?? ''
+  const cons = n.refId ? consumptionByEnergyId.value.get(n.refId) : undefined
+  const fmt = (v: number | null | undefined) => {
+    const s = fmtNum(v)
+    return s ? s + ' ' + unit : ''
+  }
   return [
-    { label: '期初', value: fmtNum(cons.openingStock) },
-    { label: '购入', value: fmtNum(cons.purchaseTotal) },
-    { label: '外供', value: fmtNum(cons.externalSupply) },
-    { label: '期末', value: fmtNum(cons.closingStock) },
+    { label: '期末库存', value: fmt(cons?.closingStock) },
+    { label: '外供', value: fmt(cons?.externalSupply) },
+    { label: '期初库存', value: fmt(cons?.openingStock) },
+    { label: '购入', value: fmt(cons?.purchaseTotal) },
   ]
 }
 
@@ -122,8 +184,10 @@ function unitEfficiency(n: FlowNodeConfig): string {
   if (!u || (u.unitType !== 1 && u.unitType !== 2)) return ''
   let inputTotal = 0, outputTotal = 0
   for (const e of visibleEdges.value) {
-    if (e.itemType !== 'energy') continue
-    const v = e.calculatedValue ?? 0
+    const rec = resolveRecord(e)
+    const iType = rec?.itemType ?? e.itemType
+    if (iType !== 'energy') continue
+    const v = rec?.calculatedValue ?? e.calculatedValue ?? 0
     if (e.targetNodeId === n.nodeId) inputTotal += v
     if (e.sourceNodeId === n.nodeId) outputTotal += v
   }
@@ -134,13 +198,13 @@ function unitEfficiency(n: FlowNodeConfig): string {
 // ── Equivalence / equivalent double lines (stage 0->1) ─────
 interface EquivLine { y: number; equivVal: string; equalVal: string; equivPct: string; equalPct: string }
 const equivLines = computed<EquivLine[]>(() => {
-  if (!props.energyConsumption?.length) return []
-  const energyNodes = visibleNodes.value.filter(n => n.nodeType === 'energy_input' && n.refId)
+  const energyNodes = layoutNodes.value.filter(ln => ln.node.nodeType === 'energy_input' && ln.node.refId)
+  if (!energyNodes.length) return []
   let totalEquiv = 0, totalEqual = 0
   const items: { cy: number; equiv: number; equal: number }[] = []
-  for (const n of energyNodes) {
-    const cons = consumptionByEnergyId.value.get(n.refId!)
-    const en = energyMap.value.get(n.refId!)
+  for (const ln of energyNodes) {
+    const cons = consumptionByEnergyId.value.get(ln.node.refId!)
+    const en = energyMap.value.get(ln.node.refId!)
     if (!cons || !en) continue
     const usage = (cons.purchaseTotal ?? 0) + (cons.openingStock ?? 0)
       - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
@@ -149,7 +213,7 @@ const equivLines = computed<EquivLine[]>(() => {
     const equiv = usage * equivF
     const equal = usage * equalF
     totalEquiv += equiv; totalEqual += equal
-    items.push({ cy: nodeCy(n), equiv, equal })
+    items.push({ cy: ln.cy, equiv, equal })
   }
   return items.map(it => ({
     y: it.cy,
@@ -161,46 +225,45 @@ const equivLines = computed<EquivLine[]>(() => {
 })
 const equivLineX = computed(() => stageDividers.value[0] ?? stageX.value[1] ?? cw.value * 0.3)
 
-// ── Edge rendering ─────────────────────────────────────────
+// ── Edge classification ─────────────────────────────────────
 function isBackflow(e: FlowEdgeConfig): boolean {
-  const s = nodeById.value.get(e.sourceNodeId)
-  const t = nodeById.value.get(e.targetNodeId)
+  const s = layoutNodeMap.value.get(e.sourceNodeId)
+  const t = layoutNodeMap.value.get(e.targetNodeId)
   if (!s || !t) return false
-  return nodeStage(s) > nodeStage(t)
+  return s.stage > t.stage
 }
-function isProductEdge(e: FlowEdgeConfig): boolean { return e.itemType === 'product' }
+function isProductEdge(e: FlowEdgeConfig): boolean {
+  const rec = resolveRecord(e)
+  if (rec) return rec.itemType === 'product'
+  return e.itemType === 'product'
+}
 
+const PALETTE = ['#E74C3C', '#3498DB', '#27AE60', '#F39C12', '#9B59B6', '#1ABC9C', '#E67E22']
 function edgeStrokeColor(e: FlowEdgeConfig): string {
-  if (e.color) return e.color
   if (isProductEdge(e)) return '#000'
-  if (e.itemId && e.itemType === 'energy') {
-    const en = energyMap.value.get(e.itemId)
+  if (e.color) return e.color
+  const rec = resolveRecord(e)
+  const itemId = rec?.itemId ?? e.itemId
+  if (itemId && (rec?.itemType === 'energy' || e.itemType === 'energy')) {
+    const en = energyMap.value.get(itemId)
     if (en?.color) return en.color
   }
-  const COLORS = ['#E74C3C', '#3498DB', '#27AE60', '#F39C12', '#9B59B6', '#1ABC9C', '#E67E22']
-  return COLORS[visibleEdges.value.indexOf(e) % COLORS.length]
+  return PALETTE[visibleEdges.value.indexOf(e) % PALETTE.length]
 }
 
-function srcExitPt(n: FlowNodeConfig): { x: number; y: number } {
-  if (n.nodeType === 'energy_input') {
-    const r = nodeR(n)
-    return { x: n.positionX + r * 2, y: n.positionY + r }
-  }
-  return { x: n.positionX + (n.width || 100), y: n.positionY + (n.height || 50) / 2 }
+function srcExitPt(ln: LayoutNode): { x: number; y: number } {
+  return { x: ln.cx + ln.w / 2, y: ln.cy }
 }
-function tgtEntryPt(n: FlowNodeConfig): { x: number; y: number } {
-  if (n.nodeType === 'energy_input') {
-    const r = nodeR(n)
-    return { x: n.positionX, y: n.positionY + r }
-  }
-  return { x: n.positionX, y: n.positionY + (n.height || 50) / 2 }
+function tgtEntryPt(ln: LayoutNode): { x: number; y: number } {
+  return { x: ln.cx - ln.w / 2, y: ln.cy }
 }
 
 function edgePath(edge: FlowEdgeConfig): string {
-  const sn = nodeById.value.get(edge.sourceNodeId)
-  const tn = nodeById.value.get(edge.targetNodeId)
-  if (!sn || !tn) return ''
-  const s = srcExitPt(sn), t = tgtEntryPt(tn)
+  const sln = layoutNodeMap.value.get(edge.sourceNodeId)
+  const tln = layoutNodeMap.value.get(edge.targetNodeId)
+  if (!sln || !tln) return ''
+  if (isProductEdge(edge)) return '' // product edges are rendered as productLines
+  const s = srcExitPt(sln), t = tgtEntryPt(tln)
 
   if (edge.routePoints) {
     try {
@@ -213,51 +276,62 @@ function edgePath(edge: FlowEdgeConfig): string {
     } catch { /* fall through */ }
   }
   if (isBackflow(edge)) {
-    const topY = HEADER_Y + 10
+    const topY = HEADER_Y - 5
     return `M ${s.x} ${s.y} L ${s.x} ${topY} L ${t.x} ${topY} L ${t.x} ${t.y}`
-  }
-  if (isProductEdge(edge)) {
-    const rightX = cw.value - 30
-    return `M ${s.x} ${s.y} L ${rightX} ${s.y}`
   }
   const midX = (s.x + t.x) / 2
   return `M ${s.x} ${s.y} L ${midX} ${s.y} L ${midX} ${t.y} L ${t.x} ${t.y}`
 }
 
-// ── Dual-line labels on edges ──────────────────────────────
+// ── Product output lines: horizontal to right boundary ──────
+interface ProductLine { y: number; x1: number; topText: string; bottomText: string }
+const productLines = computed<ProductLine[]>(() => {
+  const results: ProductLine[] = []
+  for (const e of visibleEdges.value) {
+    if (!isProductEdge(e)) continue
+    const sln = layoutNodeMap.value.get(e.sourceNodeId)
+    if (!sln) continue
+    const rec = resolveRecord(e)
+    const itemId = rec?.itemId ?? e.itemId
+    const pr = itemId ? productMap.value.get(itemId) : undefined
+    const topText = pr?.name ?? ''
+    const pq = rec?.physicalQuantity ?? e.physicalQuantity
+    const unit = pr?.measurementUnit ?? ''
+    const bottomText = fmtNum(pq) ? fmtNum(pq) + ' ' + unit : ''
+    results.push({ y: sln.cy, x1: sln.cx + sln.w / 2, topText, bottomText })
+  }
+  return results
+})
+
+// ── Dual-line labels on edges (resolved from flowRecords) ──
 interface DualLabel { x: number; y: number; top: string; bottom: string }
 function edgeDualLabel(edge: FlowEdgeConfig): DualLabel {
-  const sn = nodeById.value.get(edge.sourceNodeId)
-  const tn = nodeById.value.get(edge.targetNodeId)
-  if (!sn || !tn) return { x: 0, y: 0, top: '', bottom: '' }
-  const s = srcExitPt(sn), t = tgtEntryPt(tn)
+  if (isProductEdge(edge)) return { x: 0, y: 0, top: '', bottom: '' } // handled by productLines
+  const sln = layoutNodeMap.value.get(edge.sourceNodeId)
+  const tln = layoutNodeMap.value.get(edge.targetNodeId)
+  if (!sln || !tln) return { x: 0, y: 0, top: '', bottom: '' }
+  const s = srcExitPt(sln), t = tgtEntryPt(tln)
 
   let lx: number, ly: number
-  if (isProductEdge(edge)) {
-    lx = (s.x + cw.value - 30) / 2; ly = s.y - 6
-  } else if (isBackflow(edge)) {
-    lx = (s.x + t.x) / 2; ly = HEADER_Y + 4
+  if (isBackflow(edge)) {
+    lx = (s.x + t.x) / 2; ly = HEADER_Y - 12
   } else {
     lx = (s.x + t.x) / 2; ly = (s.y + t.y) / 2 - 4
   }
 
+  const rec = resolveRecord(edge)
+  const iType = rec?.itemType ?? edge.itemType
+  const iId = rec?.itemId ?? edge.itemId
+  const pq = rec?.physicalQuantity ?? edge.physicalQuantity
+  const cv = rec?.calculatedValue ?? edge.calculatedValue
+
   let topTxt = '', bottomTxt = ''
-  if (edge.itemType === 'energy') {
-    const en = edge.itemId ? energyMap.value.get(edge.itemId) : undefined
+  if (iType === 'energy') {
+    const en = iId ? energyMap.value.get(iId) : undefined
     const name = en?.name ?? ''
     const unit = en?.measurementUnit ?? ''
-    topTxt = fmtNum(edge.physicalQuantity)
-      ? `${name} ${fmtNum(edge.physicalQuantity)}${unit}`
-      : name
-    bottomTxt = fmtNum(edge.calculatedValue)
-      ? `${fmtNum(edge.calculatedValue)} tce`
-      : ''
-  } else if (edge.itemType === 'product') {
-    const pr = edge.itemId ? productMap.value.get(edge.itemId) : undefined
-    topTxt = pr?.name ?? ''
-    bottomTxt = fmtNum(edge.physicalQuantity)
-      ? `${fmtNum(edge.physicalQuantity)} ${pr?.measurementUnit ?? ''}`
-      : ''
+    topTxt = fmtNum(pq) ? `${name} ${fmtNum(pq)} ${unit}` : name
+    bottomTxt = fmtNum(cv) ? `${fmtNum(cv)} tce` : ''
   } else {
     topTxt = edge.labelText || ''
   }
@@ -352,110 +426,100 @@ function fitView() { svgRef.value?.scrollIntoView({ behavior: 'smooth', block: '
         </template>
       </g>
 
-      <!-- Edges -->
+      <!-- Edges (non-product) -->
       <g class="edges-layer">
         <template v-for="e in visibleEdges" :key="e.edgeId">
-          <path
-            :d="edgePath(e)"
-            :stroke="edgeStrokeColor(e)"
-            :stroke-width="e.lineWidth || 2"
-            fill="none"
-            :stroke-dasharray="isBackflow(e) ? '6,3' : undefined"
-            :marker-end="`url(#${markerId(edgeStrokeColor(e))})`"
-          />
-          <!-- Dual-line label: top + bottom -->
-          <text
-            v-if="edgeDualLabel(e).top"
-            :x="edgeDualLabel(e).x"
-            :y="edgeDualLabel(e).y"
-            text-anchor="middle" font-size="10" fill="#333"
-            stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"
-          >{{ edgeDualLabel(e).top }}</text>
-          <text
-            v-if="edgeDualLabel(e).bottom"
-            :x="edgeDualLabel(e).x"
-            :y="edgeDualLabel(e).y + 13"
-            text-anchor="middle" font-size="9" fill="#666"
-            stroke="#fff" stroke-width="2" stroke-linejoin="round" paint-order="stroke"
-          >{{ edgeDualLabel(e).bottom }}</text>
+          <template v-if="edgePath(e)">
+            <path
+              :d="edgePath(e)"
+              :stroke="edgeStrokeColor(e)"
+              :stroke-width="e.lineWidth || 2"
+              fill="none"
+              :stroke-dasharray="isBackflow(e) ? '6,3' : undefined"
+              :marker-end="`url(#${markerId(edgeStrokeColor(e))})`"
+            />
+            <text
+              v-if="edgeDualLabel(e).top"
+              :x="edgeDualLabel(e).x"
+              :y="edgeDualLabel(e).y"
+              text-anchor="middle" font-size="10" fill="#333"
+              stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"
+            >{{ edgeDualLabel(e).top }}</text>
+            <text
+              v-if="edgeDualLabel(e).bottom"
+              :x="edgeDualLabel(e).x"
+              :y="edgeDualLabel(e).y + 13"
+              text-anchor="middle" font-size="9" fill="#666"
+              stroke="#fff" stroke-width="2" stroke-linejoin="round" paint-order="stroke"
+            >{{ edgeDualLabel(e).bottom }}</text>
+          </template>
         </template>
       </g>
 
-      <!-- Nodes -->
+      <!-- Product output lines: black horizontal to right boundary -->
+      <g class="product-lines-layer">
+        <template v-for="(pl, pi) in productLines" :key="'pl'+pi">
+          <line :x1="pl.x1" :y1="pl.y" :x2="cw - 30" :y2="pl.y" stroke="#000" stroke-width="2" />
+          <text
+            v-if="pl.topText"
+            :x="(pl.x1 + cw - 30) / 2" :y="pl.y - 8"
+            text-anchor="middle" font-size="10" fill="#333"
+            stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"
+          >{{ pl.topText }}</text>
+          <text
+            v-if="pl.bottomText"
+            :x="(pl.x1 + cw - 30) / 2" :y="pl.y + 14"
+            text-anchor="middle" font-size="9" fill="#666"
+            stroke="#fff" stroke-width="2" stroke-linejoin="round" paint-order="stroke"
+          >{{ pl.bottomText }}</text>
+        </template>
+      </g>
+
+      <!-- Nodes (from layout, excluding product_output which are rendered as lines) -->
       <g class="nodes-layer">
-        <template v-for="n in visibleNodes" :key="n.nodeId">
+        <template v-for="ln in shapeNodes" :key="ln.node.nodeId">
           <!-- energy_input: circle -->
-          <g v-if="n.nodeType === 'energy_input'">
+          <g v-if="ln.isCircle">
             <circle
-              :cx="nodeCx(n)" :cy="nodeCy(n)" :r="nodeR(n)"
-              :stroke="nodeColor(n)" stroke-width="2" fill="#fff"
+              :cx="ln.cx" :cy="ln.cy" :r="ln.w / 2"
+              :stroke="nodeColor(ln.node)" stroke-width="2" fill="#fff"
             />
-            <text :x="nodeCx(n)" :y="nodeCy(n) + 4" text-anchor="middle" font-size="11" :fill="nodeColor(n)">
-              {{ n.label }}
+            <text :x="ln.cx" :y="ln.cy + 4" text-anchor="middle" font-size="11" :fill="nodeColor(ln.node)">
+              {{ ln.node.label }}
             </text>
             <!-- Inventory 4-line indicators -->
-            <template v-if="inventoryLines(n)">
+            <template v-if="inventoryLines(ln.node).length">
               <text
-                v-for="(line, li) in inventoryLines(n)!" :key="li"
-                :x="nodeCx(n) - nodeR(n) - 4"
-                :y="n.positionY + 8 + li * 13"
+                v-for="(line, li) in inventoryLines(ln.node)" :key="li"
+                :x="ln.cx - ln.w / 2 - 4"
+                :y="ln.cy - ln.h / 2 + 8 + li * 13"
                 text-anchor="end" font-size="9" fill="#555"
               >{{ line.label }}: {{ line.value }}</text>
             </template>
           </g>
 
-          <!-- unit: rectangle -->
-          <g v-else-if="n.nodeType === 'unit'">
-            <rect
-              :x="n.positionX" :y="n.positionY"
-              :width="n.width || 100" :height="n.height || 50"
-              :stroke="nodeColor(n)" stroke-width="2" fill="#fff" rx="3"
-            />
-            <text
-              :x="n.positionX + (n.width || 100) / 2"
-              :y="n.positionY + (n.height || 50) / 2 - 2"
-              text-anchor="middle" font-size="11" fill="#222"
-            >{{ n.label }}</text>
-            <text
-              v-if="unitEfficiency(n)"
-              :x="n.positionX + (n.width || 100) / 2"
-              :y="n.positionY + (n.height || 50) / 2 + 12"
-              text-anchor="middle" font-size="9" fill="#888"
-            >{{ unitEfficiency(n) }}</text>
-          </g>
-
-          <!-- product_output: rectangle with green fill -->
-          <g v-else-if="n.nodeType === 'product_output'">
-            <rect
-              :x="n.positionX" :y="n.positionY"
-              :width="n.width || 100" :height="n.height || 50"
-              :stroke="nodeColor(n)" stroke-width="2" fill="#f0fff0" rx="8"
-            />
-            <text
-              :x="n.positionX + (n.width || 100) / 2"
-              :y="n.positionY + (n.height || 50) / 2 + 4"
-              text-anchor="middle" font-size="11" fill="#222"
-            >{{ n.label }}</text>
-          </g>
-
-          <!-- custom / fallback: rectangle -->
+          <!-- unit / custom: rectangle -->
           <g v-else>
             <rect
-              :x="n.positionX" :y="n.positionY"
-              :width="n.width || 100" :height="n.height || 50"
-              :stroke="nodeColor(n)" stroke-width="2" fill="#fff" rx="3"
+              :x="ln.cx - ln.w / 2" :y="ln.cy - ln.h / 2"
+              :width="ln.w" :height="ln.h"
+              :stroke="nodeColor(ln.node)" stroke-width="2" fill="#fff" rx="3"
             />
             <text
-              :x="n.positionX + (n.width || 100) / 2"
-              :y="n.positionY + (n.height || 50) / 2 + 4"
+              :x="ln.cx" :y="ln.cy - 2"
               text-anchor="middle" font-size="11" fill="#222"
-            >{{ n.label }}</text>
+            >{{ ln.node.label }}</text>
+            <text
+              v-if="unitEfficiency(ln.node)"
+              :x="ln.cx" :y="ln.cy + 12"
+              text-anchor="middle" font-size="9" fill="#888"
+            >{{ unitEfficiency(ln.node) }}</text>
           </g>
         </template>
       </g>
 
       <!-- Legend -->
-      <g v-if="visibleNodes.length > 0" :transform="`translate(20, ${ch - 55})`">
+      <g v-if="shapeNodes.length > 0" :transform="`translate(20, ${ch - 55})`">
         <rect width="320" height="45" fill="#f9f9f9" stroke="#ddd" rx="4" />
         <circle cx="16" cy="14" r="6" fill="#fff" stroke="#E74C3C" stroke-width="1.5" />
         <text x="28" y="18" font-size="9" fill="#333">能源输入(圆)</text>

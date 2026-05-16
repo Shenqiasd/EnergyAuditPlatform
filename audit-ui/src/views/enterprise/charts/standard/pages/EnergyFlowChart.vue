@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import EnergyFlowConfigView from '@/components/EnergyFlowConfigView/index.vue'
 import { getEnergyFlowConfig } from '@/api/energyFlowConfig'
 import type {
-  FlowNodeConfig, FlowEdgeConfig, EnergyInfo, UnitInfo, ProductInfo, EnergyConsumptionInfo,
+  FlowNodeConfig, FlowEdgeConfig, FlowRecord, EnergyInfo, UnitInfo, ProductInfo,
+  EnergyConsumptionInfo, ValidationResult,
 } from '@/api/energyFlowConfig'
 
 const currentYear = new Date().getFullYear()
@@ -15,6 +16,8 @@ const energies = ref<EnergyInfo[]>([])
 const units = ref<UnitInfo[]>([])
 const products = ref<ProductInfo[]>([])
 const energyConsumption = ref<EnergyConsumptionInfo[]>([])
+const flowRecords = ref<FlowRecord[]>([])
+const validation = ref<ValidationResult>({ valid: false, exportReady: false, enterpriseComplete: false, hasUnits: false, hasEnergies: false, hasProducts: false, warnings: [], exportErrors: [] })
 const enterpriseName = ref('')
 const canvasWidth = ref(1200)
 const canvasHeight = ref(800)
@@ -30,6 +33,8 @@ async function loadData() {
     units.value = config.units || []
     products.value = config.products || []
     energyConsumption.value = config.energyConsumption || []
+    flowRecords.value = config.flowRecords || []
+    if (config.validation) validation.value = config.validation
     if (config.diagram) {
       nodes.value = config.diagram.nodes || []
       edges.value = config.diagram.edges || []
@@ -48,6 +53,13 @@ async function loadData() {
 }
 
 async function handleExportPng() {
+  if (!validation.value.exportReady) {
+    const reasons = validation.value.exportErrors?.length
+      ? validation.value.exportErrors.join('\n')
+      : '前置资料不完整'
+    ElMessageBox.alert(reasons, '无法导出 PNG — 数据验证未通过', { type: 'error' })
+    return
+  }
   if (!viewRef.value) return
   try {
     const dataUri = await viewRef.value.exportPng()
@@ -85,10 +97,12 @@ onMounted(() => {
         ref="viewRef"
         :nodes="nodes"
         :edges="edges"
+        :flow-records="flowRecords"
         :energies="energies"
         :units="units"
         :products="products"
         :energy-consumption="energyConsumption"
+        :validation="validation"
         :enterprise-name="enterpriseName"
         :audit-year="auditYear"
         :canvas-width="canvasWidth"

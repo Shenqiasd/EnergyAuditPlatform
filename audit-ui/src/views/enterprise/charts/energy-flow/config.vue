@@ -13,7 +13,9 @@ import {
   type EnergyInfo,
   type ProductInfo,
   type SaveEnergyFlowConfig,
+  type EnergyConsumptionInfo,
 } from '@/api/energyFlowConfig'
+import EnergyFlowConfigView from '@/components/EnergyFlowConfigView/index.vue'
 
 // ============================================================
 // State
@@ -90,6 +92,9 @@ function genClientKey(): string {
 // SVG ref for PNG export
 const svgRef = ref<SVGSVGElement | null>(null)
 
+// Off-screen final-effect renderer for PNG export
+const exportViewRef = ref<InstanceType<typeof EnergyFlowConfigView>>()
+
 // ============================================================
 // Computed
 // ============================================================
@@ -97,6 +102,7 @@ const enterpriseName = computed(() => config.value?.enterpriseInfo?.name ?? '未
 const units = computed(() => config.value?.units ?? [])
 const energies = computed(() => config.value?.energies ?? [])
 const products = computed(() => config.value?.products ?? [])
+const energyConsumption = computed<EnergyConsumptionInfo[]>(() => config.value?.energyConsumption ?? [])
 const validation = computed(() => config.value?.validation ?? {
   valid: false,
   exportReady: false,
@@ -1055,7 +1061,15 @@ function computeLocalExportErrors(): string[] {
 // PNG Export
 // ============================================================
 async function handleExportPng() {
-  // Run local validation against current page state (not just cached server response)
+  // Gate: block on validation.exportReady
+  if (!validation.value.exportReady) {
+    const reasons = validation.value.exportErrors?.length
+      ? validation.value.exportErrors.join('\n')
+      : '前置资料不完整'
+    ElMessageBox.alert(reasons, '无法导出 PNG — 数据验证未通过', { type: 'error' })
+    return
+  }
+  // Run local validation against current page state
   const localErrors = computeLocalExportErrors()
   if (localErrors.length > 0) {
     ElMessageBox.alert(
@@ -1069,39 +1083,22 @@ async function handleExportPng() {
     ElMessage.warning('图表为空，无法导出')
     return
   }
-  if (!svgRef.value) return
-
+  // Use off-screen final-effect renderer (EnergyFlowConfigView) for export
+  if (!exportViewRef.value) {
+    ElMessage.error('导出渲染器未就绪')
+    return
+  }
   try {
-    const svg = svgRef.value
-    const serializer = new XMLSerializer()
-    const svgStr = serializer.serializeToString(svg)
-    const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    try {
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const i = new Image()
-        i.onload = () => resolve(i)
-        i.onerror = () => reject(new Error('svg load failed'))
-        i.src = url
-      })
-      const scale = 2
-      const canvas = document.createElement('canvas')
-      canvas.width = canvasWidth.value * scale
-      canvas.height = canvasHeight.value * scale
-      const ctx = canvas.getContext('2d')!
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      ctx.scale(scale, scale)
-      ctx.drawImage(img, 0, 0)
-      const dataUri = canvas.toDataURL('image/png')
-      const link = document.createElement('a')
-      link.download = `energy-flow-${enterpriseName.value}-${auditYear.value}.png`
-      link.href = dataUri
-      link.click()
-      ElMessage.success('已导出 PNG')
-    } finally {
-      URL.revokeObjectURL(url)
+    const dataUri = await exportViewRef.value.exportPng()
+    if (!dataUri) {
+      ElMessage.warning('导出失败，图表为空')
+      return
     }
+    const link = document.createElement('a')
+    link.download = `energy-flow-${enterpriseName.value}-${auditYear.value}.png`
+    link.href = dataUri
+    link.click()
+    ElMessage.success('已导出 PNG')
   } catch {
     ElMessage.error('导出失败')
   }
@@ -1122,6 +1119,24 @@ function formatNum(n: number | null | undefined): string {
 
 <template>
   <div class="energy-flow-config-page">
+    <!-- Off-screen final-effect renderer for PNG export -->
+    <div style="position: absolute; left: -9999px; top: -9999px; pointer-events: none;">
+      <EnergyFlowConfigView
+        ref="exportViewRef"
+        :nodes="nodes"
+        :edges="edges"
+        :flow-records="flowRecords"
+        :energies="energies"
+        :units="units"
+        :products="products"
+        :energy-consumption="energyConsumption"
+        :enterprise-name="enterpriseName"
+        :audit-year="auditYear"
+        :canvas-width="canvasWidth"
+        :canvas-height="canvasHeight"
+        :validation="validation"
+      />
+    </div>
     <!-- Top Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
