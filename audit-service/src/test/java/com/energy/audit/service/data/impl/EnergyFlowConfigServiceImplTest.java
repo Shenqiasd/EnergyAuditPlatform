@@ -289,7 +289,7 @@ class EnergyFlowConfigServiceImplTest {
         try {
             BsProduct prod = product(1L, "产品A", new BigDecimal("5.5"));
             when(productMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(prod);
-            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "终端车间", 3));
 
             DeEnergyFlow flow = new DeEnergyFlow();
             flow.setSourceType("unit");
@@ -548,6 +548,7 @@ class EnergyFlowConfigServiceImplTest {
                     .thenReturn(List.of(existing1, existing2));
 
             when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "终端车间", 3));
             when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
             when(productMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(product(2L, "产品B", new BigDecimal("500")));
 
@@ -563,7 +564,7 @@ class EnergyFlowConfigServiceImplTest {
 
             DeEnergyFlow newRec = new DeEnergyFlow();
             newRec.setSourceType("unit");
-            newRec.setSourceRefId(1L);
+            newRec.setSourceRefId(2L);
             newRec.setTargetType("product_output");
             newRec.setItemType("product");
             newRec.setItemId(2L);
@@ -2482,7 +2483,7 @@ class EnergyFlowConfigServiceImplTest {
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(productMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(product(1L, "产品A", new BigDecimal("5.5")));
-            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 1));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "终端车间", 3));
 
             DeEnergyFlow flow = new DeEnergyFlow();
             flow.setSourceType("unit");
