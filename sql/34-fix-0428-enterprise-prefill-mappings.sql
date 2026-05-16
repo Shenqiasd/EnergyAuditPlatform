@@ -32,7 +32,7 @@ SET tag_name = 'ENERGY_LEADER_TITLE',
     update_time = NOW()
 WHERE template_version_id = @v_id
   AND deleted = 0
-  AND sheet_name = '3.主技指'
+  AND sheet_index = 3
   AND cell_range = 'C5'
   AND target_table = 'ent_enterprise_setting';
 
@@ -97,7 +97,7 @@ SELECT tag_name, field_name, target_table, sheet_index, sheet_name, cell_range, 
 FROM tpl_tag_mapping
 WHERE template_version_id = @v_id
   AND deleted = 0
-  AND sheet_name IN ('2.企概', '3.主技指')
+  AND sheet_index IN (2, 3)
   AND target_table = 'ent_enterprise_setting'
 ORDER BY sheet_index, cell_range, tag_name;
 
