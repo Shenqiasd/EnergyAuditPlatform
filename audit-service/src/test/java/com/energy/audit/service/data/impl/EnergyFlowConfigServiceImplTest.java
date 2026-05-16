@@ -1,0 +1,475 @@
+package com.energy.audit.service.data.impl;
+
+import com.energy.audit.dao.mapper.data.DeEnergyFlowDiagramMapper;
+import com.energy.audit.dao.mapper.data.DeEnergyFlowEdgeMapper;
+import com.energy.audit.dao.mapper.data.DeEnergyFlowMapper;
+import com.energy.audit.dao.mapper.data.DeEnergyFlowNodeMapper;
+import com.energy.audit.dao.mapper.enterprise.EntEnterpriseMapper;
+import com.energy.audit.dao.mapper.setting.BsEnergyMapper;
+import com.energy.audit.dao.mapper.setting.BsProductMapper;
+import com.energy.audit.dao.mapper.setting.BsUnitMapper;
+import com.energy.audit.model.dto.DiagramConfigDTO;
+import com.energy.audit.model.dto.EnergyFlowConfigDTO;
+import com.energy.audit.model.dto.SaveEnergyFlowConfigDTO;
+import com.energy.audit.model.entity.enterprise.EntEnterprise;
+import com.energy.audit.model.entity.extraction.DeEnergyFlow;
+import com.energy.audit.model.entity.extraction.DeEnergyFlowDiagram;
+import com.energy.audit.model.entity.extraction.DeEnergyFlowEdge;
+import com.energy.audit.model.entity.extraction.DeEnergyFlowNode;
+import com.energy.audit.model.entity.setting.BsEnergy;
+import com.energy.audit.model.entity.setting.BsProduct;
+import com.energy.audit.model.entity.setting.BsUnit;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class EnergyFlowConfigServiceImplTest {
+
+    private DeEnergyFlowMapper flowMapper;
+    private DeEnergyFlowDiagramMapper diagramMapper;
+    private DeEnergyFlowNodeMapper nodeMapper;
+    private DeEnergyFlowEdgeMapper edgeMapper;
+    private EntEnterpriseMapper enterpriseMapper;
+    private BsUnitMapper unitMapper;
+    private BsEnergyMapper energyMapper;
+    private BsProductMapper productMapper;
+
+    private EnergyFlowConfigServiceImpl service;
+
+    private static final Long ENT_ID = 100L;
+    private static final Integer YEAR = 2026;
+
+    @BeforeEach
+    void setUp() {
+        flowMapper = mock(DeEnergyFlowMapper.class);
+        diagramMapper = mock(DeEnergyFlowDiagramMapper.class);
+        nodeMapper = mock(DeEnergyFlowNodeMapper.class);
+        edgeMapper = mock(DeEnergyFlowEdgeMapper.class);
+        enterpriseMapper = mock(EntEnterpriseMapper.class);
+        unitMapper = mock(BsUnitMapper.class);
+        energyMapper = mock(BsEnergyMapper.class);
+        productMapper = mock(BsProductMapper.class);
+
+        service = new EnergyFlowConfigServiceImpl(
+                flowMapper, diagramMapper, nodeMapper, edgeMapper,
+                enterpriseMapper, unitMapper, energyMapper, productMapper);
+    }
+
+    // ============================================================
+    // getConfig tests
+    // ============================================================
+
+    @Test
+    void getConfigReturnsEnterpriseInfo() {
+        EntEnterprise ent = new EntEnterprise();
+        ent.setId(ENT_ID);
+        ent.setEnterpriseName("测试企业");
+        when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+        stubEmpty();
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getEnterpriseInfo()).isNotNull();
+        assertThat(result.getEnterpriseInfo().getName()).isEqualTo("测试企业");
+    }
+
+    @Test
+    void getConfigValidationFailsWhenNoUnits() {
+        stubEnterprise("测试企业");
+        when(unitMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isValid()).isFalse();
+        assertThat(result.getValidation().isHasUnits()).isFalse();
+        assertThat(result.getValidation().getWarnings()).contains("至少需要一个用能单元");
+    }
+
+    @Test
+    void getConfigValidationPassesWhenAllPrerequisitesMet() {
+        stubEnterprise("测试企业");
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isValid()).isTrue();
+    }
+
+    @Test
+    void getConfigWarnsMissingEquivalentValue() {
+        stubEnterprise("测试企业");
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "天然气", null)));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setItemType("energy");
+        flow.setItemId(1L);
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+
+        BsEnergy e = energy(1L, "天然气", null);
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(e);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().getWarnings())
+                .anyMatch(w -> w.contains("天然气") && w.contains("折标系数"));
+    }
+
+    @Test
+    void getConfigWarnsMissingProductUnitPrice() {
+        stubEnterprise("测试企业");
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "车间", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品B", null)));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setItemType("product");
+        flow.setItemId(1L);
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+
+        BsProduct p = product(1L, "产品B", null);
+        when(productMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(p);
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().getWarnings())
+                .anyMatch(w -> w.contains("产品B") && w.contains("单价"));
+    }
+
+    @Test
+    void getConfigReturnsDiagramNodesEdges() {
+        stubEnterprise("测试企业");
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("测试图");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        DeEnergyFlowNode node = new DeEnergyFlowNode();
+        node.setId(20L);
+        node.setNodeId("node-1");
+        node.setNodeType("unit");
+        node.setLabel("锅炉房");
+        node.setPositionX(100.0);
+        node.setPositionY(200.0);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(node));
+
+        DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
+        edge.setId(30L);
+        edge.setEdgeId("edge-1");
+        edge.setSourceNodeId("node-1");
+        edge.setTargetNodeId("node-2");
+        edge.setFlowRecordId(50L);
+        edge.setItemType("energy");
+        edge.setItemId(1L);
+        edge.setPhysicalQuantity(new BigDecimal("100"));
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getDiagram()).isNotNull();
+        assertThat(result.getDiagram().getNodes()).hasSize(1);
+        assertThat(result.getDiagram().getNodes().get(0).getLabel()).isEqualTo("锅炉房");
+        assertThat(result.getDiagram().getEdges()).hasSize(1);
+        assertThat(result.getDiagram().getEdges().get(0).getFlowRecordId()).isEqualTo(50L);
+    }
+
+    @Test
+    void getConfigHandlesOldRecordsWithoutV2Fields() {
+        stubEnterprise("测试企业");
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        // Old record without itemType/itemId
+        DeEnergyFlow oldFlow = new DeEnergyFlow();
+        oldFlow.setId(99L);
+        oldFlow.setSourceUnit("外购");
+        oldFlow.setTargetUnit("锅炉房");
+        oldFlow.setEnergyProduct("电力");
+        oldFlow.setPhysicalQuantity(new BigDecimal("5000"));
+        oldFlow.setStandardQuantity(new BigDecimal("614.5"));
+        // v2 fields are null
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(oldFlow));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getFlowRecords()).hasSize(1);
+        assertThat(result.getFlowRecords().get(0).getEnergyProduct()).isEqualTo("电力");
+        assertThat(result.getFlowRecords().get(0).getItemType()).isNull();
+    }
+
+    // ============================================================
+    // Energy calculation tests
+    // ============================================================
+
+    @Test
+    void saveConfigCalculatesEnergyFoldedValue() {
+                com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+                try {
+                    BsEnergy elec = energy(1L, "电力", new BigDecimal("0.1229"));
+                    when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(elec);
+
+                    DeEnergyFlow flow = new DeEnergyFlow();
+                    flow.setItemType("energy");
+                    flow.setItemId(1L);
+                    flow.setPhysicalQuantity(new BigDecimal("10000"));
+
+                    SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+                    dto.setFlowRecords(List.of(flow));
+
+                    service.saveConfig(ENT_ID, YEAR, dto);
+
+                    verify(flowMapper).insert(any(DeEnergyFlow.class));
+                    // calculatedValue = 10000 * 0.1229 = 1229.0000
+                    assertThat(flow.getCalculatedValue()).isEqualByComparingTo(new BigDecimal("1229.0000"));
+                } finally {
+                    com.energy.audit.common.util.SecurityUtils.clear();
+                }
+    }
+
+    @Test
+    void saveConfigCalculatesProductPriceValue() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            BsProduct prod = product(1L, "产品A", new BigDecimal("5.5"));
+            when(productMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(prod);
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setItemType("product");
+            flow.setItemId(1L);
+            flow.setPhysicalQuantity(new BigDecimal("2000"));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            verify(flowMapper).insert(any(DeEnergyFlow.class));
+            // calculatedValue = 2000 * 5.5 = 11000.0
+            assertThat(flow.getCalculatedValue()).isEqualByComparingTo(new BigDecimal("11000.0"));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigSkipsCalcWhenPhysicalQuantityNull() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setItemType("energy");
+            flow.setItemId(1L);
+            // physicalQuantity is null
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            verify(flowMapper).insert(any(DeEnergyFlow.class));
+            assertThat(flow.getCalculatedValue()).isNull();
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigBackwardCompatByName() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            BsEnergy elec = energy(1L, "电力", new BigDecimal("0.1229"));
+            when(energyMapper.selectByEnterpriseAndName(ENT_ID, "电力")).thenReturn(elec);
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setEnergyProduct("电力");
+            flow.setPhysicalQuantity(new BigDecimal("5000"));
+            // No itemType/itemId
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            // Should calculate via backward-compat name matching
+            assertThat(flow.getCalculatedValue()).isEqualByComparingTo(new BigDecimal("614.5000"));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    // ============================================================
+    // Diagram save tests
+    // ============================================================
+
+    @Test
+    void saveConfigCreatesDiagramWhenNoneExists() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("测试图");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+
+            DiagramConfigDTO.FlowNodeDTO node = new DiagramConfigDTO.FlowNodeDTO();
+            node.setNodeId("node-1");
+            node.setNodeType("unit");
+            node.setLabel("锅炉房");
+            node.setPositionX(100.0);
+            node.setPositionY(200.0);
+            dc.setNodes(List.of(node));
+
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-1");
+            edge.setSourceNodeId("node-1");
+            edge.setTargetNodeId("node-2");
+            edge.setFlowRecordId(50L);
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setDiagram(dc);
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            verify(diagramMapper).insert(any(DeEnergyFlowDiagram.class));
+            verify(nodeMapper).insert(any(DeEnergyFlowNode.class));
+            verify(edgeMapper).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigUpdatesExistingDiagram() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            DeEnergyFlowDiagram existing = new DeEnergyFlowDiagram();
+            existing.setId(10L);
+            existing.setName("旧图");
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(existing);
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("新图");
+            dc.setCanvasWidth(1400);
+            dc.setCanvasHeight(900);
+            dc.setNodes(Collections.emptyList());
+            dc.setEdges(Collections.emptyList());
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setDiagram(dc);
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            verify(diagramMapper).update(existing);
+            verify(diagramMapper, never()).insert(any());
+            assertThat(existing.getName()).isEqualTo("新图");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigFlowRecordIdBindingPreserved() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("绑定测试图");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+            dc.setNodes(Collections.emptyList());
+
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-binding");
+            edge.setSourceNodeId("n1");
+            edge.setTargetNodeId("n2");
+            edge.setFlowRecordId(77L);
+            edge.setItemType("energy");
+            edge.setItemId(5L);
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setDiagram(dc);
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            verify(edgeMapper).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    // ============================================================
+    // Helpers
+    // ============================================================
+
+    private void stubEnterprise(String name) {
+        EntEnterprise ent = new EntEnterprise();
+        ent.setId(ENT_ID);
+        ent.setEnterpriseName(name);
+        when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+    }
+
+    private void stubEmpty() {
+        when(unitMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(energyMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(productMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(flowMapper.selectByEnterpriseAndYear(anyLong(), anyInt())).thenReturn(Collections.emptyList());
+    }
+
+    private static BsUnit unit(Long id, String name, Integer unitType) {
+        BsUnit u = new BsUnit();
+        u.setId(id);
+        u.setName(name);
+        u.setUnitType(unitType);
+        return u;
+    }
+
+    private static BsEnergy energy(Long id, String name, BigDecimal equivalentValue) {
+        BsEnergy e = new BsEnergy();
+        e.setId(id);
+        e.setName(name);
+        e.setEquivalentValue(equivalentValue);
+        return e;
+    }
+
+    private static BsProduct product(Long id, String name, BigDecimal unitPrice) {
+        BsProduct p = new BsProduct();
+        p.setId(id);
+        p.setName(name);
+        p.setUnitPrice(unitPrice);
+        return p;
+    }
+}
