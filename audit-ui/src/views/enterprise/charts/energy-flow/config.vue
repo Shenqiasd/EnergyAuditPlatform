@@ -643,6 +643,21 @@ function handleCanvasClick() {
   }
 }
 
+// Whether the selected edge's label is data-derived (from bound fill record / master data).
+// The final-effect renderer ignores labelText for energy-type and product-output edges,
+// rendering labels from resolved fill records instead. Editing labelText for these edges
+// has no visible effect in preview or PNG export.
+const selectedEdgeLabelDerived = computed(() => {
+  if (!selectedEdge.value) return false
+  const rec = resolveEdgeRecord(selectedEdge.value)
+  const iType = rec?.itemType ?? selectedEdge.value.itemType
+  // Energy records: label derived from energy master data (name + calculatedValue + physicalQuantity)
+  if (iType === 'energy') return true
+  // Product output edges: label derived from product master data
+  if (isEditorProductEdge(selectedEdge.value)) return true
+  return false
+})
+
 // ============================================================
 // Edge interactions
 // ============================================================
@@ -939,20 +954,41 @@ function setRoutePointsJson(pts: { x: number; y: number }[]) {
 
 function addRoutePoint() {
   if (!selectedEdge.value) return
-  // Seed route point from canonical fixed-stage positions (same as final-effect renderer)
-  const srcFixed = fixedStageLayout.value.get(selectedEdge.value.sourceNodeId)
-  const dstFixed = fixedStageLayout.value.get(selectedEdge.value.targetNodeId)
+  const edge = selectedEdge.value
+  // Seed route point ON the canonical route path (same segments the final renderer builds).
+  // This ensures the added point is accepted as a valid hint by buildOrthoPath().
+  const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
+  const dstFixed = fixedStageLayout.value.get(edge.targetNodeId)
+  if (!srcFixed || !dstFixed) {
+    // Fallback: canvas center (will likely fail validation — user must adjust)
+    const pts = [...parsedRoutePoints.value, { x: Math.round(canvasWidth.value / 2), y: Math.round(canvasHeight.value / 2) }]
+    setRoutePointsJson(pts)
+    return
+  }
+  const sx = srcFixed.cx + srcFixed.w / 2
+  const sy = srcFixed.cy
+  const tx = dstFixed.cx - dstFixed.w / 2
+  const ty = dstFixed.cy
   let mx: number, my: number
-  if (srcFixed && dstFixed) {
-    const sx = srcFixed.cx + srcFixed.w / 2
-    const sy = srcFixed.cy
-    const tx = dstFixed.cx - dstFixed.w / 2
-    const ty = dstFixed.cy
+  if (isEdgeBackflow(edge)) {
+    // Backflow: seed a point on the top channel (Y above both nodes, X at midpoint).
+    // The final renderer accepts Y hints that are < min(sy, ty) as the lane level.
+    const lane = editorBackflowLaneMap.value.get(edge.edgeId) ?? 0
+    const topY = Math.min(sy, ty) - 40 - lane * BACKFLOW_LANE_SPACING
     mx = Math.round((sx + tx) / 2)
-    my = Math.round((sy + ty) / 2)
+    my = Math.round(topY)
   } else {
-    mx = Math.round(canvasWidth.value / 2)
-    my = Math.round(canvasHeight.value / 2)
+    // Forward: seed a point on the trunk vertical segment.
+    const info = editorTrunkInfoMap.value.get(edge.edgeId)
+    if (info && Math.abs(info.trunkX - sx) > 5) {
+      // Trunk routing: point on trunk X, at vertical midpoint between source and target Y
+      mx = Math.round(info.trunkX)
+      my = Math.round((sy + ty) / 2)
+    } else {
+      // Default orthogonal: point at midpoint X, at vertical midpoint Y
+      mx = Math.round((sx + tx) / 2)
+      my = Math.round((sy + ty) / 2)
+    }
   }
   const pts = [...parsedRoutePoints.value, { x: mx, y: my }]
   setRoutePointsJson(pts)
@@ -1435,12 +1471,19 @@ function computeLocalExportErrors(): string[] {
                 errors.push(`回流连线 [${e.edgeId}] 的路由点未经过顶部通道，请编辑路由点使其经过顶部回流通道`)
               }
             }
-            // Forward trunk compatibility check against fixed-stage positions
+            // Forward trunk compatibility: tighter ±30px corridor + vertical-segment trunk zone check
             if (sx < tx) {
               for (let i = 0; i < rpts.length; i++) {
                 const px = rpts[i].x
-                if (px < sx - 5 || px > tx + 5) {
-                  errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})超出固定布局有效路由范围，将被最终渲染器忽略`)
+                const py = rpts[i].y
+                if (px < sx - 30 || px > tx + 30) {
+                  errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})超出固定布局有效路由范围(±30px容差)，将被最终渲染器忽略`)
+                }
+                // Vertical-segment waypoints (not on source/target Y) must be in valid trunk zone
+                if (Math.abs(py - sy) > 1 && Math.abs(py - ty) > 1) {
+                  if (px < sx + 5 || px > tx - 5) {
+                    errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})不在有效中继区域，最终渲染器可能忽略`)
+                  }
                 }
               }
             }
@@ -1815,7 +1858,12 @@ function formatNum(n: number | null | undefined): string {
           <h4>连线属性</h4>
           <div class="prop-row">
             <label>标签</label>
-            <el-input :model-value="selectedEdge.labelText || ''" size="small" @update:model-value="v => updateEdgeProp('labelText', v)" />
+            <template v-if="selectedEdgeLabelDerived">
+              <el-tag size="small" type="info">由填报记录自动生成</el-tag>
+            </template>
+            <template v-else>
+              <el-input :model-value="selectedEdge.labelText || ''" size="small" @update:model-value="v => updateEdgeProp('labelText', v)" />
+            </template>
           </div>
           <div class="prop-row">
             <label>颜色</label>

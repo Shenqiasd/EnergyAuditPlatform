@@ -1180,14 +1180,33 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
 
-            // Check forward trunk compatibility against fixed-stage positions
+            // Check forward trunk compatibility against fixed-stage positions.
+            // The final renderer only accepts forward X hints within ±30px of the canonical trunk X.
+            // Trunk X = source exit X + 20 + slotOffset (computed per source+itemId group).
+            // For simplicity, we validate that each route point X is either:
+            //   (a) on a horizontal segment (same Y as source or target), OR
+            //   (b) within reasonable range between source exit and target entry (±30px tolerance)
+            // This prevents route points that the final renderer will silently ignore.
             if (sx < tx) {
                 for (int i = 0; i < coords.size(); i++) {
                     double px = coords.get(i)[0];
-                    if (px < sx - 5 || px > tx + 5) {
+                    double py = coords.get(i)[1];
+                    // Route point must be within the source-to-target corridor
+                    if (px < sx - 30 || px > tx + 30) {
                         errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
-                                + "]的X坐标(" + px + ")超出固定布局有效路由范围，"
+                                + "]的X坐标(" + px + ")超出固定布局有效路由范围(±30px容差)，"
                                 + "将被最终渲染器忽略");
+                    }
+                    // Vertical route points (not on source/target Y) should be near a trunk X
+                    // Trunk X is typically source exit + 20~50px range
+                    if (Math.abs(py - sy) > 1 && Math.abs(py - ty) > 1) {
+                        // This is a vertical-segment waypoint — check it's in a valid trunk zone
+                        double minTrunkX = sx + 5;
+                        double maxTrunkX = tx - 5;
+                        if (px < minTrunkX || px > maxTrunkX) {
+                            errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
+                                    + "]的X坐标(" + px + ")不在有效中继区域，最终渲染器可能忽略");
+                        }
                     }
                 }
             }
