@@ -38,6 +38,11 @@ export interface EnergyConsumptionInfo {
   purchaseAmount?: number
   closingStock?: number
   externalSupply?: number
+  industrialConsumption?: number
+  materialConsumption?: number
+  transportConsumption?: number
+  /** Aggregate consumption = industrial + material + transport */
+  consumeAmount?: number
   equivFactor?: number
   equalFactor?: number
   standardCoal?: number

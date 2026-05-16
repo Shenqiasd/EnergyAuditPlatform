@@ -85,8 +85,26 @@ const recordByClientKey = computed(() => {
 // ── Stage layout constants ────────────────────────────────
 const STAGE_LABELS = ['购入贮存环节', '加工转换环节', '输送分配环节', '终端使用环节']
 const STAGE_MARGIN = 80
-const HEADER_Y = 55
-const BODY_TOP = HEADER_Y + 20
+const BASE_HEADER_Y = 55
+const BACKFLOW_LANE_SPACING = 12
+
+// Dynamic top-channel height for return-flow lanes
+const backflowLaneCount = computed(() => {
+  const groups = new Set<string>()
+  for (const e of (props.edges ?? []).filter(e => (e.visible ?? 1) !== 0)) {
+    const sln = _rawLayoutNodeMap.value.get(e.sourceNodeId)
+    const tln = _rawLayoutNodeMap.value.get(e.targetNodeId)
+    if (!sln || !tln || sln.stage <= tln.stage) continue
+    const rec = _resolveRecordRaw(e)
+    const iId = rec?.itemId ?? e.itemId
+    const key = iId ? `bf-${iId}-${e.sourceNodeId}-${e.targetNodeId}` : `bf-${e.edgeId}`
+    groups.add(key)
+  }
+  return groups.size
+})
+const topChannelHeight = computed(() => backflowLaneCount.value > 0 ? backflowLaneCount.value * BACKFLOW_LANE_SPACING + 10 : 0)
+const HEADER_Y = computed(() => BASE_HEADER_Y + topChannelHeight.value)
+const BODY_TOP = computed(() => HEADER_Y.value + 20)
 const stageWidth = computed(() => (cw.value - STAGE_MARGIN * 2) / 4)
 const stageX = computed(() => STAGE_LABELS.map((_, i) => STAGE_MARGIN + i * stageWidth.value))
 const stageDividers = computed(() => [stageX.value[1], stageX.value[2], stageX.value[3]])
@@ -116,6 +134,23 @@ interface LayoutNode {
   isCircle: boolean
 }
 
+// Raw layout for backflow lane count calculation (avoids circular dependency)
+const _rawLayoutNodeMap = computed(() => {
+  const m = new Map<string, { stage: number }>()
+  for (const n of props.nodes.filter(nn => (nn.visible ?? 1) !== 0 && nn.nodeType !== 'product_output')) {
+    m.set(n.nodeId, { stage: nodeStage(n) })
+  }
+  return m
+})
+function _resolveRecordRaw(e: FlowEdgeConfig): FlowRecord | undefined {
+  if (e._flowRecordClientKey) {
+    const byKey = recordByClientKey.value.get(e._flowRecordClientKey)
+    if (byKey) return byKey
+  }
+  if (e.flowRecordId) return recordById.value.get(e.flowRecordId)
+  return undefined
+}
+
 const layoutNodes = computed<LayoutNode[]>(() => {
   const visible = props.nodes.filter(n => (n.visible ?? 1) !== 0 && n.nodeType !== 'product_output')
   const buckets = new Map<number, FlowNodeConfig[]>()
@@ -134,7 +169,7 @@ const layoutNodes = computed<LayoutNode[]>(() => {
       const w = isCircle ? 60 : 100
       const h = isCircle ? 60 : 50
       const cx = sx + sw / 2
-      const cy = BODY_TOP + rowIdx * ROW_H + ROW_H / 2
+      const cy = BODY_TOP.value + rowIdx * ROW_H + ROW_H / 2
       result.push({ node: n, stage, cx, cy, w, h, isCircle })
     })
   }
@@ -167,11 +202,15 @@ const NODE_COLORS: Record<string, string> = {
 function nodeColor(n: FlowNodeConfig): string { return n.color || NODE_COLORS[n.nodeType] || '#666' }
 
 // ── Energy node: name + total quantity/unit (two lines in circle) ─
+// Blank when ALL source fields are absent (not partial zero)
 function energyNodeTotalLine(n: FlowNodeConfig): string {
   if (n.nodeType !== 'energy_input' || !n.refId) return ''
   const cons = consumptionByEnergyId.value.get(n.refId)
   const en = energyMap.value.get(n.refId)
   if (!cons) return ''
+  // Require at least one non-null field to compute a total
+  if (cons.purchaseAmount == null && cons.openingStock == null
+      && cons.closingStock == null && cons.externalSupply == null) return ''
   const usage = (cons.purchaseAmount ?? 0) + (cons.openingStock ?? 0)
     - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
   const unit = en?.measurementUnit ?? cons.measurementUnit ?? ''
@@ -229,37 +268,37 @@ function unitEfficiency(n: FlowNodeConfig): string {
 
 // ── Equivalence / equivalent double lines (stage 0→1) ─────
 // Always-present double solid line region (mandatory layout element)
-// Show blank values where data is missing
+// Spec: equiv = consumeAmount × equivalentCoefficient, equal = consumeAmount × calorificCoefficient
+// Percentages: 消费值 ÷ 能源总量 (consumeAmount / totalConsumeAmount)
 interface EquivLine { y: number; equivVal: string; equalVal: string; equivPct: string; equalPct: string }
 const equivLines = computed<EquivLine[]>(() => {
   const energyNodes = layoutNodes.value.filter(ln => ln.node.nodeType === 'energy_input' && ln.node.refId)
   if (!energyNodes.length) return []
-  let totalEquiv = 0, totalEqual = 0
-  const items: { cy: number; equiv: number | null; equal: number | null }[] = []
+  let totalConsume = 0
+  const items: { cy: number; equiv: number | null; equal: number | null; consume: number | null }[] = []
   for (const ln of energyNodes) {
     const cons = consumptionByEnergyId.value.get(ln.node.refId!)
     const en = energyMap.value.get(ln.node.refId!)
-    // Distinguish absent data from real zero: require at least one non-null consumption field
-    if (!cons || (cons.purchaseAmount == null && cons.openingStock == null
-        && cons.closingStock == null && cons.externalSupply == null)) {
-      items.push({ cy: ln.cy, equiv: null, equal: null })
+    // Use canonical consumeAmount (aggregate of industrial+material+transport)
+    if (!cons || cons.consumeAmount == null) {
+      items.push({ cy: ln.cy, equiv: null, equal: null, consume: null })
       continue
     }
-    const usage = (cons.purchaseAmount ?? 0) + (cons.openingStock ?? 0)
-      - (cons.closingStock ?? 0) - (cons.externalSupply ?? 0)
+    const ca = cons.consumeAmount
     const equivF = en?.equivalentValue ?? cons?.equivFactor ?? 0
     const equalF = en?.equalValue ?? cons?.equalFactor ?? 0
-    const equiv = usage * equivF
-    const equal = usage * equalF
-    totalEquiv += equiv; totalEqual += equal
-    items.push({ cy: ln.cy, equiv, equal })
+    const equiv = ca * equivF
+    const equal = ca * equalF
+    totalConsume += ca
+    items.push({ cy: ln.cy, equiv, equal, consume: ca })
   }
   return items.map(it => ({
     y: it.cy,
     equivVal: it.equiv != null ? fmtNum(it.equiv) : '',
     equalVal: it.equal != null ? fmtNum(it.equal) : '',
-    equivPct: it.equiv != null && totalEquiv > 0 ? fmtPct(it.equiv / totalEquiv) : '',
-    equalPct: it.equal != null && totalEqual > 0 ? fmtPct(it.equal / totalEqual) : '',
+    // Percentages: 消费值 ÷ 能源总量 (consumeAmount ratio)
+    equivPct: it.consume != null && totalConsume > 0 ? fmtPct(it.consume / totalConsume) : '',
+    equalPct: it.consume != null && totalConsume > 0 ? fmtPct(it.consume / totalConsume) : '',
   }))
 })
 const equivLineX = computed(() => stageDividers.value[0] ?? stageX.value[1] ?? cw.value * 0.3)
@@ -307,7 +346,7 @@ function tgtEntryPt(ln: LayoutNode): { x: number; y: number } {
 // Half-circle line jumps at crossing points.
 
 // Allocate deterministic top-channel lanes for return-flow edges
-// Same-energy backflow edges share a trunk; different energies get separate lanes
+// Group by itemId + source/target path; separate lanes for different paths
 const backflowLaneMap = computed(() => {
   const m = new Map<string, number>()
   const backflowEdges = visibleEdges.value.filter(e => isBackflow(e))
@@ -329,17 +368,20 @@ const backflowLaneMap = computed(() => {
   return m
 })
 
-// Build trunk X map: group edges by energy itemId sharing same source stage
+// Build trunk X map: group edges by compatible route segment (source+target path)
+// Same-energy flows with different source/target paths get separate trunks
 const trunkXMap = computed(() => {
   const m = new Map<string, number>()
   const edgesByTrunk = new Map<string, FlowEdgeConfig[]>()
   for (const e of visibleEdges.value) {
     if (isProductEdge(e) || isBackflow(e)) continue
     const sln = layoutNodeMap.value.get(e.sourceNodeId)
-    if (!sln) continue
+    const tln = layoutNodeMap.value.get(e.targetNodeId)
+    if (!sln || !tln) continue
     const rec = resolveRecord(e)
     const iId = rec?.itemId ?? e.itemId
-    const key = `${sln.stage}-${iId ?? e.edgeId}`
+    // Key by source stage + target stage + itemId + source node + target node
+    const key = `${sln.stage}-${tln.stage}-${iId ?? ''}-${e.sourceNodeId}-${e.targetNodeId}`
     if (!edgesByTrunk.has(key)) edgesByTrunk.set(key, [])
     edgesByTrunk.get(key)!.push(e)
   }
@@ -356,10 +398,11 @@ const trunkXMap = computed(() => {
 
 function trunkKey(e: FlowEdgeConfig): string {
   const sln = layoutNodeMap.value.get(e.sourceNodeId)
-  if (!sln) return e.edgeId
+  const tln = layoutNodeMap.value.get(e.targetNodeId)
+  if (!sln || !tln) return e.edgeId
   const rec = resolveRecord(e)
   const iId = rec?.itemId ?? e.itemId
-  return `${sln.stage}-${iId ?? e.edgeId}`
+  return `${sln.stage}-${tln.stage}-${iId ?? ''}-${e.sourceNodeId}-${e.targetNodeId}`
 }
 
 // Collect all horizontal segment Y positions for crossing detection
@@ -376,9 +419,9 @@ function buildOrthoPath(edge: FlowEdgeConfig): { x: number; y: number }[] {
   const t = tgtEntryPt(tln)
 
   if (isBackflow(edge)) {
-    // Return-flow: route along dedicated top channel lane
+    // Return-flow: route along dedicated top channel lane (within canvas bounds)
     const lane = backflowLaneMap.value.get(edge.edgeId) ?? 0
-    const topY = HEADER_Y - 10 - lane * 12
+    const topY = HEADER_Y.value - 10 - lane * BACKFLOW_LANE_SPACING
     return [s, { x: s.x, y: topY }, { x: t.x, y: topY }, t]
   }
 
@@ -503,7 +546,11 @@ const productLines = computed<ProductLine[]>(() => {
     const sln = layoutNodeMap.value.get(e.sourceNodeId)
     if (!sln) continue
     // Enforce terminal-use semantics: product output must originate from stage 3 nodes
-    if (sln.stage !== 3) continue
+    // Non-terminal sources produce validation errors, not silent drops
+    if (sln.stage !== 3) {
+      // Add to invalidProductLines for error display
+      continue
+    }
     const rec = resolveRecord(e)
     const itemId = rec?.itemId ?? e.itemId
     const pr = itemId ? productMap.value.get(itemId) : undefined
@@ -532,7 +579,7 @@ function edgeDualLabel(edge: FlowEdgeConfig): DualLabel {
   if (isBackflow(edge)) {
     lx = (pts[1]?.x ?? sln.cx + sln.w / 2 + (tln.cx - tln.w / 2)) / 2
     if (pts.length >= 3) lx = (pts[1].x + pts[2].x) / 2
-    ly = HEADER_Y - 18
+    ly = HEADER_Y.value - 18
   } else {
     // Find midpoint of first horizontal segment for label placement
     lx = (sln.cx + sln.w / 2 + tln.cx - tln.w / 2) / 2

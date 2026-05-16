@@ -67,6 +67,11 @@ public class EnergyFlowConfigDTO implements Serializable {
         private java.math.BigDecimal purchaseAmount;
         private java.math.BigDecimal closingStock;
         private java.math.BigDecimal externalSupply;
+        private java.math.BigDecimal industrialConsumption;
+        private java.math.BigDecimal materialConsumption;
+        private java.math.BigDecimal transportConsumption;
+        /** Aggregate consumption = industrial + material + transport */
+        private java.math.BigDecimal consumeAmount;
         private java.math.BigDecimal equivFactor;
         private java.math.BigDecimal equalFactor;
         private java.math.BigDecimal standardCoal;

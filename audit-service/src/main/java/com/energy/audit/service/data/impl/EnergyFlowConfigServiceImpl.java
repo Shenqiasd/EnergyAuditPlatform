@@ -154,6 +154,17 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
             cdto.setPurchaseAmount(c.getPurchaseAmount());
             cdto.setClosingStock(c.getClosingStock());
             cdto.setExternalSupply(c.getExternalSupply());
+            cdto.setIndustrialConsumption(c.getIndustrialConsumption());
+            cdto.setMaterialConsumption(c.getMaterialConsumption());
+            cdto.setTransportConsumption(c.getTransportConsumption());
+            // Aggregate consumeAmount = industrial + material + transport
+            java.math.BigDecimal consume = java.math.BigDecimal.ZERO;
+            if (c.getIndustrialConsumption() != null) consume = consume.add(c.getIndustrialConsumption());
+            if (c.getMaterialConsumption() != null) consume = consume.add(c.getMaterialConsumption());
+            if (c.getTransportConsumption() != null) consume = consume.add(c.getTransportConsumption());
+            cdto.setConsumeAmount(
+                    (c.getIndustrialConsumption() != null || c.getMaterialConsumption() != null
+                            || c.getTransportConsumption() != null) ? consume : null);
             cdto.setEquivFactor(c.getEquivFactor());
             cdto.setEqualFactor(c.getEqualFactor());
             cdto.setStandardCoal(c.getStandardCoal());
@@ -880,13 +891,28 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         if (flow.getPhysicalQuantity() == null) {
             errors.add("实物量(physicalQuantity)不能为空");
         }
-        // Terminal-use semantics: product output must originate from terminal-use unit (unitType=3)
-        if ("product_output".equals(flow.getTargetType()) && "unit".equals(flow.getSourceType())
-                && flow.getSourceRefId() != null) {
-            BsUnit srcUnit = unitMapper.selectByIdAndEnterprise(flow.getSourceRefId(), enterpriseId);
-            if (srcUnit != null && srcUnit.getUnitType() != null && srcUnit.getUnitType() != 3) {
-                errors.add("产品输出记录的来源单元必须是终端使用环节(unitType=3)，当前来源单元类型为"
-                        + srcUnit.getUnitType());
+        // Terminal-use semantics: product output must originate from terminal-use sources
+        // For unit sources: validate unitType=3
+        // For system/custom sources: they are inherently non-unit and cannot guarantee terminal-use stage
+        if ("product_output".equals(flow.getTargetType())) {
+            if ("unit".equals(flow.getSourceType())) {
+                if (flow.getSourceRefId() != null) {
+                    BsUnit srcUnit = unitMapper.selectByIdAndEnterprise(flow.getSourceRefId(), enterpriseId);
+                    if (srcUnit != null && srcUnit.getUnitType() != null && srcUnit.getUnitType() != 3) {
+                        errors.add("产品输出记录的来源单元必须是终端使用环节(unitType=3)，当前来源单元类型为"
+                                + srcUnit.getUnitType());
+                    }
+                }
+            } else if ("system".equals(flow.getSourceType())) {
+                // System sources for product output: allowed but flagged if no sourceUnit
+                if (isBlank(flow.getSourceUnit())) {
+                    errors.add("产品输出记录的来源系统名称不能为空");
+                }
+            } else if ("custom".equals(flow.getSourceType())) {
+                // Custom sources for product output: allowed but flagged if no sourceUnit
+                if (isBlank(flow.getSourceUnit())) {
+                    errors.add("产品输出记录的自定义来源名称不能为空");
+                }
             }
         }
         if (!errors.isEmpty()) {
