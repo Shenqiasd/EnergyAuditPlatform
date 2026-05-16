@@ -910,7 +910,108 @@ function removeRoutePoint(index: number) {
 }
 
 // ============================================================
-// SVG edge path generation
+// Canonical routing (editor uses the same algorithm as final-effect renderer)
+// ============================================================
+const BACKFLOW_LANE_SPACING = 12
+
+function isEdgeBackflow(edge: FlowEdgeConfig): boolean {
+  const src = nodes.value.find(n => n.nodeId === edge.sourceNodeId)
+  const dst = nodes.value.find(n => n.nodeId === edge.targetNodeId)
+  if (!src || !dst) return false
+  return (src.positionX + (src.width || 100)) > (dst.positionX + (dst.width || 100))
+}
+
+function resolveEdgeRecord(edge: FlowEdgeConfig): FlowRecord | undefined {
+  if (edge._flowRecordClientKey) {
+    return flowRecords.value.find(r => r._clientKey === edge._flowRecordClientKey)
+  }
+  if (edge.flowRecordId != null) {
+    return flowRecords.value.find(r => r.id === edge.flowRecordId)
+  }
+  return undefined
+}
+
+const editorBackflowLaneMap = computed(() => {
+  const m = new Map<string, number>()
+  const visEdges = edges.value.filter(e => (e.visible ?? 1) !== 0)
+  const backflowEdges = visEdges.filter(e => isEdgeBackflow(e))
+  const groups = new Map<string, FlowEdgeConfig[]>()
+  for (const e of backflowEdges) {
+    const rec = resolveEdgeRecord(e)
+    const iId = rec?.itemId ?? e.itemId
+    const key = iId ? `bf-${iId}-${e.sourceNodeId}-${e.targetNodeId}` : `bf-${e.edgeId}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(e)
+  }
+  let laneIdx = 0
+  for (const [, grp] of groups) {
+    for (const e of grp) m.set(e.edgeId, laneIdx)
+    laneIdx++
+  }
+  return m
+})
+
+interface EditorTrunkInfo { trunkX: number; branchX: number }
+const editorTrunkInfoMap = computed(() => {
+  const m = new Map<string, EditorTrunkInfo>()
+  const visEdges = edges.value.filter(e => (e.visible ?? 1) !== 0)
+  const trunkGroups = new Map<string, FlowEdgeConfig[]>()
+  for (const e of visEdges) {
+    if (isEdgeBackflow(e)) continue
+    const src = nodes.value.find(n => n.nodeId === e.sourceNodeId)
+    if (!src) continue
+    const rec = resolveEdgeRecord(e)
+    const iId = rec?.itemId ?? e.itemId
+    const tk = `${e.sourceNodeId}-${iId ?? ''}`
+    if (!trunkGroups.has(tk)) trunkGroups.set(tk, [])
+    trunkGroups.get(tk)!.push(e)
+  }
+  let slotIdx = 0
+  for (const [, grp] of trunkGroups) {
+    const src = nodes.value.find(n => n.nodeId === grp[0].sourceNodeId)
+    if (!src) continue
+    const srcW = src.width || 100
+    const trunkX = src.positionX + srcW + 20 + slotIdx * 16
+    const targetSet = new Set(grp.map(e => e.targetNodeId))
+    const targets = Array.from(targetSet)
+    for (const e of grp) {
+      if (targets.length <= 1) {
+        m.set(e.edgeId, { trunkX, branchX: trunkX })
+      } else {
+        const tIdx = targets.indexOf(e.targetNodeId)
+        const branchX = trunkX + (tIdx + 1) * 8
+        m.set(e.edgeId, { trunkX, branchX })
+      }
+    }
+    slotIdx++
+  }
+  return m
+})
+
+function parseEditorRoutePoints(edge: FlowEdgeConfig): { x: number; y: number }[] {
+  if (!edge.routePoints) return []
+  try {
+    const pts = JSON.parse(edge.routePoints) as { x: number; y: number }[]
+    if (!Array.isArray(pts)) return []
+    return pts.filter(p => typeof p.x === 'number' && typeof p.y === 'number' && isFinite(p.x) && isFinite(p.y))
+  } catch { return [] }
+}
+
+function validateEditorRoutePoints(rpts: { x: number; y: number }[], s: { x: number; y: number }, t: { x: number; y: number }): boolean {
+  if (!rpts.length) return true
+  for (const p of rpts) {
+    if (p.x < 0 || p.y < 0 || p.x > 5000 || p.y > 5000) return false
+  }
+  const full = [s, ...rpts, t]
+  for (let i = 0; i < full.length - 1; i++) {
+    const a = full[i], b = full[i + 1]
+    if (Math.abs(a.x - b.x) > 1 && Math.abs(a.y - b.y) > 1) return false
+  }
+  return true
+}
+
+// ============================================================
+// SVG edge path generation (canonical routing — matches final-effect renderer)
 // ============================================================
 function edgePath(edge: FlowEdgeConfig): string {
   const src = nodes.value.find(n => n.nodeId === edge.sourceNodeId)
@@ -926,19 +1027,50 @@ function edgePath(edge: FlowEdgeConfig): string {
   const tx = dst.positionX
   const ty = dst.positionY + dstH / 2
 
-  if (edge.routePoints) {
-    try {
-      const pts = JSON.parse(edge.routePoints) as { x: number; y: number }[]
-      if (pts.length > 0) {
-        let d = `M ${sx} ${sy}`
-        for (const p of pts) d += ` L ${p.x} ${p.y}`
-        d += ` L ${tx} ${ty}`
-        return d
+  // Parse route points as constrained hints (same contract as final renderer)
+  const rpts = parseEditorRoutePoints(edge)
+  const rptsValid = rpts.length > 0 && validateEditorRoutePoints(rpts, { x: sx, y: sy }, { x: tx, y: ty })
+
+  if (isEdgeBackflow(edge)) {
+    const lane = editorBackflowLaneMap.value.get(edge.edgeId) ?? 0
+    const defaultTopY = Math.min(sy, ty) - 40 - lane * BACKFLOW_LANE_SPACING
+    let topY = defaultTopY
+    if (rptsValid) {
+      const minNodeY = Math.min(sy, ty)
+      const hintYs = rpts.filter(p => p.y < minNodeY).map(p => p.y)
+      if (hintYs.length > 0) {
+        const candidateY = Math.min(...hintYs)
+        if (candidateY >= 0 && candidateY < minNodeY) topY = candidateY
       }
-    } catch { /* fall through */ }
+    }
+    return `M ${sx} ${sy} L ${sx} ${topY} L ${tx} ${topY} L ${tx} ${ty}`
   }
 
-  const midX = (sx + tx) / 2
+  // Forward edge: trunk/branch routing
+  const info = editorTrunkInfoMap.value.get(edge.edgeId)
+  if (info && Math.abs(info.trunkX - sx) > 5) {
+    let trunkX = info.trunkX
+    let branchX = info.branchX
+    if (rptsValid) {
+      const hintXs = rpts.filter(p => Math.abs(p.x - info.trunkX) <= 30).map(p => p.x)
+      if (hintXs.length > 0) {
+        trunkX = hintXs[0]
+        branchX = info.trunkX === info.branchX ? trunkX : info.branchX
+      }
+    }
+    if (trunkX === branchX) {
+      return `M ${sx} ${sy} L ${trunkX} ${sy} L ${trunkX} ${ty} L ${tx} ${ty}`
+    }
+    const midY = (sy + ty) / 2
+    return `M ${sx} ${sy} L ${trunkX} ${sy} L ${trunkX} ${midY} L ${branchX} ${midY} L ${branchX} ${ty} L ${tx} ${ty}`
+  }
+
+  // Default: midpoint routing with route point X hints
+  let midX = (sx + tx) / 2
+  if (rptsValid) {
+    const hintXs = rpts.map(p => p.x).filter(x => x >= 0 && x <= 5000)
+    if (hintXs.length > 0) midX = hintXs[Math.floor(hintXs.length / 2)]
+  }
   return `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`
 }
 

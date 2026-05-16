@@ -2987,10 +2987,22 @@ class EnergyFlowConfigServiceImplTest {
     }
 
     @Test
+    void getConfigExportBlockedWhenForwardRoutePointsTrunkIncompatible() {
+        // Forward edge: route point X far outside source-exit..target-entry range
+        // Source exit X = 200 (100+100), target entry X = 400
+        // Route point at x=800 is outside [195, 405] → trunk-incompatible
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":200,\"y\":225},{\"x\":200,\"y\":100},{\"x\":800,\"y\":100},{\"x\":800,\"y\":225}]");
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("routePoints") && e.contains("超出有效路由范围"));
+    }
+
+    @Test
     void getConfigExportPassesWhenRoutePointsValidOrthogonal() {
-        // Valid orthogonal route points should not block export
-        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":200,\"y\":225},{\"x\":300,\"y\":225}]");
-        // Should not have route-point-specific errors (may have other export issues)
+        // Valid orthogonal route points within source-exit..target-entry range
+        // Source exit X = 200 (100+100), target entry X = 400
+        // Route points at x=250 (between source exit and target entry) are valid
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":250,\"y\":225},{\"x\":250,\"y\":300},{\"x\":350,\"y\":300},{\"x\":350,\"y\":225}]");
         assertThat(result.getValidation().getExportErrors())
                 .noneMatch(e -> e.contains("routePoints"));
     }

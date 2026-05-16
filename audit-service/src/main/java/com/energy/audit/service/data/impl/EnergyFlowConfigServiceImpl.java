@@ -1079,6 +1079,23 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     errors.add("回流连线 [" + ed.getEdgeId() + "] 的routePoints未经过顶部回流通道");
                 }
             }
+
+            // Check forward trunk compatibility: for forward edges (source left of target),
+            // route point X hints must be within ±30px of the source exit X to be accepted
+            // as valid trunk hints by the canonical router.
+            if (sx < tx) {
+                double srcExitX = sx;
+                for (int i = 0; i < coords.size(); i++) {
+                    double px = coords.get(i)[0];
+                    // Route point X values far from source-exit or target-entry range are
+                    // trunk-incompatible and will be ignored by the canonical router
+                    if (px < srcExitX - 5 || px > tx + 5) {
+                        errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
+                                + "]的X坐标(" + px + ")超出有效路由范围，"
+                                + "将被最终渲染器忽略");
+                    }
+                }
+            }
         }
 
         return errors;
