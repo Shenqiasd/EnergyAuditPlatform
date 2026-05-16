@@ -31,6 +31,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -301,7 +302,9 @@ class EnergyFlowConfigServiceImplTest {
     void saveConfigSkipsCalcWhenPhysicalQuantityNull() {
         com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
         try {
+            // Legacy row (has energyProduct, no sourceType) bypasses strict validation
             DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setEnergyProduct("电力");
             flow.setItemType("energy");
             flow.setItemId(1L);
             // physicalQuantity is null
@@ -350,7 +353,19 @@ class EnergyFlowConfigServiceImplTest {
     void saveConfigCreatesDiagramWhenNoneExists() {
         com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
         try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+            // Create a record so the edge can bind to it
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setItemType("energy");
+            rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("100"));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0);
+                f.setId(50L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
 
             DiagramConfigDTO dc = new DiagramConfigDTO();
             dc.setName("测试图");
@@ -369,10 +384,11 @@ class EnergyFlowConfigServiceImplTest {
             edge.setEdgeId("edge-1");
             edge.setSourceNodeId("node-1");
             edge.setTargetNodeId("node-2");
-            edge.setFlowRecordId(50L);
+            edge.setFlowRecordIndex(0); // resolve to first saved record (ID=50)
             dc.setEdges(List.of(edge));
 
             SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec));
             dto.setDiagram(dc);
 
             service.saveConfig(ENT_ID, YEAR, dto);
@@ -418,7 +434,19 @@ class EnergyFlowConfigServiceImplTest {
     void saveConfigFlowRecordIdBindingPreserved() {
         com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
         try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+            // Create a record so the edge can bind to it
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setItemType("energy");
+            rec.setItemId(5L);
+            rec.setPhysicalQuantity(new BigDecimal("100"));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0);
+                f.setId(77L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
 
             DiagramConfigDTO dc = new DiagramConfigDTO();
             dc.setName("绑定测试图");
@@ -430,17 +458,25 @@ class EnergyFlowConfigServiceImplTest {
             edge.setEdgeId("edge-binding");
             edge.setSourceNodeId("n1");
             edge.setTargetNodeId("n2");
-            edge.setFlowRecordId(77L);
+            edge.setFlowRecordIndex(0); // resolve to first saved record (ID=77)
             edge.setItemType("energy");
             edge.setItemId(5L);
             dc.setEdges(List.of(edge));
 
             SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec));
             dto.setDiagram(dc);
+
+            List<DeEnergyFlowEdge> capturedEdges = new ArrayList<>();
+            doAnswer(inv -> {
+                capturedEdges.add(inv.getArgument(0));
+                return 1;
+            }).when(edgeMapper).insert(any(DeEnergyFlowEdge.class));
 
             service.saveConfig(ENT_ID, YEAR, dto);
 
-            verify(edgeMapper).insert(any(DeEnergyFlowEdge.class));
+            assertThat(capturedEdges).hasSize(1);
+            assertThat(capturedEdges.get(0).getFlowRecordId()).isEqualTo(77L);
         } finally {
             com.energy.audit.common.util.SecurityUtils.clear();
         }
@@ -630,6 +666,8 @@ class EnergyFlowConfigServiceImplTest {
         s.setCompilerEmail("compiler@example.com");
         s.setEnergyCert(1);
         s.setHasEnergyCenter(0);
+        s.setCertPassDate(java.time.LocalDate.of(2023, 6, 15));
+        s.setCertAuthority("国家认证机构");
         return s;
     }
 
@@ -719,17 +757,16 @@ class EnergyFlowConfigServiceImplTest {
     }
 
     // ============================================================
-    // Edge flowRecordId validation: edges with invalid flowRecordId are cleared
+    // Fix #1 (v3): visible edges without valid flowRecordId are NOT persisted
     // ============================================================
 
     @Test
-    void saveConfigClearsEdgeWithInvalidFlowRecordId() {
+    void saveConfigSkipsVisibleEdgeWithInvalidFlowRecordId() {
         com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
 
-            // One new record
             DeEnergyFlow rec = new DeEnergyFlow();
             rec.setItemType("energy");
             rec.setItemId(1L);
@@ -740,38 +777,331 @@ class EnergyFlowConfigServiceImplTest {
                 return 1;
             }).when(flowMapper).insert(any(DeEnergyFlow.class));
 
-            // Edge with flowRecordId pointing to non-existent record 999
             DiagramConfigDTO dc = new DiagramConfigDTO();
-            dc.setName("invalid ref test");
+            dc.setName("skip unbound test");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+            dc.setNodes(Collections.emptyList());
+
+            // Visible edge with invalid flowRecordId (999 not in saved records)
+            DiagramConfigDTO.FlowEdgeDTO badEdge = new DiagramConfigDTO.FlowEdgeDTO();
+            badEdge.setEdgeId("edge-bad");
+            badEdge.setSourceNodeId("n1");
+            badEdge.setTargetNodeId("n2");
+            badEdge.setFlowRecordId(999L);
+            badEdge.setFlowRecordIndex(null);
+            badEdge.setVisible(1);
+            dc.setEdges(List.of(badEdge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec));
+            dto.setDiagram(dc);
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            // Visible edge with no valid binding must NOT be inserted
+            verify(edgeMapper, never()).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigSkipsVisibleEdgeWithNullFlowRecordId() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("null ref test");
             dc.setCanvasWidth(1200);
             dc.setCanvasHeight(800);
             dc.setNodes(Collections.emptyList());
 
             DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
-            edge.setEdgeId("edge-bad");
+            edge.setEdgeId("edge-null");
             edge.setSourceNodeId("n1");
             edge.setTargetNodeId("n2");
-            edge.setFlowRecordId(999L); // does not exist in saved records
+            edge.setFlowRecordId(null);
             edge.setFlowRecordIndex(null);
+            edge.setVisible(1);
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setDiagram(dc);
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            verify(edgeMapper, never()).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigSkipsVisibleEdgeWithOutOfRangeFlowRecordIndex() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setItemType("energy");
+            rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("100"));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0);
+                f.setId(50L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("oob index test");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+            dc.setNodes(Collections.emptyList());
+
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-oob");
+            edge.setSourceNodeId("n1");
+            edge.setTargetNodeId("n2");
+            edge.setFlowRecordId(null);
+            edge.setFlowRecordIndex(99); // out of range
+            edge.setVisible(1);
             dc.setEdges(List.of(edge));
 
             SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
             dto.setFlowRecords(List.of(rec));
             dto.setDiagram(dc);
 
-            List<DeEnergyFlowEdge> capturedEdges = new ArrayList<>();
-            doAnswer(inv -> {
-                capturedEdges.add(inv.getArgument(0));
-                return 1;
-            }).when(edgeMapper).insert(any(DeEnergyFlowEdge.class));
-
             service.saveConfig(ENT_ID, YEAR, dto);
 
-            // Edge should be saved but with flowRecordId cleared to null
-            assertThat(capturedEdges).hasSize(1);
-            assertThat(capturedEdges.get(0).getFlowRecordId()).isNull();
+            verify(edgeMapper, never()).insert(any(DeEnergyFlowEdge.class));
         } finally {
             com.energy.audit.common.util.SecurityUtils.clear();
         }
+    }
+
+    // ============================================================
+    // Fix #3 (v3): server-side fill record validation
+    // ============================================================
+
+    @Test
+    void saveConfigRejectsMissingSourceType() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            // sourceType is null, not a legacy row (no energyProduct)
+            flow.setTargetType("unit");
+            flow.setTargetRefId(1L);
+            flow.setItemType("energy");
+            flow.setItemId(1L);
+            flow.setPhysicalQuantity(new BigDecimal("100"));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sourceType");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigRejectsMissingTargetType() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setSourceType("external_energy");
+            // targetType is null
+            flow.setItemType("energy");
+            flow.setItemId(1L);
+            flow.setPhysicalQuantity(new BigDecimal("100"));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("targetType");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigRejectsMissingItemType() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setSourceType("external_energy");
+            flow.setTargetType("unit");
+            flow.setTargetRefId(1L);
+            // itemType is null
+            flow.setPhysicalQuantity(new BigDecimal("100"));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("itemType");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigRejectsMissingPhysicalQuantity() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setSourceType("external_energy");
+            flow.setTargetType("unit");
+            flow.setTargetRefId(1L);
+            flow.setItemType("energy");
+            flow.setItemId(1L);
+            // physicalQuantity is null
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("physicalQuantity");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigAllowsLegacyRowWithoutStrictValidation() {
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+            // Legacy row: no sourceType but has energyProduct
+            DeEnergyFlow flow = new DeEnergyFlow();
+            flow.setEnergyProduct("电力");
+            flow.setPhysicalQuantity(new BigDecimal("5000"));
+
+            BsEnergy elec = energy(1L, "电力", new BigDecimal("0.1229"));
+            when(energyMapper.selectByEnterpriseAndName(ENT_ID, "电力")).thenReturn(elec);
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(flow));
+
+            assertThatNoException().isThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto));
+            verify(flowMapper).insert(any(DeEnergyFlow.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void getConfigExportBlockedForLegacyUnresolvedRows() {
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow legacy = new DeEnergyFlow();
+        legacy.setEnergyProduct("煤炭");
+        legacy.setPhysicalQuantity(new BigDecimal("3000"));
+        // No itemType/itemId
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(legacy));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("待确认") && e.contains("煤炭"));
+    }
+
+    // ============================================================
+    // Fix #4 (v3): conditional enterprise completeness (certPassDate/certAuthority)
+    // ============================================================
+
+    @Test
+    void getConfigExportBlockedWhenEnergyCert1MissingCertDate() {
+        EntEnterprise ent = new EntEnterprise();
+        ent.setId(ENT_ID);
+        ent.setEnterpriseName("测试企业");
+        ent.setCreditCode("91000000MA0XXXXX");
+        ent.setContactPerson("张三");
+        when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+        EntEnterpriseSetting setting = buildCompleteSetting();
+        setting.setCertPassDate(null); // Missing cert date when energyCert=1
+        when(enterpriseSettingMapper.selectByEnterpriseId(ENT_ID)).thenReturn(setting);
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isEnterpriseComplete()).isFalse();
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("认证通过日期"));
+    }
+
+    @Test
+    void getConfigExportBlockedWhenEnergyCert1MissingCertAuthority() {
+        EntEnterprise ent = new EntEnterprise();
+        ent.setId(ENT_ID);
+        ent.setEnterpriseName("测试企业");
+        ent.setCreditCode("91000000MA0XXXXX");
+        ent.setContactPerson("张三");
+        when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+        EntEnterpriseSetting setting = buildCompleteSetting();
+        setting.setCertAuthority(null); // Missing cert authority when energyCert=1
+        when(enterpriseSettingMapper.selectByEnterpriseId(ENT_ID)).thenReturn(setting);
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isEnterpriseComplete()).isFalse();
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("认证机构"));
+    }
+
+    @Test
+    void getConfigExportPassesWhenEnergyCert0NoCertFields() {
+        EntEnterprise ent = new EntEnterprise();
+        ent.setId(ENT_ID);
+        ent.setEnterpriseName("测试企业");
+        ent.setCreditCode("91000000MA0XXXXX");
+        ent.setContactPerson("张三");
+        when(enterpriseMapper.selectById(ENT_ID)).thenReturn(ent);
+        EntEnterpriseSetting setting = buildCompleteSetting();
+        setting.setEnergyCert(0); // No certification
+        setting.setCertPassDate(null);
+        setting.setCertAuthority(null);
+        when(enterpriseSettingMapper.selectByEnterpriseId(ENT_ID)).thenReturn(setting);
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 1)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+
+        assertThat(result.getValidation().isEnterpriseComplete()).isTrue();
+        assertThat(result.getValidation().isExportReady()).isTrue();
     }
 }

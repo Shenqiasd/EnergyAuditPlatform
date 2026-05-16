@@ -597,6 +597,20 @@ async function saveRecord() {
     flowRecords.value.push(r)
   }
 
+  // Sync all bound edges with updated record data
+  if (r._clientKey) {
+    for (const e of edges.value) {
+      if (e._flowRecordClientKey === r._clientKey) {
+        e.flowRecordId = r.id
+        e.itemType = r.itemType
+        e.itemId = r.itemId
+        e.physicalQuantity = r.physicalQuantity
+        e.calculatedValue = r.calculatedValue
+        e.labelText = buildEdgeLabel(r)
+      }
+    }
+  }
+
   // Mode B: create visual edge when dialog was opened from edge creation
   if (pendingEdgeSrcNodeId.value && pendingEdgeTgtNodeId.value) {
     const edgeId = `edge-${Date.now()}`

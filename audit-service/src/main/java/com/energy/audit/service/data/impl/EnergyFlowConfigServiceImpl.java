@@ -227,6 +227,10 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     warnings.add(msg);
                     exportErrors.add(msg);
                 }
+            } else if (isBlank(f.getItemType()) && !isBlank(f.getEnergyProduct())) {
+                String msg = "填报记录 [" + f.getEnergyProduct() + "] 为旧数据（待确认），请编辑确认品目类型和品目";
+                warnings.add(msg);
+                exportErrors.add(msg);
             }
         }
         validation.setWarnings(warnings);
@@ -242,9 +246,15 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
     public void saveConfig(Long enterpriseId, Integer auditYear, SaveEnergyFlowConfigDTO dto) {
         String operator = SecurityUtils.getCurrentUsername();
 
-        // 1. Upsert flow records (preserve IDs so edges keep stable flowRecordId)
+        // 1. Validate and upsert flow records
         List<DeEnergyFlow> savedRecords = new ArrayList<>();
         if (dto.getFlowRecords() != null) {
+            // Server-side validation for each flow record
+            for (int i = 0; i < dto.getFlowRecords().size(); i++) {
+                DeEnergyFlow flow = dto.getFlowRecords().get(i);
+                validateFlowRecord(flow, i);
+            }
+
             List<DeEnergyFlow> existing = flowMapper.selectByEnterpriseAndYear(enterpriseId, auditYear);
             Set<Long> existingIds = existing.stream()
                     .map(DeEnergyFlow::getId)
@@ -361,10 +371,16 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                         boolean valid = savedRecords.stream()
                                 .anyMatch(r -> r.getId().equals(checkId));
                         if (!valid) {
-                            log.warn("Edge {} has flowRecordId={} not in active records, clearing",
+                            log.warn("Edge {} has flowRecordId={} not in active records, skipping",
                                     ed.getEdgeId(), resolvedRecordId);
                             resolvedRecordId = null;
                         }
+                    }
+                    // Skip visible edges that have no valid flowRecordId binding
+                    Integer edgeVisible = ed.getVisible() != null ? ed.getVisible() : 1;
+                    if (resolvedRecordId == null && edgeVisible == 1) {
+                        log.warn("Skipping visible edge {} — no valid flowRecordId", ed.getEdgeId());
+                        continue;
                     }
                     edge.setFlowRecordId(resolvedRecordId);
 
@@ -376,7 +392,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                     edge.setColor(ed.getColor());
                     edge.setLineWidth(ed.getLineWidth());
                     edge.setRoutePoints(ed.getRoutePoints());
-                    edge.setVisible(ed.getVisible() != null ? ed.getVisible() : 1);
+                    edge.setVisible(edgeVisible);
                     edge.setCreateBy(operator);
                     edge.setUpdateBy(operator);
                     edgeMapper.insert(edge);
@@ -424,7 +440,15 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 && !isBlank(setting.getCompilerMobile())
                 && !isBlank(setting.getCompilerEmail())
                 && setting.getEnergyCert() != null
-                && setting.getHasEnergyCenter() != null;
+                && setting.getHasEnergyCenter() != null
+                && checkCertFields(setting);
+    }
+
+    private static boolean checkCertFields(EntEnterpriseSetting s) {
+        if (s.getEnergyCert() != null && s.getEnergyCert() == 1) {
+            return s.getCertPassDate() != null && !isBlank(s.getCertAuthority());
+        }
+        return true;
     }
 
     private List<String> listMissingEnterpriseFields(EntEnterprise ent, Long enterpriseId) {
@@ -464,11 +488,54 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         if (isBlank(s.getCompilerEmail())) missing.add("编制联系人邮箱");
         if (s.getEnergyCert() == null) missing.add("能源认证");
         if (s.getHasEnergyCenter() == null) missing.add("能源管理中心");
+        if (s.getEnergyCert() != null && s.getEnergyCert() == 1) {
+            if (s.getCertPassDate() == null) missing.add("认证通过日期");
+            if (isBlank(s.getCertAuthority())) missing.add("认证机构");
+        }
         return missing;
     }
 
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
+    }
+
+    /**
+     * Server-side validation for fill records.
+     * Legacy rows without itemType/itemId are allowed but flagged.
+     */
+    private void validateFlowRecord(DeEnergyFlow flow, int index) {
+        // Legacy rows: if no sourceType and has energyProduct, treat as legacy — allow but flag
+        if (isBlank(flow.getSourceType()) && !isBlank(flow.getEnergyProduct())) {
+            return; // legacy row, skip strict validation
+        }
+        List<String> errors = new ArrayList<>();
+        if (isBlank(flow.getSourceType())) {
+            errors.add("来源类型(sourceType)不能为空");
+        } else if ("unit".equals(flow.getSourceType()) && flow.getSourceRefId() == null) {
+            if (isBlank(flow.getSourceUnit())) errors.add("来源单元未指定");
+        } else if ("system".equals(flow.getSourceType()) && isBlank(flow.getSourceUnit())) {
+            errors.add("来源系统名称不能为空");
+        }
+        if (isBlank(flow.getTargetType())) {
+            errors.add("目的类型(targetType)不能为空");
+        } else if ("unit".equals(flow.getTargetType()) && flow.getTargetRefId() == null) {
+            if (isBlank(flow.getTargetUnit())) errors.add("目的单元未指定");
+        } else if ("production_system".equals(flow.getTargetType()) && isBlank(flow.getTargetUnit())) {
+            errors.add("目的生产系统名称不能为空");
+        }
+        if (isBlank(flow.getItemType())) {
+            errors.add("品目类型(itemType)不能为空");
+        }
+        if (flow.getItemId() == null && !isBlank(flow.getItemType())) {
+            errors.add("品目(itemId)不能为空");
+        }
+        if (flow.getPhysicalQuantity() == null) {
+            errors.add("实物量(physicalQuantity)不能为空");
+        }
+        if (!errors.isEmpty()) {
+            throw new IllegalArgumentException(
+                    String.format("填报记录[%d]校验失败: %s", index + 1, String.join("; ", errors)));
+        }
     }
 
     private void calculateFlowValue(DeEnergyFlow flow, Long enterpriseId) {
