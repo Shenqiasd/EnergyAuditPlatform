@@ -1603,8 +1603,8 @@ class EnergyFlowConfigServiceImplTest {
             DiagramConfigDTO.FlowNodeDTO node = new DiagramConfigDTO.FlowNodeDTO();
             node.setNodeId("node-1");
             node.setNodeType("unit");
-            node.setPositionX(100);
-            node.setPositionY(100);
+            node.setPositionX(100.0);
+            node.setPositionY(100.0);
             dc.setNodes(List.of(node));
 
             DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
@@ -1663,8 +1663,8 @@ class EnergyFlowConfigServiceImplTest {
             DiagramConfigDTO.FlowNodeDTO node = new DiagramConfigDTO.FlowNodeDTO();
             node.setNodeId("node-1");
             node.setNodeType("unit");
-            node.setPositionX(100);
-            node.setPositionY(100);
+            node.setPositionX(100.0);
+            node.setPositionY(100.0);
             dc.setNodes(List.of(node));
 
             DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
