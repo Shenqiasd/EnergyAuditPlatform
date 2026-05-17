@@ -964,10 +964,7 @@ function addRoutePoint() {
   }
 }
 
-function clearRoutePoints() {
-  if (!selectedEdge.value) return
-  setRoutePointsJson([])
-}
+// clearRoutePoints replaced by resetRouteToDefault below
 
 // ============================================================
 // Route editing: constrained controls that map to renderer hints
@@ -1074,7 +1071,6 @@ function setRouteHintValue(newValue: number) {
   const sx = srcFixed.cx + srcFixed.w / 2
   const sy = srcFixed.cy
   const tx = tgtFixed.cx - tgtFixed.w / 2
-  const ty = tgtFixed.cy
   const clamped = Math.max(info.min, Math.min(info.max, Math.round(newValue)))
 
   if (info.type === 'backflow') {
