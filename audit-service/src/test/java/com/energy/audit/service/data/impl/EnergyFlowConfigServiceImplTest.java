@@ -3978,4 +3978,184 @@ class EnergyFlowConfigServiceImplTest {
         assertThat(result.getValidation().getExportErrors())
                 .anyMatch(e -> e.contains("edge-bf-wrong") && e.contains("不一致"));
     }
+
+    // ============================================================
+    // Fix (v28): Route edit → save → reload → preview consistency
+    // ============================================================
+
+    @Test
+    void saveConfigAcceptsForwardEdgeWithAdjustedTrunkXHint() {
+        // Forward edge: user adjusts trunk X via slider → generates hint route point.
+        // Backend computes canonical path with the adjusted trunk X → saves successfully.
+        // On reload (getConfig), the saved route points match the canonical path → export passes.
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房A", 3)));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房A", 3));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0, DeEnergyFlow.class);
+                f.setId(60L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlowDiagram.class).setId(10L); return null; })
+                    .when(diagramMapper).insert(any());
+
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit"); rec.setTargetRefId(1L);
+            rec.setItemType("energy"); rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("100"));
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("trunk-edit-test"); dc.setCanvasWidth(1200); dc.setCanvasHeight(800);
+
+            DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
+            srcNode.setNodeId("node-src"); srcNode.setNodeType("energy_input");
+            srcNode.setRefId(1L); srcNode.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgt = new DiagramConfigDTO.FlowNodeDTO();
+            tgt.setNodeId("node-tgt"); tgt.setNodeType("unit");
+            tgt.setRefId(1L); tgt.setVisible(1);
+            dc.setNodes(List.of(srcNode, tgt));
+
+            // User adjusts trunk X via slider — generates a single hint point at trunk X position.
+            // Default trunkX = srcExit + 20 + 0*16 = 270 (stage0 center + 30 + 20).
+            // User slides to trunkX + 15 = 285 (within ±30px range).
+            // The hint is a single point at (285, srcY), which the canonical builder interprets as trunk X offset.
+            // computeCanonicalPath with this hint → trunkX=285 → path: [src, (285,sy), (285,ty), tgt]
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-trunk-adj"); edge.setSourceNodeId("node-src");
+            edge.setTargetNodeId("node-tgt"); edge.setFlowRecordIndex(0);
+            edge.setItemId(1L); edge.setVisible(1);
+            // After normalizeAllRoutePoints, the frontend saves the canonical path waypoints:
+            // The canonical path with trunkX=285 is: (285, sy), (285, ty)
+            edge.setRoutePoints("[{\"x\":285,\"y\":120},{\"x\":285,\"y\":120}]");
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec)); dto.setDiagram(dc);
+
+            // Should succeed — adjusted trunk X produces a valid canonical path
+            service.saveConfig(ENT_ID, YEAR, dto);
+            verify(edgeMapper, org.mockito.Mockito.atLeastOnce()).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigAcceptsBackflowEdgeWithAdjustedTopYHint() {
+        // Backflow edge: user adjusts topY via slider → generates hint route points.
+        // Source unit (unitType=3, stage 3) → target unit (unitType=1, stage 1) = backflow.
+        // The hint has Y < minNodeY → canonical builder uses it as topY.
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            // unit1: unitType=3 (stage 3), unit2: unitType=1 (stage 1)
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "终端车间", 3), unit(2L, "锅炉房", 1)));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "终端车间", 3));
+            when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "锅炉房", 1));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0, DeEnergyFlow.class);
+                f.setId(70L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlowDiagram.class).setId(10L); return null; })
+                    .when(diagramMapper).insert(any());
+
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("unit"); rec.setSourceRefId(1L);
+            rec.setTargetType("unit"); rec.setTargetRefId(2L);
+            rec.setItemType("energy"); rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("50"));
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("backflow-edit-test"); dc.setCanvasWidth(1200); dc.setCanvasHeight(800);
+
+            // unit1 (stage 3) → unit2 (stage 1) = backflow (srcStage > tgtStage)
+            DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
+            srcNode.setNodeId("node-unit-src"); srcNode.setNodeType("unit");
+            srcNode.setRefId(1L); srcNode.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgtNode = new DiagramConfigDTO.FlowNodeDTO();
+            tgtNode.setNodeId("node-unit-tgt"); tgtNode.setNodeType("unit");
+            tgtNode.setRefId(2L); tgtNode.setVisible(1);
+            dc.setNodes(List.of(srcNode, tgtNode));
+
+            // Backflow: srcExit (stage 3) = 990+50=1040, tgtEntry (stage 1) = 470-50=420
+            // With 1 bf group: topChannelH=22, headerY=77, BODY_TOP=97, nodeY=142
+            // Default topY = 77-10-0*12 = 67. User adjusts to 40 (< minNodeY=142) → valid hint.
+            // Canonical path with hint: [(1040,40), (420,40)]
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-bf-adj"); edge.setSourceNodeId("node-unit-src");
+            edge.setTargetNodeId("node-unit-tgt"); edge.setFlowRecordIndex(0);
+            edge.setItemId(1L); edge.setVisible(1);
+            edge.setRoutePoints("[{\"x\":1040,\"y\":40},{\"x\":420,\"y\":40}]");
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec)); dto.setDiagram(dc);
+
+            // Should succeed — adjusted topY=40 is a valid backflow hint (< minNodeY)
+            service.saveConfig(ENT_ID, YEAR, dto);
+            verify(edgeMapper, org.mockito.Mockito.atLeastOnce()).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void getConfigExportPassesWhenForwardEdgeHasAdjustedMidpointX() {
+        // Default forward edge (no trunk): user adjusts midpoint X via slider.
+        // Route points with the adjusted midX pass export validation on reload.
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setId(80L);
+        flow.setSourceType("external_energy");
+        flow.setTargetType("unit"); flow.setTargetRefId(1L);
+        flow.setItemType("energy"); flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L); diagram.setName("test");
+        diagram.setDiagramType(3); diagram.setCanvasWidth(1200); diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        DeEnergyFlowNode srcNode = new DeEnergyFlowNode();
+        srcNode.setNodeId("node-src"); srcNode.setNodeType("energy_input");
+        srcNode.setRefType("energy"); srcNode.setRefId(1L);
+        srcNode.setPositionX(100.0); srcNode.setPositionY(200.0);
+        srcNode.setWidth(60.0); srcNode.setHeight(60.0); srcNode.setVisible(1);
+        DeEnergyFlowNode tgtNode = new DeEnergyFlowNode();
+        tgtNode.setNodeId("node-tgt"); tgtNode.setNodeType("unit");
+        tgtNode.setRefType("unit"); tgtNode.setRefId(1L);
+        tgtNode.setPositionX(500.0); tgtNode.setPositionY(200.0);
+        tgtNode.setWidth(100.0); tgtNode.setHeight(50.0); tgtNode.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgtNode));
+
+        // User adjusted midpoint X via slider. Default midX = (srcExit + tgtEntry) / 2.
+        // Using fixed-stage layout: srcExit = stage0_center + 30 = 240, tgtEntry = stage3_center - 50 = 940
+        // Default midX = (240 + 940) / 2 = 590. User slides to 400.
+        // After normalizeAllRoutePoints: waypoints = [(400, sy), (400, ty)]
+        DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
+        edge.setEdgeId("edge-mid"); edge.setSourceNodeId("node-src");
+        edge.setTargetNodeId("node-tgt"); edge.setFlowRecordId(80L); edge.setVisible(1);
+        edge.setRoutePoints("[{\"x\":400,\"y\":120},{\"x\":400,\"y\":120}]");
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        // Route points match canonical path with adjusted midX → export should pass
+        assertThat(result.getValidation().getExportErrors())
+                .noneMatch(e -> e.contains("edge-mid") && e.contains("路由点"));
+    }
 }

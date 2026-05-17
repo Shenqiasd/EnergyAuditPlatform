@@ -958,9 +958,6 @@ function setRoutePointsJson(pts: { x: number; y: number }[]) {
 function addRoutePoint() {
   if (!selectedEdge.value) return
   const edge = selectedEdge.value
-  // Seed route points by extracting the actual rendered waypoints from the
-  // final-effect renderer (buildOrthoPath output). This guarantees saved
-  // routePoints = rendered path — no lossy hint conversion.
   const waypoints = previewViewRef.value?.getRenderedWaypoints(edge.edgeId)
   if (waypoints && waypoints.length > 0) {
     setRoutePointsJson(waypoints.map(p => ({ x: Math.round(p.x), y: Math.round(p.y) })))
@@ -970,6 +967,139 @@ function addRoutePoint() {
 function clearRoutePoints() {
   if (!selectedEdge.value) return
   setRoutePointsJson([])
+}
+
+// ============================================================
+// Route editing: constrained controls that map to renderer hints
+// ============================================================
+type RouteEditType = 'backflow' | 'trunk' | 'default' | null
+
+const selectedEdgeRouteType = computed<RouteEditType>(() => {
+  if (!selectedEdge.value) return null
+  const edge = selectedEdge.value
+  if (isEdgeBackflow(edge)) return 'backflow'
+  const info = editorTrunkInfoMap.value.get(edge.edgeId)
+  const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
+  if (info && srcFixed && Math.abs(info.trunkX - (srcFixed.cx + srcFixed.w / 2)) > 5) return 'trunk'
+  return 'default'
+})
+
+interface RouteEditInfo {
+  type: RouteEditType
+  value: number
+  min: number
+  max: number
+  label: string
+  hasMultiTarget?: boolean
+}
+
+const selectedEdgeRouteInfo = computed<RouteEditInfo | null>(() => {
+  if (!selectedEdge.value) return null
+  const edge = selectedEdge.value
+  const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
+  const tgtFixed = fixedStageLayout.value.get(edge.targetNodeId)
+  if (!srcFixed || !tgtFixed) return null
+
+  const sx = srcFixed.cx + srcFixed.w / 2
+  const sy = srcFixed.cy
+  const tx = tgtFixed.cx - tgtFixed.w / 2
+  const ty = tgtFixed.cy
+  const rpts = parseEditorRoutePoints(edge)
+  const rptsValid = rpts.length > 0 && validateEditorRoutePoints(rpts, { x: sx, y: sy }, { x: tx, y: ty })
+  const type = selectedEdgeRouteType.value
+
+  if (type === 'backflow') {
+    const lane = editorBackflowLaneMap.value.get(edge.edgeId) ?? 0
+    const defaultTopY = Math.min(sy, ty) - 40 - lane * BACKFLOW_LANE_SPACING
+    let topY = defaultTopY
+    if (rptsValid) {
+      const minNodeY = Math.min(sy, ty)
+      const hintYs = rpts.filter(p => p.y < minNodeY).map(p => p.y)
+      if (hintYs.length > 0) {
+        const cand = Math.min(...hintYs)
+        if (cand >= 0 && cand < minNodeY) topY = cand
+      }
+    }
+    return {
+      type: 'backflow',
+      value: Math.round(topY),
+      min: 10,
+      max: Math.round(Math.min(sy, ty) - 5),
+      label: '回流通道 Y 位置',
+    }
+  }
+
+  if (type === 'trunk') {
+    const info = editorTrunkInfoMap.value.get(edge.edgeId)!
+    let trunkX = info.trunkX
+    if (rptsValid) {
+      const hintXs = rpts.filter(p => Math.abs(p.x - info.trunkX) <= 30).map(p => p.x)
+      if (hintXs.length > 0) trunkX = hintXs[0]
+    }
+    const hasMulti = info.trunkX !== info.branchX
+    return {
+      type: 'trunk',
+      value: Math.round(trunkX),
+      min: Math.round(info.trunkX - 30),
+      max: Math.round(info.trunkX + 30),
+      label: hasMulti ? '干线 X 位置 (多目标分支)' : '干线 X 位置',
+      hasMultiTarget: hasMulti,
+    }
+  }
+
+  // Default forward
+  let midX = (sx + tx) / 2
+  if (rptsValid) {
+    const hintXs = rpts.map(p => p.x).filter(x => x >= 0 && x <= 5000)
+    if (hintXs.length > 0) midX = hintXs[Math.floor(hintXs.length / 2)]
+  }
+  return {
+    type: 'default',
+    value: Math.round(midX),
+    min: Math.round(Math.min(sx, tx) + 10),
+    max: Math.round(Math.max(sx, tx) - 10),
+    label: '中间折点 X 位置',
+  }
+})
+
+function setRouteHintValue(newValue: number) {
+  if (!selectedEdge.value || !selectedEdgeRouteInfo.value) return
+  const edge = selectedEdge.value
+  const info = selectedEdgeRouteInfo.value
+  const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
+  const tgtFixed = fixedStageLayout.value.get(edge.targetNodeId)
+  if (!srcFixed || !tgtFixed) return
+
+  pushUndo()
+  const sx = srcFixed.cx + srcFixed.w / 2
+  const sy = srcFixed.cy
+  const tx = tgtFixed.cx - tgtFixed.w / 2
+  const ty = tgtFixed.cy
+  const clamped = Math.max(info.min, Math.min(info.max, Math.round(newValue)))
+
+  if (info.type === 'backflow') {
+    // Backflow hint: two points at the desired topY level
+    edge.routePoints = JSON.stringify([
+      { x: Math.round(sx), y: clamped },
+      { x: Math.round(tx), y: clamped },
+    ])
+  } else if (info.type === 'trunk') {
+    // Trunk hint: a point near the trunk X position
+    edge.routePoints = JSON.stringify([
+      { x: clamped, y: Math.round(sy) },
+    ])
+  } else {
+    // Default midpoint hint: a point at the desired midX
+    edge.routePoints = JSON.stringify([
+      { x: clamped, y: Math.round(sy) },
+    ])
+  }
+}
+
+function resetRouteToDefault() {
+  if (!selectedEdge.value) return
+  pushUndo()
+  selectedEdge.value.routePoints = undefined
 }
 
 /**
@@ -1858,19 +1988,57 @@ function formatNum(n: number | null | undefined): string {
           <div class="prop-row">
             <el-checkbox :model-value="(selectedEdge.visible ?? 1) === 1" @update:model-value="v => updateEdgeProp('visible', v ? 1 : 0)">可见</el-checkbox>
           </div>
-          <!-- Route point controls: read-only display of normalized canonical waypoints -->
+          <!-- Route editing controls: constrained sliders for trunk/backflow/midpoint -->
           <div class="prop-row" style="margin-top: 8px">
-            <label>折点 (Route Points)</label>
-            <div v-if="parsedRoutePoints.length > 0">
-              <div v-for="(pt, pi) in parsedRoutePoints" :key="pi" class="route-point-row">
-                <span class="route-point-idx">{{ pi + 1 }}.</span>
-                <span style="font-size: 12px; color: #666">({{ pt.x }}, {{ pt.y }})</span>
+            <label>路由编辑</label>
+            <template v-if="selectedEdgeRouteInfo">
+              <div class="route-edit-control">
+                <span class="route-edit-label">{{ selectedEdgeRouteInfo.label }}</span>
+                <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px">
+                  <el-slider
+                    :model-value="selectedEdgeRouteInfo.value"
+                    :min="selectedEdgeRouteInfo.min"
+                    :max="selectedEdgeRouteInfo.max"
+                    :step="1"
+                    :show-tooltip="true"
+                    style="flex: 1"
+                    @update:model-value="(v: number) => setRouteHintValue(v)"
+                  />
+                  <el-input-number
+                    :model-value="selectedEdgeRouteInfo.value"
+                    :min="selectedEdgeRouteInfo.min"
+                    :max="selectedEdgeRouteInfo.max"
+                    :step="1"
+                    size="small"
+                    controls-position="right"
+                    style="width: 90px"
+                    @update:model-value="(v: number | undefined) => v != null && setRouteHintValue(v)"
+                  />
+                </div>
+                <div style="font-size: 11px; color: #999; margin-top: 2px">
+                  范围: {{ selectedEdgeRouteInfo.min }} – {{ selectedEdgeRouteInfo.max }}px
+                  <template v-if="selectedEdgeRouteInfo.hasMultiTarget">
+                    · 多目标分支共享干线
+                  </template>
+                </div>
               </div>
-              <el-button size="small" type="danger" @click="clearRoutePoints" style="margin-top: 4px">清除折点</el-button>
-            </div>
-            <div v-else>
-              <el-button size="small" @click="addRoutePoint" style="margin-top: 4px">+ 使用自定义路由</el-button>
-            </div>
+              <div style="display: flex; gap: 6px; margin-top: 6px">
+                <el-button size="small" @click="addRoutePoint" v-if="!parsedRoutePoints.length">启用自定义路由</el-button>
+                <el-button size="small" type="warning" @click="resetRouteToDefault" v-if="parsedRoutePoints.length > 0">恢复默认路由</el-button>
+              </div>
+              <div v-if="parsedRoutePoints.length > 0" style="margin-top: 4px">
+                <details style="font-size: 11px; color: #888">
+                  <summary>当前路由点 ({{ parsedRoutePoints.length }})</summary>
+                  <div v-for="(pt, pi) in parsedRoutePoints" :key="pi" class="route-point-row">
+                    <span class="route-point-idx">{{ pi + 1 }}.</span>
+                    <span>({{ pt.x }}, {{ pt.y }})</span>
+                  </div>
+                </details>
+              </div>
+            </template>
+            <template v-else>
+              <span style="font-size: 12px; color: #999">该连线不支持路由编辑</span>
+            </template>
           </div>
           <el-button type="danger" size="small" @click="deleteSelectedEdge" style="margin-top: 8px">删除连线</el-button>
         </template>
@@ -2146,5 +2314,15 @@ function formatNum(n: number | null | undefined): string {
     width: 16px;
     flex-shrink: 0;
   }
+}
+
+.route-edit-control {
+  margin-top: 4px;
+}
+
+.route-edit-label {
+  font-size: 12px;
+  color: #606266;
+  font-weight: 500;
 }
 </style>
