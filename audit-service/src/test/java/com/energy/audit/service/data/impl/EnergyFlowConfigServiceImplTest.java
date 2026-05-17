@@ -2836,11 +2836,13 @@ class EnergyFlowConfigServiceImplTest {
 
     @Test
     void getConfigExportBlockedWhenRoutePointsNonOrthogonal() {
-        // Diagonal segment from source exit (200,225) to (350,300) to target entry (400,225)
+        // Fixed-stage: src(energy_input)→stage0 exit=(240,120); tgt(unit,ut=3)→stage3 entry=(940,120)
+        // Canonical trunk X=260, single target → waypoints: [(260,120),(260,120)]
+        // Submitted: 1 point vs canonical 2 → count mismatch
         EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":350,\"y\":300}]");
         assertThat(result.getValidation().isExportReady()).isFalse();
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(e -> e.contains("routePoints") && e.contains("正交"));
+                .anyMatch(e -> e.contains("路由点数量") && e.contains("不一致"));
     }
 
     @Test
@@ -2910,14 +2912,15 @@ class EnergyFlowConfigServiceImplTest {
         edge.setFlowRecordId(100L);
         edge.setVisible(1);
         // Fixed-stage layout: node-src(energy_input)→stage0 cx=210,cy=120,w=60; node-mid(unit,ut=1)→stage1 cx=470,cy=120,w=100; node-tgt(unit,ut=3)→stage3 cx=990,cy=120,w=100
-        // Source exit: (240,120), target entry: (940,120). Route point at (470,120) is inside node-mid [420-520, 95-145]
+        // Source exit: (240,120), target entry: (940,120). Canonical trunk X=260, waypoints: [(260,120),(260,120)]
+        // Submitted route points at (240,120),(470,120) don't match canonical path
         edge.setRoutePoints("[{\"x\":240,\"y\":120},{\"x\":470,\"y\":120}]");
         when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
 
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
         assertThat(result.getValidation().isExportReady()).isFalse();
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(e -> e.contains("routePoints") && e.contains("穿过节点"));
+                .anyMatch(e -> e.contains("routePoints") && e.contains("不一致"));
     }
 
     @Test
@@ -2977,33 +2980,35 @@ class EnergyFlowConfigServiceImplTest {
         edge.setTargetNodeId("node-left");
         edge.setFlowRecordId(100L);
         edge.setVisible(1);
-        // Route points stay at Y=300 (below both nodes at Y=200-250) — doesn't go through top channel
+        // Route points at Y=300 (below nodes) — canonical backflow goes through top channel
+        // With 1 backflow lane: HEADER_Y=77, topY=67, canonical waypoints: [(1040,67),(180,67)]
+        // Submitted (600,300),(100,300) don't match canonical path
         edge.setRoutePoints("[{\"x\":600,\"y\":300},{\"x\":100,\"y\":300}]");
         when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
 
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
         assertThat(result.getValidation().isExportReady()).isFalse();
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(e -> e.contains("回流") && e.contains("routePoints") && e.contains("顶部"));
+                .anyMatch(e -> e.contains("routePoints") && e.contains("不一致"));
     }
 
     @Test
     void getConfigExportBlockedWhenForwardRoutePointsTrunkIncompatible() {
         // Fixed-stage: src(energy_input)→stage0 exit=(240,120); tgt(unit,ut=3)→stage3 entry=(940,120)
-        // Canonical trunk X = 240 + 20 + 0*16 = 260
-        // Route points at x=500 are vertical-segment waypoints far from trunk X=260 (>30px)
+        // Canonical trunk X=260, single target → waypoints: [(260,120),(260,120)]
+        // Submitted 4 points vs canonical 2 → count mismatch
         EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":500,\"y\":120},{\"x\":500,\"y\":200},{\"x\":800,\"y\":200},{\"x\":800,\"y\":120}]");
         assertThat(result.getValidation().isExportReady()).isFalse();
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(e -> e.contains("routePoints") && e.contains("trunk"));
+                .anyMatch(e -> e.contains("路由点数量") && e.contains("不一致"));
     }
 
     @Test
     void getConfigExportPassesWhenRoutePointsValidOrthogonal() {
         // Fixed-stage: src(energy_input)→stage0 exit=(240,120); tgt(unit,ut=3)→stage3 entry=(940,120)
-        // Canonical trunk X = 240 + 20 + 0*16 = 260
-        // Route points at x=260 are within ±30px of canonical trunk X → accepted
-        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":200},{\"x\":260,\"y\":200},{\"x\":260,\"y\":120}]");
+        // Canonical trunk X=260, single target → waypoints: [(260,120),(260,120)]
+        // Submitted route points match canonical exactly → accepted
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":120}]");
         assertThat(result.getValidation().getExportErrors())
                 .noneMatch(e -> e.contains("routePoints"));
     }
@@ -3064,18 +3069,18 @@ class EnergyFlowConfigServiceImplTest {
         when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgtNode));
 
         // Route points valid against fixed-stage exit=(240,120) → entry=(940,120)
-        // Canonical trunk X = 240 + 20 + 0*16 = 260
+        // Canonical trunk X=260, single target → waypoints: [(260,120),(260,120)]
         DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
         edge.setEdgeId("edge-fixed");
         edge.setSourceNodeId("node-src");
         edge.setTargetNodeId("node-tgt");
         edge.setFlowRecordId(100L);
         edge.setVisible(1);
-        edge.setRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":200},{\"x\":260,\"y\":200},{\"x\":260,\"y\":120}]");
+        edge.setRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":120}]");
         when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
 
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
-        // Should pass: route points are near canonical trunk X (260 ±30px)
+        // Should pass: route points match canonical waypoints exactly
         assertThat(result.getValidation().getExportErrors())
                 .noneMatch(e -> e.contains("routePoints"));
     }
@@ -3156,7 +3161,7 @@ class EnergyFlowConfigServiceImplTest {
         // sw=(1200-160)/4=260; stage1 cx=80+260+130=470; stage2 cx=80+2*260+130=730
         // With backflow: BODY_TOP=97, cy=97+45=142
         // exit=(470+50,142)=(520,142), entry=(730-50,142)=(680,142)
-        // Canonical trunk X = 520 + 20 + 0*16 = 540
+        // Canonical trunk X=540, single target → waypoints: [(540,142),(540,142)]
         DeEnergyFlowEdge fwdEdge = new DeEnergyFlowEdge();
         fwdEdge.setEdgeId("edge-fwd");
         fwdEdge.setSourceNodeId("node-s1");
@@ -3164,9 +3169,12 @@ class EnergyFlowConfigServiceImplTest {
         fwdEdge.setFlowRecordId(100L);
         fwdEdge.setItemId(1L);
         fwdEdge.setVisible(1);
-        fwdEdge.setRoutePoints("[{\"x\":540,\"y\":142},{\"x\":540,\"y\":200},{\"x\":540,\"y\":200},{\"x\":540,\"y\":142}]");
+        fwdEdge.setRoutePoints("[{\"x\":540,\"y\":142},{\"x\":540,\"y\":142}]");
 
         // Backflow edge (stage2→stage1) — this triggers backflow lane counting
+        // Canonical backflow: lane=0, topY=77-10=67 → waypoints: [(780,67),(420,67)]
+        // But hint Y=50 < minNodeY(142) → topY adjusted to 50
+        // So canonical with hint: waypoints: [(780,50),(420,50)]
         DeEnergyFlowEdge bfEdge = new DeEnergyFlowEdge();
         bfEdge.setEdgeId("edge-bf");
         bfEdge.setSourceNodeId("node-s2");
@@ -3174,14 +3182,13 @@ class EnergyFlowConfigServiceImplTest {
         bfEdge.setFlowRecordId(101L);
         bfEdge.setItemId(1L);
         bfEdge.setVisible(1);
-        // Backflow route points go above nodes (Y < topBound=142-25=117)
         bfEdge.setRoutePoints("[{\"x\":780,\"y\":50},{\"x\":420,\"y\":50}]");
         when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(fwdEdge, bfEdge));
 
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
-        // Route points should pass validation when using backflow-shifted coordinates
+        // Both edges' route points should match canonical paths
         assertThat(result.getValidation().getExportErrors())
-                .noneMatch(e -> e.contains("routePoints") && e.contains("正交"));
+                .noneMatch(e -> e.contains("routePoints") && e.contains("不一致"));
     }
 
     @Test
@@ -3255,7 +3262,8 @@ class EnergyFlowConfigServiceImplTest {
 
         // Forward edge route points use Y=120 (no-backflow cy), which is WRONG
         // when backflow exists because actual cy=142
-        // exit=(520,142) but route point at (520,120) creates a diagonal to (600,120)→...
+        // Canonical trunk X=540, waypoints: [(540,142),(540,142)]
+        // Submitted 1 point vs canonical 2 → count mismatch
         DeEnergyFlowEdge fwdEdge = new DeEnergyFlowEdge();
         fwdEdge.setEdgeId("edge-fwd");
         fwdEdge.setSourceNodeId("node-s1");
@@ -3263,11 +3271,6 @@ class EnergyFlowConfigServiceImplTest {
         fwdEdge.setFlowRecordId(100L);
         fwdEdge.setItemId(1L);
         fwdEdge.setVisible(1);
-        // This route uses Y=120 (valid without backflow) but with backflow cy=142,
-        // the source exit is at (520,142), so segment (520,142)→(520,120) is vertical (ok),
-        // then (520,120)→(680,120) is horizontal (ok), then (680,120)→(680,142) is vertical (ok).
-        // Actually this IS valid orthogonally. Let me use a truly invalid path instead.
-        // Route point at (550,120): source exit (520,142)→(550,120) is diagonal (non-orthogonal).
         fwdEdge.setRoutePoints("[{\"x\":550,\"y\":120}]");
 
         DeEnergyFlowEdge bfEdge = new DeEnergyFlowEdge();
@@ -3281,9 +3284,9 @@ class EnergyFlowConfigServiceImplTest {
         when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(fwdEdge, bfEdge));
 
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
-        // Should FAIL: route point (550,120) is diagonal from source exit (520,142)
+        // Should FAIL: 1 submitted point vs 2 canonical waypoints
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(e -> e.contains("edge-fwd") && e.contains("正交"));
+                .anyMatch(e -> e.contains("edge-fwd") && e.contains("不一致"));
     }
 
     @Test
@@ -3644,7 +3647,7 @@ class EnergyFlowConfigServiceImplTest {
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
         assertThat(result.getValidation().isExportReady()).isFalse();
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(e -> e.contains("edge-mt-1") && e.contains("trunk"));
+                .anyMatch(e -> e.contains("edge-mt-1") && e.contains("不一致"));
     }
 
     @Test
@@ -3777,5 +3780,202 @@ class EnergyFlowConfigServiceImplTest {
         } finally {
             com.energy.audit.common.util.SecurityUtils.clear();
         }
+    }
+
+    // ============================================================
+    // Fix (v27): canonical path comparison — multi-target ignored-Y, backflow lane, normal-editor consistency
+    // ============================================================
+
+    @Test
+    void saveConfigRejectsRoutePointsWithArbitraryBranchY() {
+        // Multi-target branch: 2 edges from same source+itemId to different targets in stage3.
+        // Edge to tgt2: canonical midY=(120+210)/2=165, but submitted Y=300 on branch segment.
+        // The final renderer computes midY itself and ignores submitted Y → backend must reject.
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房A", 3), unit(2L, "锅炉房B", 3)));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房A", 3));
+            when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "锅炉房B", 3));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+
+            DeEnergyFlow rec1 = new DeEnergyFlow();
+            rec1.setSourceType("external_energy");
+            rec1.setTargetType("unit"); rec1.setTargetRefId(1L);
+            rec1.setItemType("energy"); rec1.setItemId(1L);
+            rec1.setPhysicalQuantity(new BigDecimal("100"));
+            DeEnergyFlow rec2 = new DeEnergyFlow();
+            rec2.setSourceType("external_energy");
+            rec2.setTargetType("unit"); rec2.setTargetRefId(2L);
+            rec2.setItemType("energy"); rec2.setItemId(1L);
+            rec2.setPhysicalQuantity(new BigDecimal("50"));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0, DeEnergyFlow.class);
+                f.setId(f.getTargetRefId() == 1L ? 50L : 51L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("branch-y-test"); dc.setCanvasWidth(1200); dc.setCanvasHeight(800);
+
+            DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
+            srcNode.setNodeId("node-src"); srcNode.setNodeType("energy_input");
+            srcNode.setRefId(1L); srcNode.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgt1 = new DiagramConfigDTO.FlowNodeDTO();
+            tgt1.setNodeId("node-tgt1"); tgt1.setNodeType("unit");
+            tgt1.setRefId(1L); tgt1.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgt2 = new DiagramConfigDTO.FlowNodeDTO();
+            tgt2.setNodeId("node-tgt2"); tgt2.setNodeType("unit");
+            tgt2.setRefId(2L); tgt2.setVisible(1);
+            dc.setNodes(List.of(srcNode, tgt1, tgt2));
+
+            // Edge 2 (src→tgt2): canonical trunkX=260, branchX=276, midY=165
+            // Submitted arbitrary Y=300 on branch segment — renderer ignores this Y
+            DiagramConfigDTO.FlowEdgeDTO edge2 = new DiagramConfigDTO.FlowEdgeDTO();
+            edge2.setEdgeId("edge-mt-2"); edge2.setSourceNodeId("node-src");
+            edge2.setTargetNodeId("node-tgt2"); edge2.setFlowRecordIndex(1);
+            edge2.setItemId(1L); edge2.setVisible(1);
+            edge2.setRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":300},{\"x\":276,\"y\":300},{\"x\":276,\"y\":210}]");
+            // Edge 1 has no route points (passes validation)
+            DiagramConfigDTO.FlowEdgeDTO edge1 = new DiagramConfigDTO.FlowEdgeDTO();
+            edge1.setEdgeId("edge-mt-1"); edge1.setSourceNodeId("node-src");
+            edge1.setTargetNodeId("node-tgt1"); edge1.setFlowRecordIndex(0);
+            edge1.setItemId(1L); edge1.setVisible(1);
+            dc.setEdges(List.of(edge1, edge2));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec1, rec2)); dto.setDiagram(dc);
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("路由点验证失败")
+                    .hasMessageContaining("edge-mt-2");
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigAcceptsCanonicalMultiTargetBranchRoutePoints() {
+        // Multi-target branch: submitted routePoints match canonical midY=(120+210)/2=165 exactly.
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房A", 3), unit(2L, "锅炉房B", 3)));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房A", 3));
+            when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "锅炉房B", 3));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0, DeEnergyFlow.class);
+                f.setId(f.getTargetRefId() == 1L ? 50L : 51L);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlowDiagram.class).setId(10L); return null; })
+                    .when(diagramMapper).insert(any());
+
+            DeEnergyFlow rec1 = new DeEnergyFlow();
+            rec1.setSourceType("external_energy");
+            rec1.setTargetType("unit"); rec1.setTargetRefId(1L);
+            rec1.setItemType("energy"); rec1.setItemId(1L);
+            rec1.setPhysicalQuantity(new BigDecimal("100"));
+            DeEnergyFlow rec2 = new DeEnergyFlow();
+            rec2.setSourceType("external_energy");
+            rec2.setTargetType("unit"); rec2.setTargetRefId(2L);
+            rec2.setItemType("energy"); rec2.setItemId(1L);
+            rec2.setPhysicalQuantity(new BigDecimal("50"));
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("branch-canonical"); dc.setCanvasWidth(1200); dc.setCanvasHeight(800);
+
+            DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
+            srcNode.setNodeId("node-src"); srcNode.setNodeType("energy_input");
+            srcNode.setRefId(1L); srcNode.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgt1 = new DiagramConfigDTO.FlowNodeDTO();
+            tgt1.setNodeId("node-tgt1"); tgt1.setNodeType("unit");
+            tgt1.setRefId(1L); tgt1.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgt2 = new DiagramConfigDTO.FlowNodeDTO();
+            tgt2.setNodeId("node-tgt2"); tgt2.setNodeType("unit");
+            tgt2.setRefId(2L); tgt2.setVisible(1);
+            dc.setNodes(List.of(srcNode, tgt1, tgt2));
+
+            // Edge 2 (src→tgt2): canonical midY=(120+210)/2=165 — exact canonical waypoints
+            DiagramConfigDTO.FlowEdgeDTO edge2 = new DiagramConfigDTO.FlowEdgeDTO();
+            edge2.setEdgeId("edge-mt-2"); edge2.setSourceNodeId("node-src");
+            edge2.setTargetNodeId("node-tgt2"); edge2.setFlowRecordIndex(1);
+            edge2.setItemId(1L); edge2.setVisible(1);
+            edge2.setRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":165},{\"x\":276,\"y\":165},{\"x\":276,\"y\":210}]");
+            DiagramConfigDTO.FlowEdgeDTO edge1 = new DiagramConfigDTO.FlowEdgeDTO();
+            edge1.setEdgeId("edge-mt-1"); edge1.setSourceNodeId("node-src");
+            edge1.setTargetNodeId("node-tgt1"); edge1.setFlowRecordIndex(0);
+            edge1.setItemId(1L); edge1.setVisible(1);
+            dc.setEdges(List.of(edge1, edge2));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec1, rec2)); dto.setDiagram(dc);
+
+            // Should succeed — canonical waypoints match exactly
+            service.saveConfig(ENT_ID, YEAR, dto);
+            verify(edgeMapper, org.mockito.Mockito.atLeastOnce()).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void getConfigExportBlockedWhenBackflowRoutePointsAtWrongLaneY() {
+        // Backflow edge with route points at wrong lane Y.
+        // Canonical: lane=0, topY=HEADER_Y-10-0*12=67
+        // Submitted topY=100 (not matching any valid hint) — renderer will use canonical Y=67.
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow = new DeEnergyFlow();
+        flow.setId(100L);
+        flow.setSourceType("unit"); flow.setSourceRefId(1L);
+        flow.setTargetType("external_energy");
+        flow.setItemType("energy"); flow.setItemId(1L);
+        flow.setPhysicalQuantity(new BigDecimal("100"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L); diagram.setName("test");
+        diagram.setDiagramType(3); diagram.setCanvasWidth(1200); diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        DeEnergyFlowNode srcNode = new DeEnergyFlowNode();
+        srcNode.setNodeId("node-right"); srcNode.setNodeType("unit");
+        srcNode.setRefType("unit"); srcNode.setRefId(1L);
+        srcNode.setPositionX(500.0); srcNode.setPositionY(200.0);
+        srcNode.setWidth(100.0); srcNode.setHeight(50.0); srcNode.setVisible(1);
+        DeEnergyFlowNode tgtNode = new DeEnergyFlowNode();
+        tgtNode.setNodeId("node-left"); tgtNode.setNodeType("energy_input");
+        tgtNode.setRefType("energy"); tgtNode.setRefId(1L);
+        tgtNode.setPositionX(100.0); tgtNode.setPositionY(200.0);
+        tgtNode.setWidth(100.0); tgtNode.setHeight(50.0); tgtNode.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgtNode));
+
+        // Backflow route points at Y=100 — above nodes but not matching canonical topY=67
+        // Hint Y=100 < minNodeY(142) → candidateY=100, which overrides default topY=67
+        // So canonical WITH this hint: topY=100 → waypoints: [(1040,100),(180,100)]
+        // Submitted: [(1040,100),(180,100)] → matches! So use Y=130 which is NOT < minNodeY(142)
+        // Wait — 130 < 142, so it would also be accepted as hint. Use Y=145 which > minNodeY.
+        DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
+        edge.setEdgeId("edge-bf-wrong"); edge.setSourceNodeId("node-right");
+        edge.setTargetNodeId("node-left"); edge.setFlowRecordId(100L); edge.setVisible(1);
+        // Y=145 > minNodeY(142) → not a valid hint → canonical topY stays at 67
+        // Submitted waypoints at Y=145 won't match canonical Y=67
+        edge.setRoutePoints("[{\"x\":1040,\"y\":145},{\"x\":180,\"y\":145}]");
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("edge-bf-wrong") && e.contains("不一致"));
     }
 }

@@ -357,8 +357,13 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         Map<String, double[]> fixedLayout = computeFixedStageLayout(getNodeMap, unitList,
                 allEdgeDtos,
                 diagram != null && diagram.getCanvasWidth() != null ? diagram.getCanvasWidth() : 1200);
-        // Compute trunk info map once for all edge route-point validations
+        // Compute trunk info, backflow lanes, and headerY for canonical path validation
         Map<String, double[]> trunkInfoForValidation = computeTrunkInfoMap(allEdgeDtos, fixedLayout);
+        Map<String, Integer> getBackflowLanes = computeBackflowLaneMap(allEdgeDtos, fixedLayout);
+        int getMaxLane = getBackflowLanes.values().stream().mapToInt(Integer::intValue).max().orElse(-1);
+        int getNumLanes = getMaxLane + 1;
+        int getTopChannelH = getNumLanes > 0 ? getNumLanes * 12 + 10 : 0;
+        int getHeaderY = 55 + getTopChannelH;
         if (result.getDiagram() != null && result.getDiagram().getEdges() != null) {
             for (DiagramConfigDTO.FlowEdgeDTO ed : result.getDiagram().getEdges()) {
                 Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
@@ -401,8 +406,9 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                         }
                     }
                 }
-                // Validate routePoints against fixed-stage layout + trunk info (same as final-effect renderer)
-                List<String> rpErrs = validateEdgeRoutePoints(ed, fixedLayout, trunkInfoForValidation);
+                // Validate routePoints against canonical path (same as final-effect renderer)
+                List<String> rpErrs = validateEdgeRoutePoints(
+                        ed, fixedLayout, trunkInfoForValidation, getBackflowLanes, getHeaderY);
                 exportErrors.addAll(rpErrs);
             }
         }
@@ -608,10 +614,15 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 Map<String, double[]> saveFixedLayout = computeFixedStageLayout(
                         nodeMap, saveUnits, dc.getEdges(), saveCanvasWidth);
                 Map<String, double[]> saveTrunkInfo = computeTrunkInfoMap(dc.getEdges(), saveFixedLayout);
+                Map<String, Integer> saveBfLanes = computeBackflowLaneMap(dc.getEdges(), saveFixedLayout);
+                int saveMaxLane = saveBfLanes.values().stream().mapToInt(Integer::intValue).max().orElse(-1);
+                int saveTopChannelH = (saveMaxLane + 1) > 0 ? (saveMaxLane + 1) * 12 + 10 : 0;
+                int saveHeaderY = 55 + saveTopChannelH;
                 for (DiagramConfigDTO.FlowEdgeDTO ed : dc.getEdges()) {
                     Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
                     if (vis == 0) continue;
-                    List<String> rpErrors = validateEdgeRoutePoints(ed, saveFixedLayout, saveTrunkInfo);
+                    List<String> rpErrors = validateEdgeRoutePoints(
+                            ed, saveFixedLayout, saveTrunkInfo, saveBfLanes, saveHeaderY);
                     if (!rpErrors.isEmpty()) {
                         throw new IllegalArgumentException(
                                 String.format("连线 [%s] 的路由点验证失败：%s",
@@ -1151,32 +1162,202 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
     }
 
     /**
-     * Validate route points on an edge using fixed-stage layout coordinates.
-     * fixedLayout maps nodeId -> [cx, cy, w, h] from computeFixedStageLayout().
-     * trunkInfo maps edgeId -> [trunkX, branchX] from computeTrunkInfoMap().
+     * Compute backflow lane map — mirrors EnergyFlowConfigView.backflowLaneMap.
+     * Returns map of edgeId -> laneIndex.
+     */
+    private Map<String, Integer> computeBackflowLaneMap(
+            List<DiagramConfigDTO.FlowEdgeDTO> edgeList,
+            Map<String, double[]> fixedLayout) {
+        Map<String, Integer> result = new HashMap<>();
+        Map<String, List<DiagramConfigDTO.FlowEdgeDTO>> groups = new LinkedHashMap<>();
+        for (DiagramConfigDTO.FlowEdgeDTO ed : edgeList) {
+            Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
+            if (vis == 0) continue;
+            double[] srcFixed = fixedLayout.get(ed.getSourceNodeId());
+            double[] tgtFixed = fixedLayout.get(ed.getTargetNodeId());
+            if (srcFixed == null || tgtFixed == null) continue;
+            double sx = srcFixed[0] + srcFixed[2] / 2;
+            double tx = tgtFixed[0] - tgtFixed[2] / 2;
+            if (sx <= tx) continue;
+            Long iId = ed.getItemId();
+            String key = iId != null
+                    ? "bf-" + iId + "-" + ed.getSourceNodeId() + "-" + ed.getTargetNodeId()
+                    : "bf-" + ed.getEdgeId();
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(ed);
+        }
+        int laneIdx = 0;
+        for (List<DiagramConfigDTO.FlowEdgeDTO> edges : groups.values()) {
+            for (DiagramConfigDTO.FlowEdgeDTO e : edges) {
+                result.put(e.getEdgeId(), laneIdx);
+            }
+            laneIdx++;
+        }
+        return result;
+    }
+
+    /**
+     * Parse routePoints JSON string into coordinate array.
+     * Returns empty list on invalid/missing input.
+     */
+    private List<double[]> parseRoutePointCoords(String rp) {
+        if (rp == null || rp.isBlank()) return List.of();
+        try {
+            ObjectMapper om = new ObjectMapper();
+            List<Map<String, Object>> points = om.readValue(rp, new TypeReference<>() {});
+            if (points == null || points.isEmpty()) return List.of();
+            List<double[]> coords = new ArrayList<>();
+            for (Map<String, Object> pt : points) {
+                if (pt == null || !pt.containsKey("x") || !pt.containsKey("y")) return List.of();
+                double x = ((Number) pt.get("x")).doubleValue();
+                double y = ((Number) pt.get("y")).doubleValue();
+                if (Double.isNaN(x) || Double.isInfinite(x) || Double.isNaN(y) || Double.isInfinite(y))
+                    return List.of();
+                coords.add(new double[]{x, y});
+            }
+            return coords;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Check if route points form a valid 90° orthogonal path between source and target.
+     */
+    private boolean areRoutePointsOrthogonal(List<double[]> rpts,
+                                              double sx, double sy, double tx, double ty) {
+        if (rpts.isEmpty()) return true;
+        for (double[] p : rpts) {
+            if (p[0] < 0 || p[1] < 0 || p[0] > 5000 || p[1] > 5000) return false;
+        }
+        List<double[]> full = new ArrayList<>();
+        full.add(new double[]{sx, sy});
+        full.addAll(rpts);
+        full.add(new double[]{tx, ty});
+        for (int i = 0; i < full.size() - 1; i++) {
+            double[] a = full.get(i);
+            double[] b = full.get(i + 1);
+            if (Math.abs(a[0] - b[0]) > 1 && Math.abs(a[1] - b[1]) > 1) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Compute the canonical path for an edge — faithfully mirrors
+     * EnergyFlowConfigView.buildOrthoPath().
+     * Returns the full path points including source and target endpoints.
+     * The intermediate waypoints (index 1..n-2) are the canonical route points
+     * that the final renderer will draw.
+     */
+    private List<double[]> computeCanonicalPath(
+            DiagramConfigDTO.FlowEdgeDTO ed,
+            Map<String, double[]> fixedLayout,
+            Map<String, double[]> trunkInfo,
+            Map<String, Integer> backflowLaneMap,
+            int headerY) {
+        double[] srcFixed = fixedLayout.get(ed.getSourceNodeId());
+        double[] tgtFixed = fixedLayout.get(ed.getTargetNodeId());
+        if (srcFixed == null || tgtFixed == null) return List.of();
+        if ("product".equals(ed.getItemType())) return List.of();
+
+        double sx = srcFixed[0] + srcFixed[2] / 2;
+        double sy = srcFixed[1];
+        double tx = tgtFixed[0] - tgtFixed[2] / 2;
+        double ty = tgtFixed[1];
+
+        List<double[]> rpts = parseRoutePointCoords(ed.getRoutePoints());
+        boolean rptsValid = !rpts.isEmpty() && areRoutePointsOrthogonal(rpts, sx, sy, tx, ty);
+
+        // Backflow: route through top channel
+        if (sx > tx) {
+            Integer lane = backflowLaneMap.get(ed.getEdgeId());
+            int laneIdx = lane != null ? lane : 0;
+            double topY = headerY - 10.0 - laneIdx * 12.0;
+            if (rptsValid) {
+                double minNodeY = Math.min(sy, ty);
+                double candidateY = Double.MAX_VALUE;
+                for (double[] p : rpts) {
+                    if (p[1] < minNodeY && p[1] < candidateY) candidateY = p[1];
+                }
+                if (candidateY != Double.MAX_VALUE && candidateY >= 0 && candidateY < minNodeY) {
+                    topY = candidateY;
+                }
+            }
+            return List.of(
+                    new double[]{sx, sy}, new double[]{sx, topY},
+                    new double[]{tx, topY}, new double[]{tx, ty});
+        }
+
+        // Forward edge with trunk info
+        double[] ti = trunkInfo.get(ed.getEdgeId());
+        if (ti != null && Math.abs(ti[0] - sx) > 5) {
+            double trunkX = ti[0];
+            double branchX = ti[1];
+            if (rptsValid) {
+                for (double[] p : rpts) {
+                    if (Math.abs(p[0] - ti[0]) <= 30) {
+                        trunkX = p[0];
+                        branchX = Math.abs(ti[0] - ti[1]) < 0.01 ? trunkX : ti[1];
+                        break;
+                    }
+                }
+            }
+            if (Math.abs(trunkX - branchX) < 0.01) {
+                return List.of(
+                        new double[]{sx, sy}, new double[]{trunkX, sy},
+                        new double[]{trunkX, ty}, new double[]{tx, ty});
+            }
+            double midY = (sy + ty) / 2;
+            return List.of(
+                    new double[]{sx, sy}, new double[]{trunkX, sy},
+                    new double[]{trunkX, midY}, new double[]{branchX, midY},
+                    new double[]{branchX, ty}, new double[]{tx, ty});
+        }
+
+        // Default orthogonal
+        double midX = (sx + tx) / 2;
+        if (rptsValid) {
+            List<Double> hintXs = new ArrayList<>();
+            for (double[] p : rpts) {
+                if (p[0] >= 0 && p[0] <= 5000) hintXs.add(p[0]);
+            }
+            if (!hintXs.isEmpty()) {
+                midX = hintXs.get(hintXs.size() / 2);
+            }
+        }
+        return List.of(
+                new double[]{sx, sy}, new double[]{midX, sy},
+                new double[]{midX, ty}, new double[]{tx, ty});
+    }
+
+    /**
+     * Validate route points by comparing submitted points against the canonical path
+     * that buildOrthoPath() (the final renderer) will actually draw.
+     * Rejects payloads whose routePoints are not the exact normalized path.
      */
     private List<String> validateEdgeRoutePoints(DiagramConfigDTO.FlowEdgeDTO ed,
                                                   Map<String, double[]> fixedLayout,
-                                                  Map<String, double[]> trunkInfo) {
+                                                  Map<String, double[]> trunkInfo,
+                                                  Map<String, Integer> backflowLaneMap,
+                                                  int headerY) {
         List<String> errors = new ArrayList<>();
         String rp = ed.getRoutePoints();
         if (rp == null || rp.isBlank()) return errors;
 
-        // Parse JSON
-        List<Map<String, Object>> points;
+        // Parse JSON and validate format
+        List<Map<String, Object>> rawPoints;
         try {
             ObjectMapper om = new ObjectMapper();
-            points = om.readValue(rp, new TypeReference<>() {});
+            rawPoints = om.readValue(rp, new TypeReference<>() {});
         } catch (Exception ex) {
             errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints为无效JSON: " + ex.getMessage());
             return errors;
         }
-        if (points == null || points.isEmpty()) return errors;
+        if (rawPoints == null || rawPoints.isEmpty()) return errors;
 
         // Validate each point has numeric x, y
-        List<double[]> coords = new ArrayList<>();
-        for (int i = 0; i < points.size(); i++) {
-            Map<String, Object> pt = points.get(i);
+        List<double[]> submitted = new ArrayList<>();
+        for (int i = 0; i < rawPoints.size(); i++) {
+            Map<String, Object> pt = rawPoints.get(i);
             if (pt == null || !pt.containsKey("x") || !pt.containsKey("y")) {
                 errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i + "]缺少x或y字段");
                 return errors;
@@ -1193,100 +1374,40 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i + "]包含NaN或Infinity");
                 return errors;
             }
-            // Out of canvas
             if (x < 0 || y < 0 || x > 5000 || y > 5000) {
-                errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i + "]超出画布范围(" + x + "," + y + ")");
+                errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
+                        + "]超出画布范围(" + x + "," + y + ")");
             }
-            coords.add(new double[]{x, y});
+            submitted.add(new double[]{x, y});
+        }
+        if (!errors.isEmpty()) return errors;
+
+        // Compute the canonical path the final renderer will actually draw
+        List<double[]> canonicalPath = computeCanonicalPath(
+                ed, fixedLayout, trunkInfo, backflowLaneMap, headerY);
+        if (canonicalPath.size() <= 2) {
+            errors.add("连线 [" + ed.getEdgeId() + "] 的最终渲染路径为直线，不应有路由点");
+            return errors;
         }
 
-        // Use fixed-stage layout positions for source/target endpoints
-        double[] srcFixed = fixedLayout.get(ed.getSourceNodeId());
-        double[] tgtFixed = fixedLayout.get(ed.getTargetNodeId());
-        if (srcFixed != null && tgtFixed != null) {
-            // srcFixed = [cx, cy, w, h]; exit = cx + w/2, cy
-            double sx = srcFixed[0] + srcFixed[2] / 2;
-            double sy = srcFixed[1];
-            double tx = tgtFixed[0] - tgtFixed[2] / 2;
-            double ty = tgtFixed[1];
+        // Extract canonical intermediate waypoints (excluding source/target endpoints)
+        List<double[]> canonical = canonicalPath.subList(1, canonicalPath.size() - 1);
 
-            // Build full path: [source exit, ...routePoints, target entry]
-            List<double[]> full = new ArrayList<>();
-            full.add(new double[]{sx, sy});
-            full.addAll(coords);
-            full.add(new double[]{tx, ty});
-            for (int i = 0; i < full.size() - 1; i++) {
-                double[] a = full.get(i);
-                double[] b = full.get(i + 1);
-                if (Math.abs(a[0] - b[0]) > 1 && Math.abs(a[1] - b[1]) > 1) {
-                    errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints第" + (i + 1)
-                            + "段不符合90°正交规则");
-                    break;
-                }
-            }
-
-            // Check node crossing against fixed-stage positions
-            for (Map.Entry<String, double[]> fEntry : fixedLayout.entrySet()) {
-                String nid = fEntry.getKey();
-                if (nid.equals(ed.getSourceNodeId()) || nid.equals(ed.getTargetNodeId())) continue;
-                double[] fsn = fEntry.getValue();
-                double nx = fsn[0] - fsn[2] / 2;
-                double ny = fsn[1] - fsn[3] / 2;
-                double nw = fsn[2];
-                double nh = fsn[3];
-                for (int i = 0; i < coords.size(); i++) {
-                    double[] c = coords.get(i);
-                    if (c[0] > nx && c[0] < nx + nw && c[1] > ny && c[1] < ny + nh) {
-                        errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints["
-                                + i + "]穿过节点[" + nid + "]");
-                        break;
-                    }
-                }
-            }
-
-            // Check backflow top-channel bypass using fixed-stage positions
-            if (sx > tx) {
-                double topBound = Math.min(srcFixed[1] - srcFixed[3] / 2, tgtFixed[1] - tgtFixed[3] / 2);
-                boolean hasTopPoint = false;
-                for (double[] c : coords) {
-                    if (c[1] < topBound) { hasTopPoint = true; break; }
-                }
-                if (!hasTopPoint) {
-                    errors.add("回流连线 [" + ed.getEdgeId() + "] 的routePoints未经过顶部回流通道");
-                }
-            }
-
-            // Check forward trunk compatibility using the computed trunk info map.
-            // The final renderer only honors forward X hints within ±30px of canonical trunkX.
-            // We now use the exact trunkX/branchX from computeTrunkInfoMap() (same algorithm
-            // as EnergyFlowConfigView.trunkInfoMap) instead of a broad corridor.
-            if (sx < tx) {
-                double[] ti = trunkInfo.get(ed.getEdgeId());
-                for (int i = 0; i < coords.size(); i++) {
-                    double px = coords.get(i)[0];
-                    double py = coords.get(i)[1];
-                    // Horizontal-segment points (on source Y or target Y) are always valid
-                    if (Math.abs(py - sy) <= 1 || Math.abs(py - ty) <= 1) continue;
-                    // Vertical-segment waypoints must be near the canonical trunk/branch X
-                    if (ti != null) {
-                        double canonTrunkX = ti[0];
-                        double canonBranchX = ti[1];
-                        boolean nearTrunk = Math.abs(px - canonTrunkX) <= 30;
-                        boolean nearBranch = Math.abs(px - canonBranchX) <= 30;
-                        if (!nearTrunk && !nearBranch) {
-                            errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
-                                    + "]的X坐标(" + px + ")不在canonical trunk("
-                                    + canonTrunkX + ")±30px范围内，将被最终渲染器忽略");
-                        }
-                    } else {
-                        // No trunk info (default midpoint routing) — X must be between source and target
-                        double midX = (sx + tx) / 2;
-                        if (Math.abs(px - midX) > (tx - sx) / 2 + 30) {
-                            errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
-                                    + "]的X坐标(" + px + ")超出有效路由范围");
-                        }
-                    }
-                }
+        // Compare submitted vs canonical — must match count and coordinates within ±2px
+        if (submitted.size() != canonical.size()) {
+            errors.add("连线 [" + ed.getEdgeId() + "] 的路由点数量(" + submitted.size()
+                    + ")与最终渲染路径(" + canonical.size() + ")不一致");
+            return errors;
+        }
+        for (int i = 0; i < submitted.size(); i++) {
+            double[] sub = submitted.get(i);
+            double[] can = canonical.get(i);
+            if (Math.abs(sub[0] - Math.round(can[0])) > 2 ||
+                    Math.abs(sub[1] - Math.round(can[1])) > 2) {
+                errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i + "]("
+                        + (int) sub[0] + "," + (int) sub[1] + ")与最终渲染路径("
+                        + Math.round(can[0]) + "," + Math.round(can[1]) + ")不一致，将被最终渲染器忽略");
+                return errors;
             }
         }
 

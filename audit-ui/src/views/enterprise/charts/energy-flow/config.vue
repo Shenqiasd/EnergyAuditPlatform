@@ -1636,9 +1636,11 @@ function formatNum(n: number | null | undefined): string {
 
       <!-- Center Canvas -->
       <div class="canvas-area" v-loading="loading">
-        <!-- Final-effect preview (visible when showFinalPreview is on) -->
+        <!-- Final-effect renderer: always mounted so getRenderedWaypoints() is available
+             in normal edit mode for route-point seeding, normalization, and validation.
+             Hidden via v-show when the editor canvas is active. -->
         <EnergyFlowConfigView
-          v-if="showFinalPreview"
+          v-show="showFinalPreview"
           ref="previewViewRef"
           :nodes="nodes"
           :edges="edges"
@@ -1655,7 +1657,7 @@ function formatNum(n: number | null | undefined): string {
         />
         <!-- Editor canvas (visible when showFinalPreview is off) -->
         <svg
-          v-if="!showFinalPreview"
+          v-show="!showFinalPreview"
           ref="svgRef"
           :width="canvasWidth"
           :height="canvasHeight"
