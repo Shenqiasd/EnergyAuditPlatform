@@ -3985,15 +3985,16 @@ class EnergyFlowConfigServiceImplTest {
 
     @Test
     void saveConfigAcceptsForwardEdgeWithAdjustedTrunkXHint() {
-        // Forward edge: user adjusts trunk X via slider → generates hint route point.
+        // Cross-row forward edge: energy_input (stage 0, row 0, cy=120) → unit2 (stage 3, row 1, cy=210).
+        // User adjusts trunk X via slider → full orthogonal 2-point waypoints [(275,120),(275,210)].
         // Backend computes canonical path with the adjusted trunk X → saves successfully.
-        // On reload (getConfig), the saved route points match the canonical path → export passes.
         com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
         try {
             when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
             when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
-            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房A", 3)));
-            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房A", 3));
+            // Two units at stage 3 so unit2 gets row 1 (cy=210)
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "车间A", 3), unit(2L, "车间B", 3)));
+            when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "车间B", 3));
             when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
             doAnswer(inv -> {
                 DeEnergyFlow f = inv.getArgument(0, DeEnergyFlow.class);
@@ -4005,39 +4006,114 @@ class EnergyFlowConfigServiceImplTest {
 
             DeEnergyFlow rec = new DeEnergyFlow();
             rec.setSourceType("external_energy");
-            rec.setTargetType("unit"); rec.setTargetRefId(1L);
+            rec.setTargetType("unit"); rec.setTargetRefId(2L);
             rec.setItemType("energy"); rec.setItemId(1L);
             rec.setPhysicalQuantity(new BigDecimal("100"));
 
             DiagramConfigDTO dc = new DiagramConfigDTO();
-            dc.setName("trunk-edit-test"); dc.setCanvasWidth(1200); dc.setCanvasHeight(800);
+            dc.setName("trunk-cross-row-test"); dc.setCanvasWidth(1200); dc.setCanvasHeight(800);
 
             DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
             srcNode.setNodeId("node-src"); srcNode.setNodeType("energy_input");
             srcNode.setRefId(1L); srcNode.setVisible(1);
+            // unit1 occupies stage 3 row 0, pushing unit2 to row 1
+            DiagramConfigDTO.FlowNodeDTO filler = new DiagramConfigDTO.FlowNodeDTO();
+            filler.setNodeId("node-unit1"); filler.setNodeType("unit");
+            filler.setRefId(1L); filler.setVisible(1);
             DiagramConfigDTO.FlowNodeDTO tgt = new DiagramConfigDTO.FlowNodeDTO();
-            tgt.setNodeId("node-tgt"); tgt.setNodeType("unit");
-            tgt.setRefId(1L); tgt.setVisible(1);
-            dc.setNodes(List.of(srcNode, tgt));
+            tgt.setNodeId("node-unit2"); tgt.setNodeType("unit");
+            tgt.setRefId(2L); tgt.setVisible(1);
+            dc.setNodes(List.of(srcNode, filler, tgt));
 
-            // User adjusts trunk X via slider — generates a single hint point at trunk X position.
-            // Default trunkX = srcExit + 20 + 0*16 = 270 (stage0 center + 30 + 20).
-            // User slides to trunkX + 15 = 285 (within ±30px range).
-            // The hint is a single point at (285, srcY), which the canonical builder interprets as trunk X offset.
-            // computeCanonicalPath with this hint → trunkX=285 → path: [src, (285,sy), (285,ty), tgt]
+            // srcExit=240, sy=120, tgtEntry=940, ty=210 (cross-row)
+            // Default trunkX = 240 + 20 + 0*16 = 260. User adjusts to 275 (within ±30).
+            // Full orthogonal waypoints: [(275,120),(275,210)]
             DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
             edge.setEdgeId("edge-trunk-adj"); edge.setSourceNodeId("node-src");
-            edge.setTargetNodeId("node-tgt"); edge.setFlowRecordIndex(0);
+            edge.setTargetNodeId("node-unit2"); edge.setFlowRecordIndex(0);
             edge.setItemId(1L); edge.setVisible(1);
-            // After normalizeAllRoutePoints, the frontend saves the canonical path waypoints:
-            // The canonical path with trunkX=285 is: (285, sy), (285, ty)
-            edge.setRoutePoints("[{\"x\":285,\"y\":120},{\"x\":285,\"y\":120}]");
+            edge.setRoutePoints("[{\"x\":275,\"y\":120},{\"x\":275,\"y\":210}]");
             dc.setEdges(List.of(edge));
 
             SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
             dto.setFlowRecords(List.of(rec)); dto.setDiagram(dc);
 
-            // Should succeed — adjusted trunk X produces a valid canonical path
+            service.saveConfig(ENT_ID, YEAR, dto);
+            verify(edgeMapper, org.mockito.Mockito.atLeastOnce()).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigAcceptsMultiTargetBranchWithCrossRowRouteHint() {
+        // Multi-target branch: energy_input → unit1 (row 0, cy=120) + unit2 (row 1, cy=210)
+        // Same itemId → shared trunk group. Edge to unit2 uses 4-point waypoints.
+        // trunkX=260, branchX=260+(1+1)*8=276, midY=165
+        // Adjusted trunkX=275 → waypoints: [(275,120),(275,165),(276,165),(276,210)]
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "车间A", 3), unit(2L, "车间B", 3)));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "车间A", 3));
+            when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "车间B", 3));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+            int[] fIdSeq = {60};
+            doAnswer(inv -> {
+                DeEnergyFlow f = inv.getArgument(0, DeEnergyFlow.class);
+                f.setId((long) fIdSeq[0]++);
+                return 1;
+            }).when(flowMapper).insert(any(DeEnergyFlow.class));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlowDiagram.class).setId(10L); return null; })
+                    .when(diagramMapper).insert(any());
+
+            DeEnergyFlow rec1 = new DeEnergyFlow();
+            rec1.setSourceType("external_energy");
+            rec1.setTargetType("unit"); rec1.setTargetRefId(1L);
+            rec1.setItemType("energy"); rec1.setItemId(1L);
+            rec1.setPhysicalQuantity(new BigDecimal("100"));
+
+            DeEnergyFlow rec2 = new DeEnergyFlow();
+            rec2.setSourceType("external_energy");
+            rec2.setTargetType("unit"); rec2.setTargetRefId(2L);
+            rec2.setItemType("energy"); rec2.setItemId(1L);
+            rec2.setPhysicalQuantity(new BigDecimal("50"));
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("multi-target-branch-test"); dc.setCanvasWidth(1200); dc.setCanvasHeight(800);
+
+            DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
+            srcNode.setNodeId("node-src"); srcNode.setNodeType("energy_input");
+            srcNode.setRefId(1L); srcNode.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgt1 = new DiagramConfigDTO.FlowNodeDTO();
+            tgt1.setNodeId("node-unit1"); tgt1.setNodeType("unit");
+            tgt1.setRefId(1L); tgt1.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgt2 = new DiagramConfigDTO.FlowNodeDTO();
+            tgt2.setNodeId("node-unit2"); tgt2.setNodeType("unit");
+            tgt2.setRefId(2L); tgt2.setVisible(1);
+            dc.setNodes(List.of(srcNode, tgt1, tgt2));
+
+            // Edge 1: energy_input → unit1 (no route points — default routing)
+            DiagramConfigDTO.FlowEdgeDTO edge1 = new DiagramConfigDTO.FlowEdgeDTO();
+            edge1.setEdgeId("edge-to-u1"); edge1.setSourceNodeId("node-src");
+            edge1.setTargetNodeId("node-unit1"); edge1.setFlowRecordIndex(0);
+            edge1.setItemId(1L); edge1.setVisible(1);
+
+            // Edge 2: energy_input → unit2 with adjusted trunk X
+            // Trunk group: trunkX=260, edge-to-u2 branchX=260+(1+1)*8=276
+            // Adjusted trunkX=275, midY=(120+210)/2=165
+            // Full 4-point orthogonal: [(275,120),(275,165),(276,165),(276,210)]
+            DiagramConfigDTO.FlowEdgeDTO edge2 = new DiagramConfigDTO.FlowEdgeDTO();
+            edge2.setEdgeId("edge-to-u2"); edge2.setSourceNodeId("node-src");
+            edge2.setTargetNodeId("node-unit2"); edge2.setFlowRecordIndex(1);
+            edge2.setItemId(1L); edge2.setVisible(1);
+            edge2.setRoutePoints("[{\"x\":275,\"y\":120},{\"x\":275,\"y\":165},{\"x\":276,\"y\":165},{\"x\":276,\"y\":210}]");
+            dc.setEdges(List.of(edge1, edge2));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec1, rec2)); dto.setDiagram(dc);
+
             service.saveConfig(ENT_ID, YEAR, dto);
             verify(edgeMapper, org.mockito.Mockito.atLeastOnce()).insert(any(DeEnergyFlowEdge.class));
         } finally {
@@ -4108,23 +4184,23 @@ class EnergyFlowConfigServiceImplTest {
     }
 
     @Test
-    void getConfigExportPassesWhenForwardEdgeHasAdjustedMidpointX() {
-        // Default forward edge (no trunk): user adjusts midpoint X via slider.
-        // Route points with the adjusted midX pass export validation on reload.
+    void getConfigExportPassesWhenCrossRowForwardEdgeHasAdjustedTrunkX() {
+        // Cross-row forward edge on reload: energy_input (stage 0, row 0, cy=120) → unit2 (stage 3, row 1, cy=210).
+        // Saved route points match canonical path with adjusted trunkX → export passes.
         stubEnterpriseComplete();
-        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+        when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "车间A", 3), unit(2L, "车间B", 3)));
         when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
         when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
 
         DeEnergyFlow flow = new DeEnergyFlow();
         flow.setId(80L);
         flow.setSourceType("external_energy");
-        flow.setTargetType("unit"); flow.setTargetRefId(1L);
+        flow.setTargetType("unit"); flow.setTargetRefId(2L);
         flow.setItemType("energy"); flow.setItemId(1L);
         flow.setPhysicalQuantity(new BigDecimal("100"));
         when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow));
         when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
-        when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+        when(unitMapper.selectByIdAndEnterprise(2L, ENT_ID)).thenReturn(unit(2L, "车间B", 3));
 
         DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
         diagram.setId(10L); diagram.setName("test");
@@ -4136,26 +4212,29 @@ class EnergyFlowConfigServiceImplTest {
         srcNode.setRefType("energy"); srcNode.setRefId(1L);
         srcNode.setPositionX(100.0); srcNode.setPositionY(200.0);
         srcNode.setWidth(60.0); srcNode.setHeight(60.0); srcNode.setVisible(1);
+        // filler node at stage 3 row 0 to push target to row 1
+        DeEnergyFlowNode fillerNode = new DeEnergyFlowNode();
+        fillerNode.setNodeId("node-filler"); fillerNode.setNodeType("unit");
+        fillerNode.setRefType("unit"); fillerNode.setRefId(1L);
+        fillerNode.setPositionX(500.0); fillerNode.setPositionY(200.0);
+        fillerNode.setWidth(100.0); fillerNode.setHeight(50.0); fillerNode.setVisible(1);
         DeEnergyFlowNode tgtNode = new DeEnergyFlowNode();
         tgtNode.setNodeId("node-tgt"); tgtNode.setNodeType("unit");
-        tgtNode.setRefType("unit"); tgtNode.setRefId(1L);
-        tgtNode.setPositionX(500.0); tgtNode.setPositionY(200.0);
+        tgtNode.setRefType("unit"); tgtNode.setRefId(2L);
+        tgtNode.setPositionX(500.0); tgtNode.setPositionY(300.0);
         tgtNode.setWidth(100.0); tgtNode.setHeight(50.0); tgtNode.setVisible(1);
-        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgtNode));
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, fillerNode, tgtNode));
 
-        // User adjusted midpoint X via slider. Default midX = (srcExit + tgtEntry) / 2.
-        // Using fixed-stage layout: srcExit = stage0_center + 30 = 240, tgtEntry = stage3_center - 50 = 940
-        // Default midX = (240 + 940) / 2 = 590. User slides to 400.
-        // After normalizeAllRoutePoints: waypoints = [(400, sy), (400, ty)]
+        // Cross-row: srcExit=240, sy=120, tgtEntry=940, ty=210
+        // trunkX adjusted from 260 to 275 → canonical waypoints: [(275,120),(275,210)]
         DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
-        edge.setEdgeId("edge-mid"); edge.setSourceNodeId("node-src");
+        edge.setEdgeId("edge-trunk"); edge.setSourceNodeId("node-src");
         edge.setTargetNodeId("node-tgt"); edge.setFlowRecordId(80L); edge.setVisible(1);
-        edge.setRoutePoints("[{\"x\":400,\"y\":120},{\"x\":400,\"y\":120}]");
+        edge.setRoutePoints("[{\"x\":275,\"y\":120},{\"x\":275,\"y\":210}]");
         when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
 
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
-        // Route points match canonical path with adjusted midX → export should pass
         assertThat(result.getValidation().getExportErrors())
-                .noneMatch(e -> e.contains("edge-mid") && e.contains("路由点"));
+                .noneMatch(e -> e.contains("edge-trunk") && e.contains("路由点"));
     }
 }

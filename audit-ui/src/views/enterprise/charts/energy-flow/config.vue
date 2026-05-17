@@ -1068,26 +1068,44 @@ function setRouteHintValue(newValue: number) {
   if (!srcFixed || !tgtFixed) return
 
   pushUndo()
-  const sx = srcFixed.cx + srcFixed.w / 2
-  const sy = srcFixed.cy
-  const tx = tgtFixed.cx - tgtFixed.w / 2
+  const sx = Math.round(srcFixed.cx + srcFixed.w / 2)
+  const sy = Math.round(srcFixed.cy)
+  const tx = Math.round(tgtFixed.cx - tgtFixed.w / 2)
+  const ty = Math.round(tgtFixed.cy)
   const clamped = Math.max(info.min, Math.min(info.max, Math.round(newValue)))
 
   if (info.type === 'backflow') {
-    // Backflow hint: two points at the desired topY level
+    // Backflow: full orthogonal sequence — two waypoints at topY level
     edge.routePoints = JSON.stringify([
-      { x: Math.round(sx), y: clamped },
-      { x: Math.round(tx), y: clamped },
+      { x: sx, y: clamped },
+      { x: tx, y: clamped },
     ])
   } else if (info.type === 'trunk') {
-    // Trunk hint: a point near the trunk X position
-    edge.routePoints = JSON.stringify([
-      { x: clamped, y: Math.round(sy) },
-    ])
+    // Forward trunk: generate full orthogonal waypoint sequence
+    const trunkInfo = editorTrunkInfoMap.value.get(edge.edgeId)
+    if (!trunkInfo) return
+    const branchX = Math.round(trunkInfo.trunkX === trunkInfo.branchX ? clamped : trunkInfo.branchX)
+    if (clamped === branchX) {
+      // Single-target trunk: two waypoints
+      edge.routePoints = JSON.stringify([
+        { x: clamped, y: sy },
+        { x: clamped, y: ty },
+      ])
+    } else {
+      // Multi-target branch: four waypoints with midY
+      const midY = Math.round((sy + ty) / 2)
+      edge.routePoints = JSON.stringify([
+        { x: clamped, y: sy },
+        { x: clamped, y: midY },
+        { x: branchX, y: midY },
+        { x: branchX, y: ty },
+      ])
+    }
   } else {
-    // Default midpoint hint: a point at the desired midX
+    // Default forward: two waypoints at midX
     edge.routePoints = JSON.stringify([
-      { x: clamped, y: Math.round(sy) },
+      { x: clamped, y: sy },
+      { x: clamped, y: ty },
     ])
   }
 }
