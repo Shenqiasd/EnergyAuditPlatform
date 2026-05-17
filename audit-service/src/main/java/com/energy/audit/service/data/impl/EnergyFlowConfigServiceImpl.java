@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -356,6 +357,8 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
         Map<String, double[]> fixedLayout = computeFixedStageLayout(getNodeMap, unitList,
                 allEdgeDtos,
                 diagram != null && diagram.getCanvasWidth() != null ? diagram.getCanvasWidth() : 1200);
+        // Compute trunk info map once for all edge route-point validations
+        Map<String, double[]> trunkInfoForValidation = computeTrunkInfoMap(allEdgeDtos, fixedLayout);
         if (result.getDiagram() != null && result.getDiagram().getEdges() != null) {
             for (DiagramConfigDTO.FlowEdgeDTO ed : result.getDiagram().getEdges()) {
                 Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
@@ -398,8 +401,8 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                         }
                     }
                 }
-                // Validate routePoints against fixed-stage layout positions (same as final-effect renderer)
-                List<String> rpErrs = validateEdgeRoutePoints(ed, fixedLayout);
+                // Validate routePoints against fixed-stage layout + trunk info (same as final-effect renderer)
+                List<String> rpErrs = validateEdgeRoutePoints(ed, fixedLayout, trunkInfoForValidation);
                 exportErrors.addAll(rpErrs);
             }
         }
@@ -1077,11 +1080,60 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
     }
 
     /**
+     * Compute trunk info map for forward edges — mirrors EnergyFlowConfigView.trunkInfoMap.
+     * Returns map of edgeId -> [trunkX, branchX].
+     * Same-source-same-itemId edges share a trunk; different sources get separate trunks.
+     */
+    private Map<String, double[]> computeTrunkInfoMap(
+            List<DiagramConfigDTO.FlowEdgeDTO> edgeList,
+            Map<String, double[]> fixedLayout) {
+        Map<String, double[]> result = new HashMap<>();
+        // Group forward edges by source node + itemId (shared trunk segment)
+        Map<String, List<DiagramConfigDTO.FlowEdgeDTO>> trunkGroups = new LinkedHashMap<>();
+        for (DiagramConfigDTO.FlowEdgeDTO ed : edgeList) {
+            Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
+            if (vis == 0) continue;
+            double[] srcFixed = fixedLayout.get(ed.getSourceNodeId());
+            double[] tgtFixed = fixedLayout.get(ed.getTargetNodeId());
+            if (srcFixed == null || tgtFixed == null) continue;
+            double sx = srcFixed[0] + srcFixed[2] / 2;
+            double tx = tgtFixed[0] - tgtFixed[2] / 2;
+            if (sx >= tx) continue; // skip backflow and product edges
+            Long iId = ed.getItemId();
+            String tk = ed.getSourceNodeId() + "-" + (iId != null ? iId : "");
+            trunkGroups.computeIfAbsent(tk, k -> new ArrayList<>()).add(ed);
+        }
+        int slotIdx = 0;
+        for (Map.Entry<String, List<DiagramConfigDTO.FlowEdgeDTO>> entry : trunkGroups.entrySet()) {
+            List<DiagramConfigDTO.FlowEdgeDTO> edges = entry.getValue();
+            double[] srcFixed = fixedLayout.get(edges.get(0).getSourceNodeId());
+            if (srcFixed == null) continue;
+            double trunkX = srcFixed[0] + srcFixed[2] / 2 + 20 + slotIdx * 16;
+            Set<String> targetSet = new LinkedHashSet<>();
+            for (DiagramConfigDTO.FlowEdgeDTO e : edges) targetSet.add(e.getTargetNodeId());
+            List<String> targets = new ArrayList<>(targetSet);
+            for (DiagramConfigDTO.FlowEdgeDTO e : edges) {
+                if (targets.size() <= 1) {
+                    result.put(e.getEdgeId(), new double[]{trunkX, trunkX});
+                } else {
+                    int tIdx = targets.indexOf(e.getTargetNodeId());
+                    double branchX = trunkX + (tIdx + 1) * 8;
+                    result.put(e.getEdgeId(), new double[]{trunkX, branchX});
+                }
+            }
+            slotIdx++;
+        }
+        return result;
+    }
+
+    /**
      * Validate route points on an edge using fixed-stage layout coordinates.
      * fixedLayout maps nodeId -> [cx, cy, w, h] from computeFixedStageLayout().
+     * trunkInfo maps edgeId -> [trunkX, branchX] from computeTrunkInfoMap().
      */
     private List<String> validateEdgeRoutePoints(DiagramConfigDTO.FlowEdgeDTO ed,
-                                                  Map<String, double[]> fixedLayout) {
+                                                  Map<String, double[]> fixedLayout,
+                                                  Map<String, double[]> trunkInfo) {
         List<String> errors = new ArrayList<>();
         String rp = ed.getRoutePoints();
         if (rp == null || rp.isBlank()) return errors;
@@ -1180,32 +1232,34 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
 
-            // Check forward trunk compatibility against fixed-stage positions.
-            // The final renderer only accepts forward X hints within ±30px of the canonical trunk X.
-            // Trunk X = source exit X + 20 + slotOffset (computed per source+itemId group).
-            // For simplicity, we validate that each route point X is either:
-            //   (a) on a horizontal segment (same Y as source or target), OR
-            //   (b) within reasonable range between source exit and target entry (±30px tolerance)
-            // This prevents route points that the final renderer will silently ignore.
+            // Check forward trunk compatibility using the computed trunk info map.
+            // The final renderer only honors forward X hints within ±30px of canonical trunkX.
+            // We now use the exact trunkX/branchX from computeTrunkInfoMap() (same algorithm
+            // as EnergyFlowConfigView.trunkInfoMap) instead of a broad corridor.
             if (sx < tx) {
+                double[] ti = trunkInfo.get(ed.getEdgeId());
                 for (int i = 0; i < coords.size(); i++) {
                     double px = coords.get(i)[0];
                     double py = coords.get(i)[1];
-                    // Route point must be within the source-to-target corridor
-                    if (px < sx - 30 || px > tx + 30) {
-                        errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
-                                + "]的X坐标(" + px + ")超出固定布局有效路由范围(±30px容差)，"
-                                + "将被最终渲染器忽略");
-                    }
-                    // Vertical route points (not on source/target Y) should be near a trunk X
-                    // Trunk X is typically source exit + 20~50px range
-                    if (Math.abs(py - sy) > 1 && Math.abs(py - ty) > 1) {
-                        // This is a vertical-segment waypoint — check it's in a valid trunk zone
-                        double minTrunkX = sx + 5;
-                        double maxTrunkX = tx - 5;
-                        if (px < minTrunkX || px > maxTrunkX) {
+                    // Horizontal-segment points (on source Y or target Y) are always valid
+                    if (Math.abs(py - sy) <= 1 || Math.abs(py - ty) <= 1) continue;
+                    // Vertical-segment waypoints must be near the canonical trunk/branch X
+                    if (ti != null) {
+                        double canonTrunkX = ti[0];
+                        double canonBranchX = ti[1];
+                        boolean nearTrunk = Math.abs(px - canonTrunkX) <= 30;
+                        boolean nearBranch = Math.abs(px - canonBranchX) <= 30;
+                        if (!nearTrunk && !nearBranch) {
                             errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
-                                    + "]的X坐标(" + px + ")不在有效中继区域，最终渲染器可能忽略");
+                                    + "]的X坐标(" + px + ")不在canonical trunk("
+                                    + canonTrunkX + ")±30px范围内，将被最终渲染器忽略");
+                        }
+                    } else {
+                        // No trunk info (default midpoint routing) — X must be between source and target
+                        double midX = (sx + tx) / 2;
+                        if (Math.abs(px - midX) > (tx - sx) / 2 + 30) {
+                            errors.add("连线 [" + ed.getEdgeId() + "] 的routePoints[" + i
+                                    + "]的X坐标(" + px + ")超出有效路由范围");
                         }
                     }
                 }

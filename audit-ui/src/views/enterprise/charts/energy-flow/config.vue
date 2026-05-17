@@ -955,12 +955,12 @@ function setRoutePointsJson(pts: { x: number; y: number }[]) {
 function addRoutePoint() {
   if (!selectedEdge.value) return
   const edge = selectedEdge.value
-  // Seed route point ON the canonical route path (same segments the final renderer builds).
-  // This ensures the added point is accepted as a valid hint by buildOrthoPath().
+  // Seed an orthogonal hint SEQUENCE on the canonical route path.
+  // Must create 2+ points so [source, ...hints, target] forms all-orthogonal segments.
+  // A single midpoint creates diagonal segments for different-row edges.
   const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
   const dstFixed = fixedStageLayout.value.get(edge.targetNodeId)
   if (!srcFixed || !dstFixed) {
-    // Fallback: canvas center (will likely fail validation — user must adjust)
     const pts = [...parsedRoutePoints.value, { x: Math.round(canvasWidth.value / 2), y: Math.round(canvasHeight.value / 2) }]
     setRoutePointsJson(pts)
     return
@@ -969,28 +969,27 @@ function addRoutePoint() {
   const sy = srcFixed.cy
   const tx = dstFixed.cx - dstFixed.w / 2
   const ty = dstFixed.cy
-  let mx: number, my: number
+  let newPts: { x: number; y: number }[]
   if (isEdgeBackflow(edge)) {
-    // Backflow: seed a point on the top channel (Y above both nodes, X at midpoint).
-    // The final renderer accepts Y hints that are < min(sy, ty) as the lane level.
+    // Backflow: seed 2 points on the top channel → [{sx, topY}, {tx, topY}]
+    // Path: [source(sx,sy) → (sx,topY) → (tx,topY) → target(tx,ty)] — all orthogonal
     const lane = editorBackflowLaneMap.value.get(edge.edgeId) ?? 0
-    const topY = Math.min(sy, ty) - 40 - lane * BACKFLOW_LANE_SPACING
-    mx = Math.round((sx + tx) / 2)
-    my = Math.round(topY)
+    const topY = Math.round(Math.min(sy, ty) - 40 - lane * BACKFLOW_LANE_SPACING)
+    newPts = [{ x: Math.round(sx), y: topY }, { x: Math.round(tx), y: topY }]
   } else {
-    // Forward: seed a point on the trunk vertical segment.
+    // Forward: seed 2 points on the trunk vertical segment → [{trunkX, sy}, {trunkX, ty}]
+    // Path: [source(sx,sy) → (trunkX,sy) → (trunkX,ty) → target(tx,ty)] — all orthogonal
     const info = editorTrunkInfoMap.value.get(edge.edgeId)
     if (info && Math.abs(info.trunkX - sx) > 5) {
-      // Trunk routing: point on trunk X, at vertical midpoint between source and target Y
-      mx = Math.round(info.trunkX)
-      my = Math.round((sy + ty) / 2)
+      const trunkX = Math.round(info.trunkX)
+      newPts = [{ x: trunkX, y: Math.round(sy) }, { x: trunkX, y: Math.round(ty) }]
     } else {
-      // Default orthogonal: point at midpoint X, at vertical midpoint Y
-      mx = Math.round((sx + tx) / 2)
-      my = Math.round((sy + ty) / 2)
+      // Default: midpoint X
+      const midX = Math.round((sx + tx) / 2)
+      newPts = [{ x: midX, y: Math.round(sy) }, { x: midX, y: Math.round(ty) }]
     }
   }
-  const pts = [...parsedRoutePoints.value, { x: mx, y: my }]
+  const pts = [...parsedRoutePoints.value, ...newPts]
   setRoutePointsJson(pts)
 }
 
@@ -1471,18 +1470,25 @@ function computeLocalExportErrors(): string[] {
                 errors.push(`回流连线 [${e.edgeId}] 的路由点未经过顶部通道，请编辑路由点使其经过顶部回流通道`)
               }
             }
-            // Forward trunk compatibility: tighter ±30px corridor + vertical-segment trunk zone check
+            // Forward trunk compatibility: use computed trunk info map (same as final renderer)
             if (sx < tx) {
+              const ti = editorTrunkInfoMap.value.get(e.edgeId)
               for (let i = 0; i < rpts.length; i++) {
                 const px = rpts[i].x
                 const py = rpts[i].y
-                if (px < sx - 30 || px > tx + 30) {
-                  errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})超出固定布局有效路由范围(±30px容差)，将被最终渲染器忽略`)
-                }
-                // Vertical-segment waypoints (not on source/target Y) must be in valid trunk zone
-                if (Math.abs(py - sy) > 1 && Math.abs(py - ty) > 1) {
-                  if (px < sx + 5 || px > tx - 5) {
-                    errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})不在有效中继区域，最终渲染器可能忽略`)
+                // Horizontal-segment points (on source Y or target Y) are always valid
+                if (Math.abs(py - sy) <= 1 || Math.abs(py - ty) <= 1) continue
+                // Vertical-segment waypoints must be near the canonical trunk/branch X
+                if (ti) {
+                  const nearTrunk = Math.abs(px - ti.trunkX) <= 30
+                  const nearBranch = Math.abs(px - ti.branchX) <= 30
+                  if (!nearTrunk && !nearBranch) {
+                    errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})不在canonical trunk(${ti.trunkX})±30px范围内，将被最终渲染器忽略`)
+                  }
+                } else {
+                  const midX = (sx + tx) / 2
+                  if (Math.abs(px - midX) > (tx - sx) / 2 + 30) {
+                    errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})超出有效路由范围`)
                   }
                 }
               }

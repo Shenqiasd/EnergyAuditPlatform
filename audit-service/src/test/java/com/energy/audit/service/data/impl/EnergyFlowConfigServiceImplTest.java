@@ -2990,18 +2990,20 @@ class EnergyFlowConfigServiceImplTest {
     @Test
     void getConfigExportBlockedWhenForwardRoutePointsTrunkIncompatible() {
         // Fixed-stage: src(energy_input)→stage0 exit=(240,120); tgt(unit,ut=3)→stage3 entry=(940,120)
-        // Route point at x=2000 is far outside [235, 945] → trunk-incompatible
-        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":240,\"y\":120},{\"x\":240,\"y\":50},{\"x\":2000,\"y\":50},{\"x\":2000,\"y\":120}]");
+        // Canonical trunk X = 240 + 20 + 0*16 = 260
+        // Route points at x=500 are vertical-segment waypoints far from trunk X=260 (>30px)
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":500,\"y\":120},{\"x\":500,\"y\":200},{\"x\":800,\"y\":200},{\"x\":800,\"y\":120}]");
         assertThat(result.getValidation().isExportReady()).isFalse();
         assertThat(result.getValidation().getExportErrors())
-                .anyMatch(e -> e.contains("routePoints") && e.contains("超出固定布局有效路由范围"));
+                .anyMatch(e -> e.contains("routePoints") && e.contains("trunk"));
     }
 
     @Test
     void getConfigExportPassesWhenRoutePointsValidOrthogonal() {
         // Fixed-stage: src(energy_input)→stage0 exit=(240,120); tgt(unit,ut=3)→stage3 entry=(940,120)
-        // Route points form valid orthogonal path within [235, 945] range
-        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":500,\"y\":120},{\"x\":500,\"y\":200},{\"x\":800,\"y\":200},{\"x\":800,\"y\":120}]");
+        // Canonical trunk X = 240 + 20 + 0*16 = 260
+        // Route points at x=260 are within ±30px of canonical trunk X → accepted
+        EnergyFlowConfigDTO result = getConfigWithEdgeRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":200},{\"x\":260,\"y\":200},{\"x\":260,\"y\":120}]");
         assertThat(result.getValidation().getExportErrors())
                 .noneMatch(e -> e.contains("routePoints"));
     }
@@ -3062,17 +3064,18 @@ class EnergyFlowConfigServiceImplTest {
         when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgtNode));
 
         // Route points valid against fixed-stage exit=(240,120) → entry=(940,120)
+        // Canonical trunk X = 240 + 20 + 0*16 = 260
         DeEnergyFlowEdge edge = new DeEnergyFlowEdge();
         edge.setEdgeId("edge-fixed");
         edge.setSourceNodeId("node-src");
         edge.setTargetNodeId("node-tgt");
         edge.setFlowRecordId(100L);
         edge.setVisible(1);
-        edge.setRoutePoints("[{\"x\":500,\"y\":120},{\"x\":500,\"y\":200},{\"x\":700,\"y\":200},{\"x\":700,\"y\":120}]");
+        edge.setRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":200},{\"x\":260,\"y\":200},{\"x\":260,\"y\":120}]");
         when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge));
 
         EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
-        // Should pass: route points are valid against fixed-stage coordinates
+        // Should pass: route points are near canonical trunk X (260 ±30px)
         assertThat(result.getValidation().getExportErrors())
                 .noneMatch(e -> e.contains("routePoints"));
     }
@@ -3153,6 +3156,7 @@ class EnergyFlowConfigServiceImplTest {
         // sw=(1200-160)/4=260; stage1 cx=80+260+130=470; stage2 cx=80+2*260+130=730
         // With backflow: BODY_TOP=97, cy=97+45=142
         // exit=(470+50,142)=(520,142), entry=(730-50,142)=(680,142)
+        // Canonical trunk X = 520 + 20 + 0*16 = 540
         DeEnergyFlowEdge fwdEdge = new DeEnergyFlowEdge();
         fwdEdge.setEdgeId("edge-fwd");
         fwdEdge.setSourceNodeId("node-s1");
@@ -3160,7 +3164,7 @@ class EnergyFlowConfigServiceImplTest {
         fwdEdge.setFlowRecordId(100L);
         fwdEdge.setItemId(1L);
         fwdEdge.setVisible(1);
-        fwdEdge.setRoutePoints("[{\"x\":600,\"y\":142},{\"x\":600,\"y\":200},{\"x\":650,\"y\":200},{\"x\":650,\"y\":142}]");
+        fwdEdge.setRoutePoints("[{\"x\":540,\"y\":142},{\"x\":540,\"y\":200},{\"x\":540,\"y\":200},{\"x\":540,\"y\":142}]");
 
         // Backflow edge (stage2→stage1) — this triggers backflow lane counting
         DeEnergyFlowEdge bfEdge = new DeEnergyFlowEdge();
