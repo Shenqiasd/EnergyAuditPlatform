@@ -596,6 +596,30 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
                 }
             }
 
+            // Validate route points on visible edges BEFORE deleting existing edges.
+            // This ensures invalid/non-honored route points cannot be persisted and
+            // existing edges are not wiped when validation fails.
+            if (dc.getEdges() != null) {
+                int saveCanvasWidth = dc.getCanvasWidth() != null && dc.getCanvasWidth() > 0
+                        ? dc.getCanvasWidth() : 1200;
+                BsUnit uq = new BsUnit();
+                uq.setEnterpriseId(enterpriseId);
+                List<BsUnit> saveUnits = unitMapper.selectList(uq);
+                Map<String, double[]> saveFixedLayout = computeFixedStageLayout(
+                        nodeMap, saveUnits, dc.getEdges(), saveCanvasWidth);
+                Map<String, double[]> saveTrunkInfo = computeTrunkInfoMap(dc.getEdges(), saveFixedLayout);
+                for (DiagramConfigDTO.FlowEdgeDTO ed : dc.getEdges()) {
+                    Integer vis = ed.getVisible() != null ? ed.getVisible() : 1;
+                    if (vis == 0) continue;
+                    List<String> rpErrors = validateEdgeRoutePoints(ed, saveFixedLayout, saveTrunkInfo);
+                    if (!rpErrors.isEmpty()) {
+                        throw new IllegalArgumentException(
+                                String.format("连线 [%s] 的路由点验证失败：%s",
+                                        ed.getEdgeId(), String.join("；", rpErrors)));
+                    }
+                }
+            }
+
             // Now safe to replace edges (all validated) — auto-sync item fields from bound record
             edgeMapper.deleteByDiagramId(diagramId, operator);
             if (dc.getEdges() != null) {

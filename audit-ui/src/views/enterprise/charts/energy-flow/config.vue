@@ -198,6 +198,9 @@ async function loadData() {
 async function handleSave() {
   saving.value = true
   try {
+    // Normalize all visible edges' routePoints to match buildOrthoPath() output.
+    // This guarantees saved routePoints = actual rendered path (no lossy hints).
+    normalizeAllRoutePoints()
     // Resolve edge → record binding via stable _clientKey, then set flowRecordIndex
     const edgesWithIndex = edges.value.map(e => {
       let idx = -1
@@ -955,53 +958,37 @@ function setRoutePointsJson(pts: { x: number; y: number }[]) {
 function addRoutePoint() {
   if (!selectedEdge.value) return
   const edge = selectedEdge.value
-  // Seed an orthogonal hint SEQUENCE on the canonical route path.
-  // Must create 2+ points so [source, ...hints, target] forms all-orthogonal segments.
-  // A single midpoint creates diagonal segments for different-row edges.
-  const srcFixed = fixedStageLayout.value.get(edge.sourceNodeId)
-  const dstFixed = fixedStageLayout.value.get(edge.targetNodeId)
-  if (!srcFixed || !dstFixed) {
-    const pts = [...parsedRoutePoints.value, { x: Math.round(canvasWidth.value / 2), y: Math.round(canvasHeight.value / 2) }]
-    setRoutePointsJson(pts)
-    return
+  // Seed route points by extracting the actual rendered waypoints from the
+  // final-effect renderer (buildOrthoPath output). This guarantees saved
+  // routePoints = rendered path — no lossy hint conversion.
+  const waypoints = previewViewRef.value?.getRenderedWaypoints(edge.edgeId)
+  if (waypoints && waypoints.length > 0) {
+    setRoutePointsJson(waypoints.map(p => ({ x: Math.round(p.x), y: Math.round(p.y) })))
   }
-  const sx = srcFixed.cx + srcFixed.w / 2
-  const sy = srcFixed.cy
-  const tx = dstFixed.cx - dstFixed.w / 2
-  const ty = dstFixed.cy
-  let newPts: { x: number; y: number }[]
-  if (isEdgeBackflow(edge)) {
-    // Backflow: seed 2 points on the top channel → [{sx, topY}, {tx, topY}]
-    // Path: [source(sx,sy) → (sx,topY) → (tx,topY) → target(tx,ty)] — all orthogonal
-    const lane = editorBackflowLaneMap.value.get(edge.edgeId) ?? 0
-    const topY = Math.round(Math.min(sy, ty) - 40 - lane * BACKFLOW_LANE_SPACING)
-    newPts = [{ x: Math.round(sx), y: topY }, { x: Math.round(tx), y: topY }]
-  } else {
-    // Forward: seed 2 points on the trunk vertical segment → [{trunkX, sy}, {trunkX, ty}]
-    // Path: [source(sx,sy) → (trunkX,sy) → (trunkX,ty) → target(tx,ty)] — all orthogonal
-    const info = editorTrunkInfoMap.value.get(edge.edgeId)
-    if (info && Math.abs(info.trunkX - sx) > 5) {
-      const trunkX = Math.round(info.trunkX)
-      newPts = [{ x: trunkX, y: Math.round(sy) }, { x: trunkX, y: Math.round(ty) }]
+}
+
+function clearRoutePoints() {
+  if (!selectedEdge.value) return
+  setRoutePointsJson([])
+}
+
+/**
+ * Normalize all visible edges' routePoints to match the actual rendered path
+ * from buildOrthoPath(). Called before save to guarantee saved = rendered.
+ */
+function normalizeAllRoutePoints() {
+  if (!previewViewRef.value) return
+  for (const e of edges.value) {
+    const vis = e.visible ?? 1
+    if (vis === 0) continue
+    if (!e.routePoints) continue
+    const waypoints = previewViewRef.value.getRenderedWaypoints(e.edgeId)
+    if (waypoints && waypoints.length > 0) {
+      e.routePoints = JSON.stringify(waypoints.map(p => ({ x: Math.round(p.x), y: Math.round(p.y) })))
     } else {
-      // Default: midpoint X
-      const midX = Math.round((sx + tx) / 2)
-      newPts = [{ x: midX, y: Math.round(sy) }, { x: midX, y: Math.round(ty) }]
+      e.routePoints = undefined
     }
   }
-  const pts = [...parsedRoutePoints.value, ...newPts]
-  setRoutePointsJson(pts)
-}
-
-function updateRoutePoint(index: number, x: number, y: number) {
-  const pts = [...parsedRoutePoints.value]
-  pts[index] = { x, y }
-  setRoutePointsJson(pts)
-}
-
-function removeRoutePoint(index: number) {
-  const pts = parsedRoutePoints.value.filter((_: { x: number; y: number }, i: number) => i !== index)
-  setRoutePointsJson(pts)
 }
 
 // ============================================================
@@ -1462,33 +1449,20 @@ function computeLocalExportErrors(): string[] {
                 }
               }
             }
-            // Backflow edges: use fixed-stage positions for top channel check
-            if (sx > tx) {
-              const minY = Math.min(...rpts.map(p => p.y))
-              const topBound = Math.min(srcFixed.cy - srcFixed.h / 2, dstFixed.cy - dstFixed.h / 2)
-              if (minY >= topBound) {
-                errors.push(`回流连线 [${e.edgeId}] 的路由点未经过顶部通道，请编辑路由点使其经过顶部回流通道`)
-              }
-            }
-            // Forward trunk compatibility: use computed trunk info map (same as final renderer)
-            if (sx < tx) {
-              const ti = editorTrunkInfoMap.value.get(e.edgeId)
-              for (let i = 0; i < rpts.length; i++) {
-                const px = rpts[i].x
-                const py = rpts[i].y
-                // Horizontal-segment points (on source Y or target Y) are always valid
-                if (Math.abs(py - sy) <= 1 || Math.abs(py - ty) <= 1) continue
-                // Vertical-segment waypoints must be near the canonical trunk/branch X
-                if (ti) {
-                  const nearTrunk = Math.abs(px - ti.trunkX) <= 30
-                  const nearBranch = Math.abs(px - ti.branchX) <= 30
-                  if (!nearTrunk && !nearBranch) {
-                    errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})不在canonical trunk(${ti.trunkX})±30px范围内，将被最终渲染器忽略`)
-                  }
+            // Final-renderer equivalence: compare saved route points against
+            // buildOrthoPath() output to guarantee saved = rendered consistency.
+            if (previewViewRef.value) {
+              const rendered = previewViewRef.value.getRenderedWaypoints(e.edgeId)
+              if (rendered && rendered.length > 0) {
+                if (rpts.length !== rendered.length) {
+                  errors.push(`连线 [${e.edgeId}] 的路由点数量(${rpts.length})与最终渲染路径(${rendered.length})不一致，请重新添加折点`)
                 } else {
-                  const midX = (sx + tx) / 2
-                  if (Math.abs(px - midX) > (tx - sx) / 2 + 30) {
-                    errors.push(`连线 [${e.edgeId}] 的路由点[${i}]的X坐标(${px})超出有效路由范围`)
+                  for (let i = 0; i < rpts.length; i++) {
+                    if (Math.abs(rpts[i].x - Math.round(rendered[i].x)) > 2 ||
+                        Math.abs(rpts[i].y - Math.round(rendered[i].y)) > 2) {
+                      errors.push(`连线 [${e.edgeId}] 的路由点[${i}](${rpts[i].x},${rpts[i].y})与最终渲染路径(${Math.round(rendered[i].x)},${Math.round(rendered[i].y)})不一致，将被忽略`)
+                      break
+                    }
                   }
                 }
               }
@@ -1882,17 +1856,19 @@ function formatNum(n: number | null | undefined): string {
           <div class="prop-row">
             <el-checkbox :model-value="(selectedEdge.visible ?? 1) === 1" @update:model-value="v => updateEdgeProp('visible', v ? 1 : 0)">可见</el-checkbox>
           </div>
-          <!-- Fix #4: Route point editing UI -->
+          <!-- Route point controls: read-only display of normalized canonical waypoints -->
           <div class="prop-row" style="margin-top: 8px">
             <label>折点 (Route Points)</label>
-            <div v-for="(pt, pi) in parsedRoutePoints" :key="pi" class="route-point-row">
-              <span class="route-point-idx">{{ pi + 1 }}.</span>
-              <el-input-number :model-value="pt.x" size="small" :controls="false" style="width: 70px" @update:model-value="v => updateRoutePoint(pi, v ?? 0, pt.y)" />
-              <span>,</span>
-              <el-input-number :model-value="pt.y" size="small" :controls="false" style="width: 70px" @update:model-value="v => updateRoutePoint(pi, pt.x, v ?? 0)" />
-              <el-button link type="danger" size="small" @click="removeRoutePoint(pi)">×</el-button>
+            <div v-if="parsedRoutePoints.length > 0">
+              <div v-for="(pt, pi) in parsedRoutePoints" :key="pi" class="route-point-row">
+                <span class="route-point-idx">{{ pi + 1 }}.</span>
+                <span style="font-size: 12px; color: #666">({{ pt.x }}, {{ pt.y }})</span>
+              </div>
+              <el-button size="small" type="danger" @click="clearRoutePoints" style="margin-top: 4px">清除折点</el-button>
             </div>
-            <el-button size="small" @click="addRoutePoint" style="margin-top: 4px">+ 添加折点</el-button>
+            <div v-else>
+              <el-button size="small" @click="addRoutePoint" style="margin-top: 4px">+ 使用自定义路由</el-button>
+            </div>
           </div>
           <el-button type="danger" size="small" @click="deleteSelectedEdge" style="margin-top: 8px">删除连线</el-button>
         </template>

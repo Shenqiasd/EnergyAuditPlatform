@@ -3406,4 +3406,376 @@ class EnergyFlowConfigServiceImplTest {
         assertThat(result.getValidation().getExportErrors())
                 .anyMatch(e -> e.contains("终端使用环节") && e.contains("unitType=3"));
     }
+
+    // ============================================================
+    // Fix (v26): save-time route validation + multi-target branch + save/reload
+    // ============================================================
+
+    @Test
+    void saveConfigRejectsInvalidRoutePointsWithoutWipingEdges() {
+        // Invalid route points (x=500, far from canonical trunk X=260) must fail save.
+        // Existing edges must NOT be wiped (deleteByDiagramId never called).
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            DeEnergyFlowDiagram existing = new DeEnergyFlowDiagram();
+            existing.setId(10L);
+            existing.setName("existing");
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(existing);
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit");
+            rec.setTargetRefId(1L);
+            rec.setItemType("energy");
+            rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("100"));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlow.class).setId(50L); return 1; })
+                    .when(flowMapper).insert(any(DeEnergyFlow.class));
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("route-point-save-test");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+
+            DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
+            srcNode.setNodeId("node-src");
+            srcNode.setNodeType("energy_input");
+            srcNode.setRefId(1L);
+            srcNode.setPositionX(100.0);
+            srcNode.setPositionY(200.0);
+            srcNode.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgtNode = new DiagramConfigDTO.FlowNodeDTO();
+            tgtNode.setNodeId("node-tgt");
+            tgtNode.setNodeType("unit");
+            tgtNode.setRefId(1L);
+            tgtNode.setPositionX(400.0);
+            tgtNode.setPositionY(200.0);
+            tgtNode.setVisible(1);
+            dc.setNodes(List.of(srcNode, tgtNode));
+
+            // Route points at x=500 — far from canonical trunk X=260 (>30px)
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-rp-bad");
+            edge.setSourceNodeId("node-src");
+            edge.setTargetNodeId("node-tgt");
+            edge.setFlowRecordIndex(0);
+            edge.setVisible(1);
+            edge.setRoutePoints("[{\"x\":500,\"y\":120},{\"x\":500,\"y\":200}]");
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec));
+            dto.setDiagram(dc);
+
+            assertThatThrownBy(() -> service.saveConfig(ENT_ID, YEAR, dto))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("路由点验证失败")
+                    .hasMessageContaining("edge-rp-bad");
+
+            // Existing edges must NOT be deleted when route validation fails
+            verify(edgeMapper, never()).deleteByDiagramId(anyLong(), anyString());
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void saveConfigAcceptsValidRoutePointsNearCanonicalTrunk() {
+        // Route points at x=260 (canonical trunk X) must pass save-time validation.
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit");
+            rec.setTargetRefId(1L);
+            rec.setItemType("energy");
+            rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("100"));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlow.class).setId(50L); return 1; })
+                    .when(flowMapper).insert(any(DeEnergyFlow.class));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlowDiagram.class).setId(10L); return null; })
+                    .when(diagramMapper).insert(any());
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("valid-rp-test");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+
+            DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
+            srcNode.setNodeId("node-src");
+            srcNode.setNodeType("energy_input");
+            srcNode.setRefId(1L);
+            srcNode.setPositionX(100.0);
+            srcNode.setPositionY(200.0);
+            srcNode.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgtNode = new DiagramConfigDTO.FlowNodeDTO();
+            tgtNode.setNodeId("node-tgt");
+            tgtNode.setNodeType("unit");
+            tgtNode.setRefId(1L);
+            tgtNode.setPositionX(400.0);
+            tgtNode.setPositionY(200.0);
+            tgtNode.setVisible(1);
+            dc.setNodes(List.of(srcNode, tgtNode));
+
+            // Route points at x=260 — within ±30px of canonical trunk X=260
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-rp-ok");
+            edge.setSourceNodeId("node-src");
+            edge.setTargetNodeId("node-tgt");
+            edge.setFlowRecordIndex(0);
+            edge.setVisible(1);
+            edge.setRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":120}]");
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec));
+            dto.setDiagram(dc);
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            // Edge was persisted (deleteByDiagramId + insert happened)
+            verify(edgeMapper).insert(any(DeEnergyFlowEdge.class));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
+
+    @Test
+    void getConfigExportBlockedWhenMultiTargetBranchRoutePointsAtWrongX() {
+        // Multi-target branch route: two edges from same source+itemId to different targets.
+        // The trunk group gets slotIdx=0: trunkX = sourceExit + 20 + 0*16 = 260
+        // Edge to second target gets branchX = 260 + 2*8 = 276
+        // Route points at x=500 (far from both trunk and branch) must fail.
+        stubEnterpriseComplete();
+        when(unitMapper.selectList(any())).thenReturn(List.of(
+                unit(1L, "锅炉房A", 3),
+                unit(2L, "锅炉房B", 3)));
+        when(energyMapper.selectList(any())).thenReturn(List.of(energy(1L, "电力", new BigDecimal("0.1229"))));
+        when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+        DeEnergyFlow flow1 = new DeEnergyFlow();
+        flow1.setId(100L);
+        flow1.setSourceType("external_energy");
+        flow1.setTargetType("unit");
+        flow1.setTargetRefId(1L);
+        flow1.setItemType("energy");
+        flow1.setItemId(1L);
+        flow1.setPhysicalQuantity(new BigDecimal("100"));
+        DeEnergyFlow flow2 = new DeEnergyFlow();
+        flow2.setId(101L);
+        flow2.setSourceType("external_energy");
+        flow2.setTargetType("unit");
+        flow2.setTargetRefId(2L);
+        flow2.setItemType("energy");
+        flow2.setItemId(1L);
+        flow2.setPhysicalQuantity(new BigDecimal("50"));
+        when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(flow1, flow2));
+        when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+
+        DeEnergyFlowDiagram diagram = new DeEnergyFlowDiagram();
+        diagram.setId(10L);
+        diagram.setName("multi-target");
+        diagram.setDiagramType(3);
+        diagram.setCanvasWidth(1200);
+        diagram.setCanvasHeight(800);
+        when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(diagram);
+
+        DeEnergyFlowNode srcNode = new DeEnergyFlowNode();
+        srcNode.setNodeId("node-src");
+        srcNode.setNodeType("energy_input");
+        srcNode.setRefType("energy");
+        srcNode.setRefId(1L);
+        srcNode.setPositionX(100.0);
+        srcNode.setPositionY(200.0);
+        srcNode.setWidth(100.0);
+        srcNode.setHeight(50.0);
+        srcNode.setVisible(1);
+        DeEnergyFlowNode tgt1 = new DeEnergyFlowNode();
+        tgt1.setNodeId("node-tgt1");
+        tgt1.setNodeType("unit");
+        tgt1.setRefType("unit");
+        tgt1.setRefId(1L);
+        tgt1.setPositionX(400.0);
+        tgt1.setPositionY(100.0);
+        tgt1.setWidth(100.0);
+        tgt1.setHeight(50.0);
+        tgt1.setVisible(1);
+        DeEnergyFlowNode tgt2 = new DeEnergyFlowNode();
+        tgt2.setNodeId("node-tgt2");
+        tgt2.setNodeType("unit");
+        tgt2.setRefType("unit");
+        tgt2.setRefId(2L);
+        tgt2.setPositionX(400.0);
+        tgt2.setPositionY(300.0);
+        tgt2.setWidth(100.0);
+        tgt2.setHeight(50.0);
+        tgt2.setVisible(1);
+        when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(srcNode, tgt1, tgt2));
+
+        // Edge 1: src→tgt1 with route points far from trunk/branch
+        DeEnergyFlowEdge edge1 = new DeEnergyFlowEdge();
+        edge1.setEdgeId("edge-mt-1");
+        edge1.setSourceNodeId("node-src");
+        edge1.setTargetNodeId("node-tgt1");
+        edge1.setFlowRecordId(100L);
+        edge1.setItemId(1L);
+        edge1.setVisible(1);
+        edge1.setRoutePoints("[{\"x\":500,\"y\":120},{\"x\":500,\"y\":200}]");
+        // Edge 2: src→tgt2 with valid route points near branch
+        DeEnergyFlowEdge edge2 = new DeEnergyFlowEdge();
+        edge2.setEdgeId("edge-mt-2");
+        edge2.setSourceNodeId("node-src");
+        edge2.setTargetNodeId("node-tgt2");
+        edge2.setFlowRecordId(101L);
+        edge2.setItemId(1L);
+        edge2.setVisible(1);
+        when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(edge1, edge2));
+
+        EnergyFlowConfigDTO result = service.getConfig(ENT_ID, YEAR);
+        assertThat(result.getValidation().isExportReady()).isFalse();
+        assertThat(result.getValidation().getExportErrors())
+                .anyMatch(e -> e.contains("edge-mt-1") && e.contains("trunk"));
+    }
+
+    @Test
+    void saveConfigRoutePointSaveReloadConsistency() {
+        // Save valid route points (x=260), then reload via getConfig.
+        // The route points should pass export validation after save/reload.
+        com.energy.audit.common.util.SecurityUtils.setContext(1L, "test", 3, ENT_ID);
+        try {
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(Collections.emptyList());
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(null);
+            when(unitMapper.selectList(any())).thenReturn(List.of(unit(1L, "锅炉房", 3)));
+            when(unitMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(unit(1L, "锅炉房", 3));
+            when(energyMapper.selectByIdAndEnterprise(1L, ENT_ID)).thenReturn(energy(1L, "电力", new BigDecimal("0.1229")));
+
+            DeEnergyFlow rec = new DeEnergyFlow();
+            rec.setSourceType("external_energy");
+            rec.setTargetType("unit");
+            rec.setTargetRefId(1L);
+            rec.setItemType("energy");
+            rec.setItemId(1L);
+            rec.setPhysicalQuantity(new BigDecimal("100"));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlow.class).setId(50L); return 1; })
+                    .when(flowMapper).insert(any(DeEnergyFlow.class));
+            doAnswer(inv -> { inv.getArgument(0, DeEnergyFlowDiagram.class).setId(10L); return null; })
+                    .when(diagramMapper).insert(any());
+
+            // Capture the edge that gets inserted
+            var insertedEdges = new java.util.ArrayList<DeEnergyFlowEdge>();
+            doAnswer(inv -> { insertedEdges.add(inv.getArgument(0, DeEnergyFlowEdge.class)); return 1; })
+                    .when(edgeMapper).insert(any(DeEnergyFlowEdge.class));
+
+            DiagramConfigDTO dc = new DiagramConfigDTO();
+            dc.setName("save-reload-test");
+            dc.setCanvasWidth(1200);
+            dc.setCanvasHeight(800);
+
+            DiagramConfigDTO.FlowNodeDTO srcNode = new DiagramConfigDTO.FlowNodeDTO();
+            srcNode.setNodeId("node-src");
+            srcNode.setNodeType("energy_input");
+            srcNode.setRefId(1L);
+            srcNode.setPositionX(100.0);
+            srcNode.setPositionY(200.0);
+            srcNode.setVisible(1);
+            DiagramConfigDTO.FlowNodeDTO tgtNode = new DiagramConfigDTO.FlowNodeDTO();
+            tgtNode.setNodeId("node-tgt");
+            tgtNode.setNodeType("unit");
+            tgtNode.setRefId(1L);
+            tgtNode.setPositionX(400.0);
+            tgtNode.setPositionY(200.0);
+            tgtNode.setVisible(1);
+            dc.setNodes(List.of(srcNode, tgtNode));
+
+            DiagramConfigDTO.FlowEdgeDTO edge = new DiagramConfigDTO.FlowEdgeDTO();
+            edge.setEdgeId("edge-reload");
+            edge.setSourceNodeId("node-src");
+            edge.setTargetNodeId("node-tgt");
+            edge.setFlowRecordIndex(0);
+            edge.setVisible(1);
+            edge.setRoutePoints("[{\"x\":260,\"y\":120},{\"x\":260,\"y\":120}]");
+            dc.setEdges(List.of(edge));
+
+            SaveEnergyFlowConfigDTO dto = new SaveEnergyFlowConfigDTO();
+            dto.setFlowRecords(List.of(rec));
+            dto.setDiagram(dc);
+
+            service.saveConfig(ENT_ID, YEAR, dto);
+
+            // Verify edge was persisted with route points
+            assertThat(insertedEdges).hasSize(1);
+            assertThat(insertedEdges.get(0).getRoutePoints()).contains("260");
+
+            // Now simulate reload: set up getConfig with the saved data
+            com.energy.audit.common.util.SecurityUtils.clear();
+            stubEnterpriseComplete();
+            when(productMapper.selectList(any())).thenReturn(List.of(product(1L, "产品A", new BigDecimal("1000"))));
+
+            DeEnergyFlowDiagram savedDiagram = new DeEnergyFlowDiagram();
+            savedDiagram.setId(10L);
+            savedDiagram.setName("save-reload-test");
+            savedDiagram.setDiagramType(3);
+            savedDiagram.setCanvasWidth(1200);
+            savedDiagram.setCanvasHeight(800);
+            when(diagramMapper.selectByEnterpriseYearType(ENT_ID, YEAR, 3)).thenReturn(savedDiagram);
+
+            DeEnergyFlowNode savedSrc = new DeEnergyFlowNode();
+            savedSrc.setNodeId("node-src");
+            savedSrc.setNodeType("energy_input");
+            savedSrc.setRefType("energy");
+            savedSrc.setRefId(1L);
+            savedSrc.setPositionX(100.0);
+            savedSrc.setPositionY(200.0);
+            savedSrc.setWidth(100.0);
+            savedSrc.setHeight(50.0);
+            savedSrc.setVisible(1);
+            DeEnergyFlowNode savedTgt = new DeEnergyFlowNode();
+            savedTgt.setNodeId("node-tgt");
+            savedTgt.setNodeType("unit");
+            savedTgt.setRefType("unit");
+            savedTgt.setRefId(1L);
+            savedTgt.setPositionX(400.0);
+            savedTgt.setPositionY(200.0);
+            savedTgt.setWidth(100.0);
+            savedTgt.setHeight(50.0);
+            savedTgt.setVisible(1);
+            when(nodeMapper.selectByDiagramId(10L)).thenReturn(List.of(savedSrc, savedTgt));
+
+            DeEnergyFlowEdge savedEdge = new DeEnergyFlowEdge();
+            savedEdge.setEdgeId("edge-reload");
+            savedEdge.setSourceNodeId("node-src");
+            savedEdge.setTargetNodeId("node-tgt");
+            savedEdge.setFlowRecordId(50L);
+            savedEdge.setVisible(1);
+            savedEdge.setRoutePoints(insertedEdges.get(0).getRoutePoints());
+            when(edgeMapper.selectByDiagramId(10L)).thenReturn(List.of(savedEdge));
+
+            DeEnergyFlow savedRec = new DeEnergyFlow();
+            savedRec.setId(50L);
+            savedRec.setSourceType("external_energy");
+            savedRec.setTargetType("unit");
+            savedRec.setTargetRefId(1L);
+            savedRec.setItemType("energy");
+            savedRec.setItemId(1L);
+            savedRec.setPhysicalQuantity(new BigDecimal("100"));
+            when(flowMapper.selectByEnterpriseAndYear(ENT_ID, YEAR)).thenReturn(List.of(savedRec));
+
+            EnergyFlowConfigDTO reloaded = service.getConfig(ENT_ID, YEAR);
+            // Route points should still pass export validation after save/reload
+            assertThat(reloaded.getValidation().getExportErrors())
+                    .noneMatch(e -> e.contains("routePoints") || e.contains("路由点"));
+        } finally {
+            com.energy.audit.common.util.SecurityUtils.clear();
+        }
+    }
 }

@@ -21,7 +21,7 @@ const props = defineProps<{
   validation?: ValidationResult
 }>()
 
-defineExpose({ exportPng, fitView })
+defineExpose({ exportPng, fitView, getRenderedWaypoints })
 
 const svgRef = ref<SVGSVGElement>()
 const cw = computed(() => props.canvasWidth || 1200)
@@ -515,6 +515,20 @@ function buildOrthoPath(edge: FlowEdgeConfig): { x: number; y: number }[] {
     if (hintXs.length > 0) midX = hintXs[Math.floor(hintXs.length / 2)]
   }
   return [s, { x: midX, y: s.y }, { x: midX, y: t.y }, t]
+}
+
+/**
+ * Get the rendered intermediate waypoints for a given edge.
+ * Returns the actual path waypoints (excluding source/target endpoints)
+ * that buildOrthoPath() computes. These are the points that should be
+ * saved as routePoints to guarantee saved = rendered consistency.
+ */
+function getRenderedWaypoints(edgeId: string): { x: number; y: number }[] {
+  const edge = visibleEdges.value.find(e => e.edgeId === edgeId)
+  if (!edge) return []
+  const path = buildOrthoPath(edge)
+  if (path.length <= 2) return []
+  return path.slice(1, -1)
 }
 
 // Collect all segments for crossing detection
