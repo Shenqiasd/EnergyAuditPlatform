@@ -1007,7 +1007,7 @@ const selectedEdgeRouteInfo = computed<RouteEditInfo | null>(() => {
 
   if (type === 'backflow') {
     const lane = editorBackflowLaneMap.value.get(edge.edgeId) ?? 0
-    const defaultTopY = Math.min(sy, ty) - 40 - lane * BACKFLOW_LANE_SPACING
+    const defaultTopY = editorHeaderY.value - 10 - lane * BACKFLOW_LANE_SPACING
     let topY = defaultTopY
     if (rptsValid) {
       const minNodeY = Math.min(sy, ty)
@@ -1256,7 +1256,7 @@ function edgePath(edge: FlowEdgeConfig): string {
 
   if (isEdgeBackflow(edge)) {
     const lane = editorBackflowLaneMap.value.get(edge.edgeId) ?? 0
-    const defaultTopY = Math.min(sy, ty) - 40 - lane * BACKFLOW_LANE_SPACING
+    const defaultTopY = editorHeaderY.value - 10 - lane * BACKFLOW_LANE_SPACING
     let topY = defaultTopY
     if (rptsValid) {
       const minNodeY = Math.min(sy, ty)
@@ -1350,15 +1350,12 @@ function editorNodeStage(n: FlowNodeConfig): number {
 }
 
 interface FixedStageNode { nodeId: string; stage: number; cx: number; cy: number; w: number; h: number }
-const fixedStageLayout = computed<Map<string, FixedStageNode>>(() => {
-  const STAGE_MARGIN = 80
+
+/** Editor HEADER_Y — same formula as final renderer: BASE_HEADER_Y + topChannelH */
+const editorHeaderY = computed(() => {
   const BASE_HEADER_Y = 55
   const BF_LANE_SP = 12
-  const ROW_H = 90
-
   const visible = nodes.value.filter(n => (n.visible ?? 1) !== 0 && n.nodeType !== 'product_output')
-
-  // Count backflow lanes for top channel height
   const bfGroups = new Set<string>()
   for (const e of edges.value.filter(ee => (ee.visible ?? 1) !== 0)) {
     const src = visible.find(n => n.nodeId === e.sourceNodeId)
@@ -1370,7 +1367,15 @@ const fixedStageLayout = computed<Map<string, FixedStageNode>>(() => {
     bfGroups.add(iId ? `bf-${iId}-${e.sourceNodeId}-${e.targetNodeId}` : `bf-${e.edgeId}`)
   }
   const topChannelH = bfGroups.size > 0 ? bfGroups.size * BF_LANE_SP + 10 : 0
-  const BODY_TOP = BASE_HEADER_Y + topChannelH + 20
+  return BASE_HEADER_Y + topChannelH
+})
+
+const fixedStageLayout = computed<Map<string, FixedStageNode>>(() => {
+  const STAGE_MARGIN = 80
+  const ROW_H = 90
+
+  const visible = nodes.value.filter(n => (n.visible ?? 1) !== 0 && n.nodeType !== 'product_output')
+  const BODY_TOP = editorHeaderY.value + 20
 
   const sw = (canvasWidth.value - STAGE_MARGIN * 2) / 4
   const stageXArr = [0, 1, 2, 3].map(i => STAGE_MARGIN + i * sw)
