@@ -529,7 +529,7 @@ public class EnergyFlowConfigServiceImpl implements EnergyFlowConfigService {
 
             // Build active node ID set and node map for endpoint validation
             Set<String> activeNodeIds = new HashSet<>();
-            Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap = new HashMap<>();
+            Map<String, DiagramConfigDTO.FlowNodeDTO> nodeMap = new LinkedHashMap<>();
             if (dc.getNodes() != null) {
                 for (DiagramConfigDTO.FlowNodeDTO nd : dc.getNodes()) {
                     if (nd.getNodeId() != null) {
