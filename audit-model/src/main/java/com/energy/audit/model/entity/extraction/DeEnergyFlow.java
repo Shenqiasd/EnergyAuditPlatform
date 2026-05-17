@@ -27,4 +27,13 @@ public class DeEnergyFlow extends BaseEntity {
     private BigDecimal physicalQuantity;
     private BigDecimal standardQuantity;
     private String remark;
+
+    // v2 typed columns
+    private String sourceType;
+    private Long sourceRefId;
+    private String targetType;
+    private Long targetRefId;
+    private String itemType;
+    private Long itemId;
+    private BigDecimal calculatedValue;
 }

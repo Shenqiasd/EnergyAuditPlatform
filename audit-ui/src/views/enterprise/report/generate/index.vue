@@ -23,11 +23,12 @@ import {
   REPORT_STATUS_MAP,
   type ArReport,
 } from '@/api/report'
-import { getEnergyFlowList } from '@/api/energyFlow'
-import type { EnergyFlowItem } from '@/api/energyFlow'
-import { queryExtractedTable } from '@/api/extracted-data'
-import FlowEditor from '@/components/FlowEditor/index.vue'
-import type { EnergyBalanceItem } from '@/components/FlowEditor/index.vue'
+import { getEnergyFlowConfig } from '@/api/energyFlowConfig'
+import type {
+  FlowNodeConfig, FlowEdgeConfig, FlowRecord, EnergyFlowConfig,
+  EnergyInfo, UnitInfo, ProductInfo, EnergyConsumptionInfo, ValidationResult,
+} from '@/api/energyFlowConfig'
+import EnergyFlowConfigView from '@/components/EnergyFlowConfigView/index.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -42,9 +43,18 @@ const generatingReport = ref(false)
 const reports = ref<ArReport[]>([])
 
 // Flow chart off-screen rendering for report embedding
-const flowChartRef = ref<InstanceType<typeof FlowEditor>>()
-const flowData = ref<EnergyFlowItem[]>([])
-const balanceData = ref<EnergyBalanceItem[]>([])
+const flowChartRef = ref<InstanceType<typeof EnergyFlowConfigView>>()
+const flowNodes = ref<FlowNodeConfig[]>([])
+const flowEdges = ref<FlowEdgeConfig[]>([])
+const flowEnergies = ref<EnergyInfo[]>([])
+const flowUnits = ref<UnitInfo[]>([])
+const flowProducts = ref<ProductInfo[]>([])
+const flowEnergyConsumption = ref<EnergyConsumptionInfo[]>([])
+const flowRecords = ref<FlowRecord[]>([])
+const flowValidation = ref<ValidationResult>({ valid: false, exportReady: false, enterpriseComplete: false, hasUnits: false, hasEnergies: false, hasProducts: false, warnings: [], exportErrors: [] })
+const flowEnterpriseName = ref('')
+const flowCanvasWidth = ref(1200)
+const flowCanvasHeight = ref(800)
 const showFlowChart = ref(false)
 
 interface Row {
@@ -179,27 +189,42 @@ function viewDetail(row: Row) {
  */
 async function captureFlowChartImage(): Promise<File | undefined> {
   try {
-    // Load flow data for the selected year
-    const [flows, balanceResult] = await Promise.all([
-      getEnergyFlowList(selectedYear.value).catch(() => [] as EnergyFlowItem[]),
-      queryExtractedTable('de_energy_balance', { auditYear: selectedYear.value, pageSize: 100 })
-        .catch(() => ({ rows: [] as Record<string, unknown>[], total: 0 })),
-    ])
-    if (!flows.length) return undefined
+    const config: EnergyFlowConfig = await getEnergyFlowConfig(selectedYear.value)
+    if (!config.diagram?.nodes?.length) return undefined
 
-    flowData.value = flows
-    balanceData.value = (balanceResult.rows || []) as unknown as EnergyBalanceItem[]
+    // Gate: block on validation.exportReady
+    if (config.validation && !config.validation.exportReady) {
+      const reasons = config.validation.exportErrors?.length
+        ? config.validation.exportErrors.join('\n')
+        : '前置资料不完整'
+      ElMessage.warning('能流图数据验证未通过，报告中将不包含能流图：' + reasons)
+      return undefined
+    }
+
+    flowNodes.value = config.diagram.nodes || []
+    flowEdges.value = config.diagram.edges || []
+    flowEnergies.value = config.energies || []
+    flowUnits.value = config.units || []
+    flowProducts.value = config.products || []
+    flowEnergyConsumption.value = config.energyConsumption || []
+    flowRecords.value = config.flowRecords || []
+    if (config.validation) flowValidation.value = config.validation
+    flowEnterpriseName.value = config.enterpriseInfo?.name || ''
+    flowCanvasWidth.value = config.diagram.canvasWidth || 1200
+    flowCanvasHeight.value = config.diagram.canvasHeight || 800
     showFlowChart.value = true
 
-    // Wait for FlowEditor to mount and render the graph
+    // Wait for EnergyFlowConfigView to mount and render
     await nextTick()
     await new Promise(resolve => setTimeout(resolve, 500))
 
     if (!flowChartRef.value) return undefined
-    const blob = await flowChartRef.value.exportPngBlob()
+    const dataUri = await flowChartRef.value.exportPng()
     showFlowChart.value = false
 
-    if (!blob) return undefined
+    if (!dataUri) return undefined
+    const res = await fetch(dataUri)
+    const blob = await res.blob()
     return new File([blob], `energy-flow-${selectedYear.value}.png`, { type: 'image/png' })
   } catch {
     showFlowChart.value = false
@@ -386,9 +411,23 @@ onMounted(loadData)
       </div>
     </el-card>
 
-    <!-- Off-screen FlowEditor for capturing flow chart screenshot -->
+    <!-- Off-screen EnergyFlowConfigView for capturing flow chart screenshot -->
     <div v-if="showFlowChart" class="flow-chart-offscreen">
-      <FlowEditor ref="flowChartRef" :flow-data="flowData" :balance-data="balanceData" />
+      <EnergyFlowConfigView
+        ref="flowChartRef"
+        :nodes="flowNodes"
+        :edges="flowEdges"
+        :flow-records="flowRecords"
+        :energies="flowEnergies"
+        :units="flowUnits"
+        :products="flowProducts"
+        :energy-consumption="flowEnergyConsumption"
+        :validation="flowValidation"
+        :enterprise-name="flowEnterpriseName"
+        :audit-year="selectedYear"
+        :canvas-width="flowCanvasWidth"
+        :canvas-height="flowCanvasHeight"
+      />
     </div>
 
     <el-card shadow="never" style="margin-top: 16px">

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.data.DeEnergyConsumptionMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.extraction.DeEnergyConsumption">
+        <id column="id" property="id"/>
+        <result column="submission_id" property="submissionId"/>
+        <result column="enterprise_id" property="enterpriseId"/>
+        <result column="audit_year" property="auditYear"/>
+        <result column="energy_code" property="energyCode"/>
+        <result column="energy_name" property="energyName"/>
+        <result column="measurement_unit" property="measurementUnit"/>
+        <result column="opening_stock" property="openingStock"/>
+        <result column="purchase_total" property="purchaseTotal"/>
+        <result column="purchase_from_province" property="purchaseFromProvince"/>
+        <result column="purchase_amount" property="purchaseAmount"/>
+        <result column="industrial_consumption" property="industrialConsumption"/>
+        <result column="material_consumption" property="materialConsumption"/>
+        <result column="transport_consumption" property="transportConsumption"/>
+        <result column="closing_stock" property="closingStock"/>
+        <result column="external_supply" property="externalSupply"/>
+        <result column="equiv_factor" property="equivFactor"/>
+        <result column="equal_factor" property="equalFactor"/>
+        <result column="standard_coal" property="standardCoal"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, submission_id, enterprise_id, audit_year, energy_code, energy_name,
+        measurement_unit, opening_stock, purchase_total, purchase_from_province,
+        purchase_amount, industrial_consumption, material_consumption, transport_consumption,
+        closing_stock, external_supply, equiv_factor, equal_factor, standard_coal,
+        create_by, create_time, update_by, update_time, deleted
+    </sql>
+
+    <select id="selectByEnterpriseAndYear" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM de_energy_consumption
+        WHERE enterprise_id = #{enterpriseId}
+          AND audit_year = #{auditYear}
+          AND deleted = 0
+        ORDER BY id ASC
+    </select>
+
+</mapper>

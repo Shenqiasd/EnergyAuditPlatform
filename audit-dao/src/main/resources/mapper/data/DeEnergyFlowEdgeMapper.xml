@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.energy.audit.dao.mapper.data.DeEnergyFlowEdgeMapper">
+
+    <resultMap id="BaseResultMap" type="com.energy.audit.model.entity.extraction.DeEnergyFlowEdge">
+        <id column="id" property="id"/>
+        <result column="diagram_id" property="diagramId"/>
+        <result column="edge_id" property="edgeId"/>
+        <result column="source_node_id" property="sourceNodeId"/>
+        <result column="target_node_id" property="targetNodeId"/>
+        <result column="energy_id" property="energyId"/>
+        <result column="product_id" property="productId"/>
+        <result column="physical_amount" property="physicalAmount"/>
+        <result column="remark" property="remark"/>
+        <result column="flow_record_id" property="flowRecordId"/>
+        <result column="item_type" property="itemType"/>
+        <result column="item_id" property="itemId"/>
+        <result column="physical_quantity" property="physicalQuantity"/>
+        <result column="calculated_value" property="calculatedValue"/>
+        <result column="label_text" property="labelText"/>
+        <result column="color" property="color"/>
+        <result column="line_width" property="lineWidth"/>
+        <result column="route_points" property="routePoints"/>
+        <result column="visible" property="visible"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <select id="selectByDiagramId" resultMap="BaseResultMap">
+        SELECT * FROM de_energy_flow_edge
+        WHERE diagram_id = #{diagramId}
+          AND deleted = 0
+        ORDER BY id ASC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO de_energy_flow_edge (
+            diagram_id, edge_id, source_node_id, target_node_id,
+            energy_id, product_id, physical_amount, remark,
+            flow_record_id, item_type, item_id,
+            physical_quantity, calculated_value, label_text,
+            color, line_width, route_points, visible,
+            create_by, update_by
+        ) VALUES (
+            #{diagramId}, #{edgeId}, #{sourceNodeId}, #{targetNodeId},
+            #{energyId}, #{productId}, #{physicalAmount}, #{remark},
+            #{flowRecordId}, #{itemType}, #{itemId},
+            #{physicalQuantity}, #{calculatedValue}, #{labelText},
+            #{color}, #{lineWidth}, #{routePoints}, #{visible},
+            #{createBy}, #{updateBy}
+        )
+    </insert>
+
+    <update id="deleteByDiagramId">
+        UPDATE de_energy_flow_edge
+        SET deleted = 1, update_by = #{updateBy}, update_time = CURRENT_TIMESTAMP
+        WHERE diagram_id = #{diagramId} AND deleted = 0
+    </update>
+
+</mapper>

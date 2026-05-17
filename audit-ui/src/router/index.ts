@@ -66,6 +66,7 @@ const routes: RouteRecordRaw[] = [
         ],
       },
       { path: 'charts/energy-flow', name: 'ChartsEnergyFlow', component: () => import('@/views/enterprise/charts/energy-flow/index.vue'), meta: { title: '能源流向图' } },
+      { path: 'charts/energy-flow/config', name: 'ChartsEnergyFlowConfig', component: () => import('@/views/enterprise/charts/energy-flow/config.vue'), meta: { title: '能流图配置' } },
       { path: 'charts/report-assist', name: 'ChartsReportAssist', component: () => import('@/views/enterprise/charts/report-assist/index.vue'), meta: { title: '辅助图表' } },
       // Audit report (unified download-template + upload-filled-report page)
       { path: 'audit-report/upload', name: 'AuditReportUpload', component: () => import('@/views/enterprise/audit-report/upload/index.vue'), meta: { title: '审计报告' } },

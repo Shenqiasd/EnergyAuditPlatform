@@ -33,6 +33,7 @@ export const enterpriseMenuItems: MenuItem[] = [
     children: [
       { key: 'standard-charts', icon: '📉', title: '规定图表', path: '/enterprise/charts/standard' },
       { key: 'assist-charts',   icon: '📊', title: '辅助图表', path: '/enterprise/charts/report-assist' },
+      { key: 'energy-flow-config', icon: '🔄', title: '能流图配置', path: '/enterprise/charts/energy-flow/config' },
     ],
   },
   {
@@ -72,6 +73,7 @@ export const enterpriseMenus: MenuSection[] = [
     items: [
       { key: 'standard-charts', icon: '📉', title: '规定图表', path: '/enterprise/charts/standard' },
       { key: 'assist-charts',   icon: '📊', title: '辅助图表', path: '/enterprise/charts/report-assist' },
+      { key: 'energy-flow-config', icon: '🔄', title: '能流图配置', path: '/enterprise/charts/energy-flow/config' },
     ],
   },
   {

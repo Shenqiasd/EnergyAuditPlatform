@@ -1,45 +1,71 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import EnergyFlowDiagram4Stage from '@/components/EnergyFlowDiagram4Stage/index.vue'
-import { getEnergyFlowList } from '@/api/energyFlow'
-import type { EnergyFlowItem } from '@/api/energyFlow'
-import { getUnitList, getEnergyList } from '@/api/setting'
-import type { BsUnit, BsEnergy } from '@/api/setting'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import EnergyFlowConfigView from '@/components/EnergyFlowConfigView/index.vue'
+import { getEnergyFlowConfig } from '@/api/energyFlowConfig'
+import type {
+  FlowNodeConfig, FlowEdgeConfig, FlowRecord, EnergyInfo, UnitInfo, ProductInfo,
+  EnergyConsumptionInfo, ValidationResult,
+} from '@/api/energyFlowConfig'
 
+const router = useRouter()
 const currentYear = new Date().getFullYear()
 const auditYear = ref(currentYear)
 const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i)
-const flowData = ref<EnergyFlowItem[]>([])
-const units = ref<BsUnit[]>([])
-const energies = ref<BsEnergy[]>([])
+const nodes = ref<FlowNodeConfig[]>([])
+const edges = ref<FlowEdgeConfig[]>([])
+const energies = ref<EnergyInfo[]>([])
+const units = ref<UnitInfo[]>([])
+const products = ref<ProductInfo[]>([])
+const energyConsumption = ref<EnergyConsumptionInfo[]>([])
+const flowRecords = ref<FlowRecord[]>([])
+const validation = ref<ValidationResult>({ valid: false, exportReady: false, enterpriseComplete: false, hasUnits: false, hasEnergies: false, hasProducts: false, warnings: [], exportErrors: [] })
+const enterpriseName = ref('')
+const canvasWidth = ref(1200)
+const canvasHeight = ref(800)
 const loading = ref(false)
-const diagramRef = ref<InstanceType<typeof EnergyFlowDiagram4Stage>>()
+const viewRef = ref<InstanceType<typeof EnergyFlowConfigView>>()
 
 async function loadData() {
   loading.value = true
   try {
-    const [flows, unitRes, energyRes] = await Promise.all([
-      getEnergyFlowList(auditYear.value).catch(() => [] as EnergyFlowItem[]),
-      getUnitList({ pageSize: 500 }).catch(() => ({ rows: [] as BsUnit[], total: 0 })),
-      getEnergyList({ pageSize: 500 }).catch(() => ({ rows: [] as BsEnergy[], total: 0 })),
-    ])
-    flowData.value = flows
-    units.value = unitRes.rows || []
-    energies.value = energyRes.rows || []
+    const config = await getEnergyFlowConfig(auditYear.value)
+    enterpriseName.value = config.enterpriseInfo?.name || ''
+    energies.value = config.energies || []
+    units.value = config.units || []
+    products.value = config.products || []
+    energyConsumption.value = config.energyConsumption || []
+    flowRecords.value = config.flowRecords || []
+    if (config.validation) validation.value = config.validation
+    if (config.diagram) {
+      nodes.value = config.diagram.nodes || []
+      edges.value = config.diagram.edges || []
+      canvasWidth.value = config.diagram.canvasWidth || 1200
+      canvasHeight.value = config.diagram.canvasHeight || 800
+    } else {
+      nodes.value = []
+      edges.value = []
+    }
   } catch {
-    flowData.value = []
-    units.value = []
-    energies.value = []
+    nodes.value = []
+    edges.value = []
   } finally {
     loading.value = false
   }
 }
 
 async function handleExportPng() {
-  if (!diagramRef.value) return
+  if (!validation.value.exportReady) {
+    const reasons = validation.value.exportErrors?.length
+      ? validation.value.exportErrors.join('\n')
+      : '前置资料不完整'
+    ElMessageBox.alert(reasons, '无法导出 PNG — 数据验证未通过', { type: 'error' })
+    return
+  }
+  if (!viewRef.value) return
   try {
-    const dataUri = await diagramRef.value.exportPng()
+    const dataUri = await viewRef.value.exportPng()
     if (!dataUri) {
       ElMessage.warning('导出失败，图表为空')
       return
@@ -55,7 +81,7 @@ async function handleExportPng() {
 }
 
 function handleFitView() {
-  diagramRef.value?.fitView()
+  viewRef.value?.fitView()
 }
 
 onMounted(() => {
@@ -74,14 +100,24 @@ onMounted(() => {
         <el-button @click="loadData" :loading="loading">刷新数据</el-button>
         <el-button @click="handleFitView">适应画布</el-button>
         <el-button @click="handleExportPng">导出 PNG</el-button>
+        <el-button type="primary" @click="router.push('/enterprise/charts/energy-flow/config')">能流图配置</el-button>
       </div>
     </div>
     <div class="flow-wrapper" v-loading="loading">
-      <EnergyFlowDiagram4Stage
-        ref="diagramRef"
-        :flows="flowData"
-        :units="units"
+      <EnergyFlowConfigView
+        ref="viewRef"
+        :nodes="nodes"
+        :edges="edges"
+        :flow-records="flowRecords"
         :energies="energies"
+        :units="units"
+        :products="products"
+        :energy-consumption="energyConsumption"
+        :validation="validation"
+        :enterprise-name="enterpriseName"
+        :audit-year="auditYear"
+        :canvas-width="canvasWidth"
+        :canvas-height="canvasHeight"
       />
     </div>
   </div>
